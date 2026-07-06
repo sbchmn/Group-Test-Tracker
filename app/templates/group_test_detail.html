@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}{{ test.title }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
+        <li class="breadcrumb-item active">{{ test.title }}</li>
+    </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h2>{{ test.title }}</h2>
+        <span class="badge {% if test.status == 'recruiting' %}bg-success{% elif test.status == 'testing' %}bg-warning text-dark{% else %}bg-secondary{% endif %} fs-6">
+            {{ test.status.title() }}
+        </span>
+        {% if test.start_date %}<span class="text-muted ms-2">Started {{ test.start_date }}</span>{% endif %}
+    </div>
+    
+    {% if current_user.is_admin %}
+        <div>
+            <a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-outline-secondary btn-sm">Edit Test</a>
+            <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-primary btn-sm">Manage Participants</a>
+        </div>
+    {% endif %}
+</div>
+
+<div class="row">
+    <!-- Left: Details & Costs -->
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-header">Test Parameters</div>
+            <div class="card-body">
+                <dl class="row small">
+                    <dt class="col-sm-4">Vendor / Batch</dt>
+                    <dd class="col-sm-8">{{ test.vendor or '—' }} / {{ test.batch_number or '—' }}</dd>
+                    
+                    <dt class="col-sm-4">Compound / Size</dt>
+                    <dd class="col-sm-8">{{ test.compound or '—' }} • {{ test.size or '—' }}</dd>
+                    
+                    <dt class="col-sm-4">Order / Quote #</dt>
+                    <dd class="col-sm-8">{{ test.order_number or '—' }} / {{ test.quote_number or '—' }}</dd>
+                </dl>
+                
+                {% if test.description %}
+                    <p class="mt-2">{{ test.description }}</p>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Cost Summary - Core value from original spreadsheet -->
+        <div class="card mb-4 cost-highlight">
+            <div class="card-header d-flex justify-content-between">
+                <span>Cost Summary &amp; Split (Auto-calculated)</span>
+                {% if current_user.is_admin %}
+                    <a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-link p-0">Adjust inputs →</a>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% set c = costs %}
+                <div class="row text-center">
+                    <div class="col">
+                        <div class="fw-bold fs-4">{{ c.total_participants }}</div>
+                        <div class="small text-muted">Approved Participants</div>
+                    </div>
+                    <div class="col">
+                        <div class="fw-bold fs-4 text-success">{{ c.total_donors }}</div>
+                        <div class="small text-muted">Vial Donors</div>
+                    </div>
+                    <div class="col">
+                        <div class="fw-bold fs-4">{{ c.total_non_donors }}</div>
+                        <div class="small text-muted">Non-Donors</div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <td>Total Lab + Shipping</td>
+                        <td class="text-end fw-bold">${{ c.total_fixed_cost }}</td>
+                    </tr>
+                    <tr>
+                        <td>Refund Pool (to {{ c.total_donors }} donors × ${{ c.effective_donor_refund }})</td>
+                        <td class="text-end text-success">− ${{ c.total_refund_pool }}</td>
+                    </tr>
+                    <tr class="table-active">
+                        <td><strong>Non-Donor Pays</strong></td>
+                        <td class="text-end"><strong>${{ c.non_donor_pays }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Donor Pays (after credit)</strong></td>
+                        <td class="text-end"><strong>${{ c.donor_pays }}</strong></td>
+                    </tr>
+                </table>
+                <small class="text-muted d-block mt-2">Formula: Non-donors fund donor refunds via small uplift. Transparent &amp; fair. See model.py:calculate_costs() for exact logic.</small>
+            </div>
+        </div>
+        
+        <!-- Results Link (only for approved members when closed) -->
+        {% if test.status == 'closed' and test.results_link and (current_user.is_admin or my_part and my_part.approved) %}
+            <div class="alert alert-success">
+                <h6><i class="bi bi-link-45deg"></i> Test Results Available</h6>
+                <a href="{{ test.results_link }}" target="_blank" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
+                <small class="d-block mt-1 text-muted">This link is only visible to approved participants.</small>
+            </div>
+        {% elif test.status == 'closed' and current_user.is_admin %}
+            <div class="alert alert-warning">
+                Set results link in Edit Test or use quick form below.
+                <form method="POST" action="{{ url_for('main.set_results_link', test_id=test.id) }}" class="mt-2 d-flex gap-2">
+                    <input type="url" name="results_link" class="form-control form-control-sm" placeholder="https://..." value="{{ test.results_link or '' }}">
+                    <button type="submit" class="btn btn-sm btn-warning">Save Link</button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+    
+    <!-- Right: Participation / Request -->
+    <div class="col-lg-5">
+        {% if current_user.is_admin %}
+            <div class="card mb-3">
+                <div class="card-header">Quick Admin Actions</div>
+                <div class="card-body">
+                    <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-primary w-100 mb-2">Manage All Participants &amp; Approvals</a>
+                    {% if test.status != 'closed' %}
+                        <form method="POST" action="{{ url_for('main.set_results_link', test_id=test.id) }}">
+                            <div class="input-group input-group-sm">
+                                <input type="url" name="results_link" class="form-control" placeholder="Paste results URL here then close">
+                                <button type="submit" class="btn btn-outline-secondary" onclick="return confirm('Mark as closed and save link?')">Close + Save Link</button>
+                            </div>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        {% else %}
+            <!-- Regular user actions -->
+            {% if test.status == 'recruiting' %}
+                {% if my_part %}
+                    <div class="alert alert-info">
+                        You have requested to join. Status: 
+                        <strong>{% if my_part.approved %}Approved{% else %}Pending Admin Review{% endif %}</strong>
+                    </div>
+                {% else %}
+                    <div class="card border-success">
+                        <div class="card-body text-center">
+                            <h6>This test is open for requests</h6>
+                            <a href="{{ url_for('main.request_participation', test_id=test.id) }}" class="btn btn-success">Request to Participate</a>
+                            <p class="small text-muted mt-2 mb-0">Vial donors receive cost credit.</p>
+                        </div>
+                    </div>
+                {% endif %}
+            {% elif my_part and my_part.approved %}
+                <div class="alert alert-success">
+                    <strong>You are an approved member.</strong><br>
+                    Your calculated share: <strong>${{ c.donor_pays if my_part.vial_donor else c.non_donor_pays }}</strong>
+                    {% if my_part.vial_donor %}(as vial donor){% endif %}
+                </div>
+            {% else %}
+                <div class="alert alert-secondary">This test is in {{ test.status }} phase. Participation by invitation/approval only.</div>
+            {% endif %}
+        {% endif %}
+        
+        <!-- Mini participant list for context -->
+        {% if participations %}
+            <div class="card">
+                <div class="card-header small">Participants ({{ test.num_approved }} approved)</div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light"><tr><th>Name / TG</th><th>Role</th><th>Status</th></tr></thead>
+                        <tbody>
+                            {% for p in participations[:8] %}
+                            <tr>
+                                <td class="small">{{ p.name or p.user.username }}<br><span class="text-muted">{{ p.tg_username or '' }}</span></td>
+                                <td><span class="badge {% if p.vial_donor %}bg-info{% else %}bg-secondary{% endif %}">{{ 'Donor' if p.vial_donor else 'Non-Donor' }}</span></td>
+                                <td><span class="badge {% if p.approved %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ 'Approved' if p.approved else 'Pending' }}</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% if participations|length > 8 %}<div class="p-2 small text-center text-muted">+ more in Manage view</div>{% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

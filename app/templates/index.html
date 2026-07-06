@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome - Group Test Manager{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 text-center">
+        <h1 class="display-5 mt-5"><i class="bi bi-flask-fill text-primary"></i> Group Test Manager</h1>
+        <p class="lead mt-3">Professional web tool to manage group lab testing for purity, mass, endotoxin, sterility, and more.</p>
+        <p class="text-muted">Replaces spreadsheets. Tracks participants, costs, vial donors, payments, and securely shares results.</p>
+        
+        <div class="mt-4">
+            <a href="{{ url_for('main.register') }}" class="btn btn-primary btn-lg me-2">Get Started - Register</a>
+            <a href="{{ url_for('main.login') }}" class="btn btn-outline-secondary btn-lg">Login</a>
+        </div>
+        
+        <div class="mt-5">
+            <h5>Key Features</h5>
+            <div class="row text-start mt-3">
+                <div class="col-md-6">
+                    <ul class="list-unstyled">
+                        <li><i class="bi bi-check-circle text-success"></i> Admin creates &amp; configures tests</li>
+                        <li><i class="bi bi-check-circle text-success"></i> Users request participation</li>
+                        <li><i class="bi bi-check-circle text-success"></i> Role-based dashboard visibility</li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <ul class="list-unstyled">
+                        <li><i class="bi bi-check-circle text-success"></i> Automatic fair cost splitting</li>
+                        <li><i class="bi bi-check-circle text-success"></i> Vial donor credits &amp; tracking</li>
+                        <li><i class="bi bi-check-circle text-success"></i> Secure results links for members</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ test.title }}{% endblock %}
+
+{% block content %}
+<h3>Edit Group Test</h3>
+<form method="POST" novalidate>
+    {{ form.hidden_tag() }}
+    <!-- For brevity in MVP, reuse create form fields. In production would factor partial. -->
+    <div class="card mb-3"><div class="card-body">
+        <div class="row">
+            <div class="col-md-8 mb-3">{{ form.title.label(class="form-label") }}{{ form.title(class="form-control") }}</div>
+            <div class="col-md-4 mb-3">{{ form.start_date.label(class="form-label") }}{{ form.start_date(class="form-control") }}</div>
+        </div>
+        {{ form.description.label(class="form-label") }}{{ form.description(class="form-control", rows=2) }}
+        <div class="row mt-3">
+            <div class="col-md-3">{{ form.vendor.label(class="form-label") }}{{ form.vendor(class="form-control") }}</div>
+            <div class="col-md-3">{{ form.batch_number.label(class="form-label") }}{{ form.batch_number(class="form-control") }}</div>
+            <div class="col-md-3">{{ form.compound.label(class="form-label") }}{{ form.compound(class="form-control") }}</div>
+            <div class="col-md-3">{{ form.size.label(class="form-label") }}{{ form.size(class="form-control") }}</div>
+        </div>
+    </div></div>
+    
+    <div class="card mb-3"><div class="card-body">
+        <div class="row">
+            <div class="col-md-4">{{ form.total_lab_cost.label(class="form-label") }}{{ form.total_lab_cost(class="form-control", step="0.01") }}</div>
+            <div class="col-md-4">{{ form.shipping_cost.label(class="form-label") }}{{ form.shipping_cost(class="form-control", step="0.01") }}</div>
+            <div class="col-md-4">{{ form.refund_per_donor.label(class="form-label") }}{{ form.refund_per_donor(class="form-control", step="0.01") }}</div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-md-4">{{ form.order_number.label(class="form-label") }}{{ form.order_number(class="form-control") }}</div>
+            <div class="col-md-4">{{ form.quote_number.label(class="form-label") }}{{ form.quote_number(class="form-control") }}</div>
+            <div class="col-md-4">{{ form.status.label(class="form-label") }}{{ form.status(class="form-select") }}</div>
+        </div>
+        {{ form.results_link.label(class="form-label") }}{{ form.results_link(class="form-control") }}
+    </div></div>
+    
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

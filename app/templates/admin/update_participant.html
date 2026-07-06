@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Participant{% endblock %}
+
+{% block content %}
+<h4>Edit Participant: {{ part.name or part.user.username }} for {{ test.title }}</h4>
+
+<form method="POST" novalidate>
+    {{ form.hidden_tag() }}
+    <div class="row">
+        <div class="col-md-6 mb-3">{{ form.name.label(class="form-label") }}{{ form.name(class="form-control") }}</div>
+        <div class="col-md-6 mb-3">{{ form.tg_username.label(class="form-label") }}{{ form.tg_username(class="form-control") }}</div>
+    </div>
+    <div class="row">
+        <div class="col-md-3 mb-3 form-check mt-4">{{ form.verified(class="form-check-input") }} {{ form.verified.label(class="form-check-label") }}</div>
+        <div class="col-md-3 mb-3 form-check mt-4">{{ form.active(class="form-check-input") }} {{ form.active.label(class="form-check-label") }}</div>
+        <div class="col-md-3 mb-3 form-check mt-4">{{ form.vial_donor(class="form-check-input") }} {{ form.vial_donor.label(class="form-check-label") }}</div>
+        <div class="col-md-3 mb-3 form-check mt-4">{{ form.us_based(class="form-check-input") }} {{ form.us_based.label(class="form-check-label") }}</div>
+    </div>
+    <div class="row">
+        <div class="col-md-4 mb-3">{{ form.state.label(class="form-label") }}{{ form.state(class="form-control") }}</div>
+        <div class="col-md-4 mb-3">{{ form.order_status.label(class="form-label") }}{{ form.order_status(class="form-select") }}</div>
+        <div class="col-md-4 mb-3">{{ form.amount_paid.label(class="form-label") }}{{ form.amount_paid(class="form-control", step="0.01") }}</div>
+    </div>
+    <div class="row">
+        <div class="col-md-4 mb-3 form-check">{{ form.pay_vial_collector(class="form-check-input") }} {{ form.pay_vial_collector.label(class="form-check-label") }}</div>
+        <div class="col-md-4 mb-3 form-check">{{ form.pay_lab(class="form-check-input") }} {{ form.pay_lab.label(class="form-check-label") }}</div>
+        <div class="col-md-4 mb-3 form-check">{{ form.paid_lab(class="form-check-input") }} {{ form.paid_lab.label(class="form-check-label") }}</div>
+    </div>
+    <div class="mb-3">{{ form.notes.label(class="form-label") }}{{ form.notes(class="form-control", rows=2) }}</div>
+    
+    <div class="form-check mb-3">
+        {{ form.approved(class="form-check-input") }}
+        <label class="form-check-label">Approved (check to approve &amp; auto-calculate owed amount)</label>
+    </div>
+    
+    <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+    <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-secondary">Back to List</a>
+</form>
+{% endblock %}

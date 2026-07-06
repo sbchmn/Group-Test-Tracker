@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
+    {% if current_user.is_admin %}
+        <a href="{{ url_for('main.create_test') }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Create New Group Test
+        </a>
+    {% endif %}
+</div>
+
+{% if not tests %}
+    <div class="alert alert-info">
+        No group tests available yet{% if current_user.is_admin %}. Create one above.{% else %}. Check back soon for recruiting tests.{% endif %}
+    </div>
+{% endif %}
+
+<div class="row">
+    {% for test in tests %}
+        {% set visible = test.can_user_see(current_user) %}
+        {% if visible or current_user.is_admin %}
+        <div class="col-lg-6 col-xl-4 mb-4">
+            <div class="card h-100 {% if current_user.is_admin %}admin-only{% endif %}">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">{{ test.title }}</span>
+                    {% if test.status == 'recruiting' %}
+                        <span class="badge bg-success status-badge">Recruiting</span>
+                    {% elif test.status == 'testing' %}
+                        <span class="badge bg-warning text-dark status-badge">Testing</span>
+                    {% else %}
+                        <span class="badge bg-secondary status-badge">Closed</span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        {{ test.compound or 'Compound' }} • {{ test.vendor or 'Vendor TBD' }} • Started {{ test.start_date or 'N/A' }}
+                    </p>
+                    {% if test.description %}
+                        <p class="small">{{ test.description[:120] }}{% if test.description|length > 120 %}...{% endif %}</p>
+                    {% endif %}
+                    
+                    <div class="small text-muted">
+                        <strong>Approved:</strong> {{ test.num_approved }} participants 
+                        ({{ test.num_donors }} donors)
+                    </div>
+                    
+                    {% if current_user.is_admin %}
+                        <div class="mt-2 small">
+                            <a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                            <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-sm btn-outline-primary">Manage Participants</a>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="card-footer bg-white">
+                    <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-sm btn-primary stretched-link w-100">
+                        View Details {% if test.status == 'recruiting' and not current_user.is_admin %}&amp; Request Join{% endif %}
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+</div>
+
+{% if current_user.is_admin %}
+<div class="mt-4 p-3 bg-light rounded">
+    <small class="text-muted"><i class="bi bi-shield-lock"></i> Admin tip: Use "Manage Participants" to approve requests, update payment status, and set vial donor flags. Cost calculations update automatically.</small>
+</div>
+{% endif %}
+{% endblock %}

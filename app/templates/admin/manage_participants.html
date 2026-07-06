@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Participants - {{ test.title }}{% endblock %}
+
+{% block content %}
+<h3>Manage Participants for "{{ test.title }}"</h3>
+<p class="text-muted">Approve requests, update vial donor / payment status. Costs recalculate live.</p>
+
+<div class="mb-3">
+    <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-sm btn-outline-secondary">← Back to Test</a>
+    <span class="ms-3">Approved: <strong>{{ test.num_approved }}</strong> | Donors: <strong>{{ test.num_donors }}</strong></span>
+</div>
+
+{% if not participations %}
+    <div class="alert alert-info">No participation requests yet.</div>
+{% else %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Name / TG</th>
+                    <th>US / State</th>
+                    <th>Vial Donor</th>
+                    <th>Approved</th>
+                    <th>Order Status</th>
+                    <th>Paid Lab?</th>
+                    <th>Amount Owed / Paid</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in participations %}
+                <tr class="{% if p.approved %}table-success{% else %}table-warning{% endif %}">
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        <strong>{{ p.name or p.user.username }}</strong><br>
+                        <small class="text-muted">@{{ p.tg_username or p.user.tg_username or '—' }}</small>
+                    </td>
+                    <td>{{ 'US' if p.us_based else 'INTL' }} {{ p.state or '' }}</td>
+                    <td>
+                        {% if p.vial_donor %}<span class="badge bg-info">Yes - gets credit</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if p.approved %}
+                            <span class="badge bg-success">Yes • {{ p.approved_at.strftime('%m/%d') if p.approved_at else '' }}</span>
+                        {% else %}
+                            <form method="POST" action="{{ url_for('main.approve_request', part_id=p.id) }}" style="display:inline">
+                                <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-light text-dark">{{ p.order_status }}</span></td>
+                    <td>{% if p.paid_lab %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle text-muted"></i>{% endif %}</td>
+                    <td class="small">
+                        Owed: ${{ '%.2f'|format(p.amount_owed) }}<br>
+                        Paid: ${{ '%.2f'|format(p.amount_paid) }}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('main.update_participant', part_id=p.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endif %}
+
+<div class="mt-4">
+    <h6>Cost Summary (live)</h6>
+    <div class="cost-highlight small">
+        Non-Donor: <strong>${{ costs.non_donor_pays }}</strong> &nbsp;|&nbsp; 
+        Donor: <strong>${{ costs.donor_pays }}</strong> &nbsp;|&nbsp; 
+        Refund per donor: <strong>${{ costs.effective_donor_refund }}</strong>
+    </div>
+</div>
+{% endblock %}

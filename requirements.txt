@@ -11,6 +11,5 @@ python-dotenv>=1.0.0
 psycopg2-binary>=2.9.9  # PostgreSQL adapter (optional)
 pymysql>=1.1.0     # MySQL 8+ driver (recommended for MySQL)
 openpyxl>=3.1.2  # For .xlsx export / backup feature (matches original spreadsheet format)
-email-validator>=2.1.0
 # For production email/notifications later: flask-mail
 # Add boto3 if implementing DO Spaces file uploads for results/COAs

@@ -91,6 +91,7 @@ class ParticipationEditForm(FlaskForm):
     """Admin form to update a participant's details and payment status."""
     name = StringField('Name', validators=[Optional()])
     tg_username = StringField('TG Username', validators=[Optional()])
+    approved = BooleanField('Approved')
     verified = BooleanField('Identity Verified')
     active = BooleanField('Active', default=True)
     order_status = SelectField('Order Status', choices=[
@@ -106,6 +107,11 @@ class ParticipationEditForm(FlaskForm):
     amount_paid = FloatField('Amount Paid ($)', validators=[Optional(), NumberRange(min=0)])
     notes = TextAreaField('Admin Notes')
     submit = SubmitField('Update Participant')
+
+
+class AddParticipantForm(FlaskForm):
+    user_id = SelectField('Select User', coerce=int, validators=[DataRequired()])
+    submit = SubmitField('Add to Test (Auto-Approved)')
 
 
 # ==================== DECORATORS ====================
@@ -390,6 +396,48 @@ def approve_request(part_id):
         db.session.commit()
         flash(f'Approved {part.name or part.user.username} for test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
+
+
+@main_bp.route('/admin/add-participant/<int:test_id>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def add_participant_to_test(test_id):
+    """Admin can add any existing user to a test (auto-approved)."""
+    test = GroupTest.query.get_or_404(test_id)
+    form = AddParticipantForm()
+
+    # Get users who are not already participants in this test
+    existing_participant_ids = [p.user_id for p in test.participations]
+    available_users = User.query.filter(User.id.notin_(existing_participant_ids)).all()
+
+    form.user_id.choices = [(u.id, f"{u.username} ({u.email})") for u in available_users]
+
+    if form.validate_on_submit():
+        user = User.query.get(form.user_id.data)
+        if not user:
+            flash('User not found.', 'danger')
+            return redirect(url_for('main.add_participant_to_test', test_id=test_id))
+
+        # Create participation with auto-approval
+        part = Participation(
+            group_test_id=test.id,
+            user_id=user.id,
+            name=user.username,
+            tg_username=user.tg_username,
+            approved=True,
+            approved_at=datetime.utcnow(),
+            active=True
+        )
+        # Calculate initial owed amount
+        costs = test.calculate_costs()
+        part.update_amount_owed(costs)
+
+        db.session.add(part)
+        db.session.commit()
+        flash(f'Added {user.username} to the test (auto-approved).', 'success')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    return render_template('admin/add_participant.html', form=form, test=test)
 
 
 @main_bp.route('/admin/set-results/<int:test_id>', methods=['POST'])

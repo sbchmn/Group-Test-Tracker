@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Add User to {{ test.title }}{% endblock %}
+
+{% block content %}
+<h3>Add Existing User to "{{ test.title }}"</h3>
+<p class="text-muted">The user will be automatically approved.</p>
+
+<div class="card">
+    <div class="card-body">
+        {% if form.user_id.choices %}
+            <form method="POST">
+                {{ form.hidden_tag() }}
+                <div class="mb-3">
+                    {{ form.user_id.label(class="form-label") }}
+                    {{ form.user_id(class="form-select") }}
+                </div>
+                <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+                <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-secondary">Cancel</a>
+            </form>
+        {% else %}
+            <div class="alert alert-info">
+                All registered users are already participating in this test.
+            </div>
+            <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-secondary">Back</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

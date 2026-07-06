@@ -28,29 +28,34 @@ def create_app(config_overrides=None):
     # === Configuration ===
     # SECRET_KEY required for sessions, CSRF, Flask-Login
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-insecure-change-in-prod')
+    
     # Database URL handling - supports PostgreSQL, MySQL 8+, and SQLite
     database_url = os.environ.get('DATABASE_URL')
 
     if database_url:
-        # Normalize common cloud provider URL schemes
+        # Normalize common cloud provider URL schemes for SQLAlchemy
         if database_url.startswith('postgres://'):
             database_url = database_url.replace('postgres://', 'postgresql://', 1)
         elif database_url.startswith('mysql://'):
             database_url = database_url.replace('mysql://', 'mysql+pymysql://', 1)
+            # DigitalOcean MySQL often uses ssl-mode=REQUIRED → convert to ssl_mode
             database_url = database_url.replace('ssl-mode=', 'ssl_mode=')
-
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     else:
+        # Fallback for local development
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///group_tests.db'
         print("WARNING: DATABASE_URL not found. Using SQLite fallback.")
 
-    # Safety check + helpful error message
+    # Safety check to catch bad URLs early (common with passwords containing # or special chars)
     try:
         from sqlalchemy.engine import make_url
-        make_url(app.config['SQLALCHEMY_DATABASE_URI'])
+        make_url(app.config.get('SQLALCHEMY_DATABASE_URI', ''))
     except Exception as e:
-        print(f"ERROR: Cannot parse DATABASE_URL → {e}")
-        print("Check that DATABASE_URL is correctly set in your Heroku config.")
+        print(f"ERROR parsing DATABASE_URL: {e}")
+        raw_url = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        preview = raw_url[:80] + "..." if len(raw_url) > 80 else raw_url
+        print(f"Received URL preview: {preview}")
+        print("Check that DATABASE_URL is correctly set in your Heroku config (no extra spaces/quotes).")
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///group_tests.db'
 
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -58,7 +63,6 @@ def create_app(config_overrides=None):
         'pool_pre_ping': True,
         'pool_recycle': 300,
     }
-
     
     # WTF/CSRF settings
     app.config['WTF_CSRF_ENABLED'] = True

@@ -12,6 +12,9 @@
         <a href="{{ url_for('main.export_test', test_id=test.id) }}" class="btn btn-sm btn-success ms-2">
             <i class="bi bi-download"></i> Export to Excel (Original Format)
         </a>
+        <a href="{{ url_for('main.add_participant_to_test', test_id=test.id) }}" class="btn btn-sm btn-primary ms-2">
+            <i class="bi bi-person-plus"></i> Add Existing User
+        </a>
     </div>
     <span>Approved: <strong>{{ test.num_approved }}</strong> | Donors: <strong>{{ test.num_donors }}</strong></span>
 </div>

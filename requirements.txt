@@ -1,0 +1,13 @@
+# Group Test Manager - Requirements
+# Flask ecosystem for clean, maintainable full-stack app deployable to DigitalOcean App Platform
+flask>=3.0.0
+flask-sqlalchemy>=3.1.1
+flask-login>=0.6.3
+flask-wtf>=1.2.1
+wtforms>=3.1.2
+werkzeug>=3.0.1
+gunicorn>=21.2.0
+python-dotenv>=1.0.0
+psycopg2-binary>=2.9.9  # PostgreSQL adapter; safe to keep even if using SQLite locally
+# For production email/notifications later: flask-mail
+# Add boto3 if implementing DO Spaces file uploads for results/COAs

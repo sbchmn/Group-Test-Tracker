@@ -352,6 +352,14 @@ def manage_participants(test_id):
     test = GroupTest.query.get_or_404(test_id)
     parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
     costs = test.calculate_costs()
+
+    # Calculate live "Current Fair Share" for display (always accurate)
+    for p in parts:
+        if p.vial_donor:
+            p.current_fair_share = costs.get('donor_pays', 0)
+        else:
+            p.current_fair_share = costs.get('non_donor_pays', 0)
+
     return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
 
 
@@ -396,6 +404,27 @@ def approve_request(part_id):
         db.session.commit()
         flash(f'Approved {part.name or part.user.username} for test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
+
+
+@main_bp.route('/admin/recalculate-costs/<int:test_id>', methods=['POST'])
+@login_required
+@admin_required
+def recalculate_all_costs(test_id):
+    """Recalculate and update amount_owed for all approved participants."""
+    test = GroupTest.query.get_or_404(test_id)
+    costs = test.calculate_costs()
+
+    updated_count = 0
+    for part in test.participations.filter_by(approved=True):
+        if part.vial_donor:
+            part.amount_owed = costs.get('donor_pays', 0)
+        else:
+            part.amount_owed = costs.get('non_donor_pays', 0)
+        updated_count += 1
+
+    db.session.commit()
+    flash(f'Recalculated costs for {updated_count} approved participants.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test_id))
 
 
 @main_bp.route('/admin/add-participant/<int:test_id>', methods=['GET', 'POST'])

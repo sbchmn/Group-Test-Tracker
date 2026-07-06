@@ -29,12 +29,20 @@ def create_app(config_overrides=None):
     # SECRET_KEY required for sessions, CSRF, Flask-Login
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-insecure-change-in-prod')
     
-    # Database: Prefer DATABASE_URL (DO Postgres injects this). Fallback to SQLite for local.
-    database_url = os.environ.get('DATABASE_URL', 'sqlite:///group_tests.db')
-    # Fix for some Postgres URL schemes (SQLAlchemy 1.4+ / psycopg2 prefers postgresql://)
-    if database_url.startswith('postgres://'):
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    # Database URL handling - supports PostgreSQL, MySQL 8+, and SQLite
+    database_url = os.environ.get('DATABASE_URL')
+
+    if database_url:
+        # Normalize common cloud provider URL schemes for SQLAlchemy
+        if database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        elif database_url.startswith('mysql://'):
+            database_url = database_url.replace('mysql://', 'mysql+pymysql://', 1)
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    else:
+        # Fallback for local development
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///group_tests.db'
+        print("WARNING: DATABASE_URL not found. Using SQLite fallback.")
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_pre_ping': True,  # Robust for cloud DBs like DO Managed Postgres

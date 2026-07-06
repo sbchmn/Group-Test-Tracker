@@ -124,6 +124,9 @@
                 <div class="card-header">Quick Admin Actions</div>
                 <div class="card-body">
                     <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-primary w-100 mb-2">Manage All Participants &amp; Approvals</a>
+                    <a href="{{ url_for('main.export_test', test_id=test.id) }}" class="btn btn-success w-100 mb-2">
+                        <i class="bi bi-download"></i> Export to Excel (Backup / Original Format)
+                    </a>
                     {% if test.status != 'closed' %}
                         <form method="POST" action="{{ url_for('main.set_results_link', test_id=test.id) }}">
                             <div class="input-group input-group-sm">

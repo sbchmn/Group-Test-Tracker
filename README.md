@@ -15,13 +15,14 @@ A full-stack Flask web application to replace manual spreadsheets for managing g
   - # Approved participants, # Donors, # Non-donors.
   - Net costs, base per person, donor vs non-donor effective cost (refunds funded by slight uplift to non-donors for fairness). Clear formulas in UI and code comments.
 - **Results Link**: When admin sets status=closed and provides results_link (e.g. Google Drive, hosted PDF, or DO Spaces URL), it appears only to approved members on their dashboard/test view.
+- **Export / Backup to Excel**: One-click export generates .xlsx formatted like your original "MassPurity & Endo" spreadsheet, including all participant data, costs, and Calculations section with live Excel formulas. Includes results link when closed. Accessible to admins + approved members on closed tests.
 - **Tracking Fields**: Per-participant: vial_donor, us_based, state, order_status, pay_lab/paid_lab, amount_paid/owed, notes. Matches original sheet columns.
 - **Responsive UI**: Bootstrap 5, clean dashboard with status badges, cards for tests, tables for participants (admin can inline edit key fields via forms or future AJAX).
 - **Security**: Flask-Login sessions, @login_required, admin checks, CSRF via Flask-WTF (forms), password hash, unique constraints.
 
 ## Tech Stack (Researched for DO)
 - **Backend**: Python 3.12+, Flask 3.x, Flask-SQLAlchemy, Flask-Login, Flask-WTF.
-- **DB**: PostgreSQL (recommended; DO Managed Postgres component auto-injects `DATABASE_URL`). SQLite fallback for local dev.
+- **DB**: PostgreSQL (recommended) or MySQL 8+ via `pymysql`. Both work with `DATABASE_URL`. SQLite fallback for local dev. DO Managed MySQL or Postgres both supported.
 - **Frontend**: Jinja2 templates + Bootstrap 5 (CDN) + minimal vanilla JS for dynamic lab test rows in admin form.
 - **Deploy**: Gunicorn. Designed for DigitalOcean App Platform (easiest) or Droplet + Nginx.
 
@@ -74,7 +75,7 @@ This is production-ready structure, well-commented, follows Flask best practices
 - Email notifications on approve/results (Flask-Mail).
 - File upload for lab reports (Flask-Uploads or DO Spaces boto3).
 - Advanced cost overrides per participant.
-- Export to CSV/Excel matching original spreadsheet format.
+- Export to .xlsx matching original spreadsheet format (now implemented — see Export button on test pages).
 - Telegram bot integration for notifications (given TG usernames).
 
 ## Testing & Quality

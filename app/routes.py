@@ -8,7 +8,7 @@ Main Blueprint - All Routes, Form Classes, and Business Logic
 """
 
 from flask import (
-    Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify
+    Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify, send_file
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
@@ -22,6 +22,7 @@ from functools import wraps
 
 from . import db
 from .models import User, GroupTest, Participation
+from .export import generate_test_export
 
 main_bp = Blueprint('main', __name__)
 
@@ -415,3 +416,27 @@ def api_costs(test_id):
     if not test.can_user_see(current_user):
         return jsonify({'error': 'forbidden'}), 403
     return jsonify(test.calculate_costs())
+
+
+# ==================== EXPORT / BACKUP ====================
+
+@main_bp.route('/test/<int:test_id>/export')
+@login_required
+def export_test(test_id):
+    """Export full test data as .xlsx formatted like the original spreadsheet.
+    Available to admins always. Available to approved members when test is closed.
+    """
+    test = GroupTest.query.get_or_404(test_id)
+    is_member = test.participations.filter_by(user_id=current_user.id, approved=True).first() is not None
+
+    if not (current_user.is_admin or (test.status == 'closed' and is_member)):
+        abort(403)
+
+    output = generate_test_export(test)
+    filename = f"group_test_{test.id}_{test.compound or 'backup'}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )

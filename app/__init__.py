@@ -38,6 +38,8 @@ def create_app(config_overrides=None):
             database_url = database_url.replace('postgres://', 'postgresql://', 1)
         elif database_url.startswith('mysql://'):
             database_url = database_url.replace('mysql://', 'mysql+pymysql://', 1)
+            # DigitalOcean MySQL often uses ssl-mode=REQUIRED → convert to ssl_mode
+            database_url = database_url.replace('ssl-mode=', 'ssl_mode=')
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     else:
         # Fallback for local development

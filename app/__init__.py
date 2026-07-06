@@ -67,6 +67,12 @@ def create_app(config_overrides=None):
     # WTF/CSRF settings
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour forms
+
+    # Ensure csrf_token() is always available in Jinja2 templates
+    @app.context_processor
+    def inject_csrf_token():
+        from flask_wtf.csrf import generate_csrf
+        return dict(csrf_token=lambda: generate_csrf())
     
     # Apply any test overrides
     if config_overrides:
@@ -96,23 +102,47 @@ def create_app(config_overrides=None):
     import click
     
     @app.cli.command('create-admin')
-    @click.option('--username', prompt=True, help='Admin username')
-    @click.option('--email', prompt=True, help='Admin email')
-    @click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Admin password')
+    @click.option('--username', prompt=True, help='Username of user to promote (or create)')
+    @click.option('--email', prompt=True, help='Email (required only when creating a new user)')
+    @click.option('--password', prompt=False, hide_input=True, default=None, help='Password (only needed when creating a new user)')
     def create_admin(username, email, password):
-        """Create or promote a user to admin. Use after first registration or via DO console."""
+        """Promote an existing user to admin, or create a new admin user."""
         with app.app_context():
             user = User.query.filter_by(username=username).first()
+
             if not user:
+                # Creating new user
+                if not password:
+                    click.echo("Error: --password is required when creating a new user.")
+                    return
                 user = User(username=username, email=email, is_admin=True)
                 user.set_password(password)
                 db.session.add(user)
                 click.echo(f"Created new admin user: {username}")
             else:
+                # Promoting existing user (no password needed)
                 user.is_admin = True
                 click.echo(f"Promoted existing user to admin: {username}")
+
             db.session.commit()
-            click.echo("Admin privileges set successfully. You can now login.")
+            click.echo("Admin privileges set successfully.")
+
+    @app.cli.command('demote-admin')
+    @click.option('--username', prompt=True, help='Username of admin to demote')
+    def demote_admin(username):
+        """Remove admin privileges from a user."""
+        with app.app_context():
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                click.echo(f"User '{username}' not found.")
+                return
+            if not user.is_admin:
+                click.echo(f"User '{username}' is not an admin.")
+                return
+
+            user.is_admin = False
+            db.session.commit()
+            click.echo(f"Successfully demoted '{username}' from admin.")
     
     @app.cli.command('init-db')
     def init_db():

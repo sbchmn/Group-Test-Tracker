@@ -114,6 +114,19 @@ class AddParticipantForm(FlaskForm):
     submit = SubmitField('Add to Test (Auto-Approved)')
 
 
+class ParticipantStatusForm(FlaskForm):
+    """Form for participants to update their own vendor order and payment status."""
+    order_status = SelectField('Vendor Order Status', choices=[
+        ('pending', 'Not Ordered Yet'),
+        ('ordered_from_vendor', 'Ordered from Vendor'),
+        ('received_from_vendor', 'Received from Vendor'),
+        ('ready_to_ship', 'Ready to Ship to Lab')
+    ])
+    amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
+    notes = TextAreaField('Notes / Comments', validators=[Optional()])
+    submit = SubmitField('Update My Status')
+
+
 # ==================== DECORATORS ====================
 
 def admin_required(f):
@@ -251,6 +264,33 @@ def test_detail(test_id):
         participations=parts,
         my_part=my_part
     )
+
+
+@main_bp.route('/test/<int:test_id>/my-status', methods=['GET', 'POST'])
+@login_required
+def update_my_participant_status(test_id):
+    """Allow approved participants to update their vendor order status and self-report payment."""
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id, approved=True).first()
+
+    if not part:
+        flash("You are not an approved participant in this test.", "warning")
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    form = ParticipantStatusForm(obj=part)
+
+    if form.validate_on_submit():
+        part.order_status = form.order_status.data
+        if form.amount_paid.data is not None:
+            part.amount_paid = form.amount_paid.data
+        if form.notes.data:
+            part.notes = form.notes.data
+
+        db.session.commit()
+        flash("Your status has been updated.", "success")
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    return render_template('participant_update_status.html', form=form, test=test, part=part)
 
 
 @main_bp.route('/test/<int:test_id>/request', methods=['GET', 'POST'])

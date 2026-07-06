@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Update My Status - {{ test.title }}{% endblock %}
+
+{% block content %}
+<h3>Update My Status</h3>
+<p class="text-muted">Test: <strong>{{ test.title }}</strong></p>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="mb-3">
+                {{ form.order_status.label(class="form-label") }}
+                {{ form.order_status(class="form-select") }}
+                <div class="form-text">This refers to your order status with the vendor/supplier.</div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.amount_paid.label(class="form-label") }}
+                {{ form.amount_paid(class="form-control", step="0.01") }}
+                <div class="form-text">Enter the amount you have paid (this will be verified by admin).</div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.notes.label(class="form-label") }}
+                {{ form.notes(class="form-control", rows=3) }}
+            </div>
+
+            <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

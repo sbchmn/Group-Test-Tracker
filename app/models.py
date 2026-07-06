@@ -209,6 +209,9 @@ class Participation(db.Model):
     paid_lab = db.Column(db.Boolean, default=False)          # Admin verification
     payment_verified = db.Column(db.Boolean, default=False)  # Admin can mark as verified
     
+    # Simplified payment status (shown to all approved members)
+    payment_status = db.Column(db.String(20), default='unpaid')  # unpaid, pending, complete
+    
     # Financial tracking (admin or future auto)
     amount_owed = db.Column(db.Float, default=0.0)
     amount_paid = db.Column(db.Float, default=0.0)           # Self-reported by participant

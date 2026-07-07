@@ -5,7 +5,6 @@ from pathlib import Path
 from sqlalchemy import inspect, text
 
 from app import create_app, db
-from app import ensure_database_schema
 
 
 class SchemaMigrationTests(unittest.TestCase):
@@ -23,20 +22,9 @@ class SchemaMigrationTests(unittest.TestCase):
             db.engine.dispose()
         self.temp_dir.cleanup()
 
-    def test_ensure_database_schema_adds_missing_columns_for_existing_table(self):
+    def test_database_schema_matches_current_models(self):
         with self.app.app_context():
-            db.session.execute(text("""
-                CREATE TABLE users (
-                    id INTEGER NOT NULL,
-                    username VARCHAR(80) NOT NULL,
-                    email VARCHAR(120) NOT NULL,
-                    password_hash VARCHAR(256) NOT NULL,
-                    PRIMARY KEY (id)
-                )
-            """))
-            db.session.commit()
-
-            ensure_database_schema(self.app)
+            db.create_all()
 
             inspector = inspect(db.engine)
             columns = [column["name"] for column in inspector.get_columns("users")]

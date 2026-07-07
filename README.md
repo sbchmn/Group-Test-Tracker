@@ -44,7 +44,13 @@ This is production-ready structure, well-commented, follows Flask best practices
    ```
    Or run: `flask create-admin --username admin --email admin@example.com --password changeme` (CLI registered in app).
 
-7. Login as admin, create first GroupTest, etc.
+7. Initialize and apply database migrations:
+   ```bash
+   flask --app app db init
+   flask --app app db migrate -m "Initial schema"
+   flask --app app db upgrade head
+   ```
+8. Login as admin, create first GroupTest, etc.
 
 ## DigitalOcean Deployment (Recommended: App Platform)
 1. Push this folder to a GitHub/GitLab repo (or use DO "Create App" from repo).

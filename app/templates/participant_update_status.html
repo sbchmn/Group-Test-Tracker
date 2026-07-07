@@ -18,9 +18,20 @@
             </div>
 
             <div class="mb-3">
+                {{ form.order_status.label(class="form-label") }}
+                {{ form.order_status(class="form-select") }}
+                <div class="form-text">This refers to your order status with the vendor/supplier.</div>
+            </div>
+
+            <div class="mb-3 form-check">
+                {{ form.paid_lab(class="form-check-input") }}
+                {{ form.paid_lab.label(class="form-check-label") }}
+            </div>
+
+            <div class="mb-3">
                 {{ form.amount_paid.label(class="form-label") }}
                 {{ form.amount_paid(class="form-control", step="0.01") }}
-                <div class="form-text">Enter the amount you have paid (this will be verified by admin).</div>
+                <div class="form-text">Enter the total amount you have paid toward this test.</div>
             </div>
 
             <div class="mb-3">

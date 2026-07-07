@@ -115,13 +115,14 @@ class AddParticipantForm(FlaskForm):
 
 
 class ParticipantStatusForm(FlaskForm):
-    """Form for participants to update their own vendor order and payment status."""
+    """Form for participants to update their own status (aligned with admin form)."""
     order_status = SelectField('Vendor Order Status', choices=[
         ('pending', 'Not Ordered Yet'),
         ('ordered_from_vendor', 'Ordered from Vendor'),
         ('received_from_vendor', 'Received from Vendor'),
         ('ready_to_ship', 'Ready to Ship to Lab')
     ])
+    paid_lab = BooleanField('I have paid my lab fees')
     amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
     notes = TextAreaField('Notes / Comments', validators=[Optional()])
     submit = SubmitField('Update My Status')
@@ -282,7 +283,7 @@ def update_my_participant_status(test_id):
 
     if form.validate_on_submit():
         part.order_status = form.order_status.data
-        part.payment_status = form.payment_status.data
+        part.paid_lab = form.paid_lab.data
         if form.amount_paid.data is not None:
             part.amount_paid = form.amount_paid.data
         if form.notes.data:

@@ -33,8 +33,14 @@
                             <a class="nav-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
                         </li>
                         {% if current_user.is_admin %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('main.create_test') }}">Create Test</a>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-shield-lock"></i> Admin
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="{{ url_for('main.create_test') }}">Create Test</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('main.manage_users') }}">Manage Users</a></li>
+                            </ul>
                         </li>
                         {% endif %}
                         <li class="nav-item dropdown">

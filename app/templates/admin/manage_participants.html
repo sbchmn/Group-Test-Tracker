@@ -77,6 +77,10 @@
                     </td>
                     <td>
                         <a href="{{ url_for('main.update_participant', part_id=p.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <form method="POST" action="{{ url_for('main.remove_participant', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Remove this participant from the test? This cannot be undone.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger ms-1">Remove</button>
+                        </form>
                     </td>
                 </tr>
                 {% endfor %}

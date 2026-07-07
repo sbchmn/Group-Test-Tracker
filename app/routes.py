@@ -460,6 +460,19 @@ def approve_request(part_id):
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
 
 
+@main_bp.route('/admin/remove-participant/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def remove_participant(part_id):
+    """Remove a participant from a test when they should not be included."""
+    part = Participation.query.get_or_404(part_id)
+    test = part.group_test
+    db.session.delete(part)
+    db.session.commit()
+    flash(f'Removed {part.name or part.user.username} from the test.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
+
+
 @main_bp.route('/admin/recalculate-costs/<int:test_id>', methods=['POST'])
 @login_required
 @admin_required

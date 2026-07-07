@@ -186,7 +186,6 @@
                                 <th>Vendor Order</th>
                                 <th>Individual Fee</th>
                                 <th>Lab Fee Paid</th>
-                                <th>payment status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -215,15 +214,6 @@
                                         <span class="badge bg-success">Yes</span>
                                     {% else %}
                                         <span class="badge bg-secondary">No</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if p.payment_status == 'complete' %}
-                                        <span class="badge bg-success">Payment Complete</span>
-                                    {% elif p.payment_status == 'pending' %}
-                                        <span class="badge bg-warning text-dark">Payment Pending</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">Unpaid</span>
                                     {% endif %}
                                 </td>
                             </tr>

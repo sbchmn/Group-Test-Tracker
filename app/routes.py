@@ -116,7 +116,7 @@ class AddParticipantForm(FlaskForm):
 
 class ParticipantStatusForm(FlaskForm):
     """Form for participants to update their own status (aligned with admin form)."""
-    order_status = SelectField('Vendor Order Status', choices=[
+    order_status = SelectField('Order Status', choices=[
         ('pending', 'Not Ordered Yet'),
         ('ordered_from_vendor', 'Ordered from Vendor'),
         ('received_from_vendor', 'Received from Vendor'),

@@ -171,24 +171,62 @@
             {% endif %}
         {% endif %}
         
-        <!-- Mini participant list for context -->
-        {% if participations %}
-            <div class="card">
-                <div class="card-header small">Participants ({{ test.num_approved }} approved)</div>
+        <!-- Participant list visible to approved members + admins -->
+        {% if show_participant_list and participations %}
+            <div class="card mt-4">
+                <div class="card-header">
+                    <strong>Participants</strong> ({{ test.num_approved }} approved)
+                </div>
                 <div class="card-body p-0">
                     <table class="table table-sm table-hover mb-0">
-                        <thead class="table-light"><tr><th>Name / TG</th><th>Role</th><th>Status</th></tr></thead>
-                        <tbody>
-                            {% for p in participations[:8] %}
+                        <thead class="table-light">
                             <tr>
-                                <td class="small">{{ p.name or p.user.username }}<br><span class="text-muted">{{ p.tg_username or '' }}</span></td>
-                                <td><span class="badge {% if p.vial_donor %}bg-info{% else %}bg-secondary{% endif %}">{{ 'Donor' if p.vial_donor else 'Non-Donor' }}</span></td>
-                                <td><span class="badge {% if p.approved %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ 'Approved' if p.approved else 'Pending' }}</span></td>
+                                <th>Name / TG</th>
+                                <th>Role</th>
+                                <th>Vendor Order</th>
+                                <th>Individual Fee</th>
+                                <th>Lab Fee Paid</th>
+                                <th>payment status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in participations %}
+                            <tr class="{% if not p.approved %}table-warning{% endif %}">
+                                <td class="small">
+                                    {{ p.name or p.user.username }}<br>
+                                    <span class="text-muted">{{ p.tg_username or '' }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge {% if p.vial_donor %}bg-info{% else %}bg-secondary{% endif %}">
+                                        {{ 'Donor' if p.vial_donor else 'Non-Donor' }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark">{{ p.order_status or 'pending' }}</span>
+                                </td>
+                                <td class="small text-success">
+                                    ${{ '%.2f'|format(p.amount_owed) }}
+                                </td>
+                                <td>
+                                    {% if p.paid_lab %}
+                                        <span class="badge bg-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if p.payment_status == 'complete' %}
+                                        <span class="badge bg-success">Payment Complete</span>
+                                    {% elif p.payment_status == 'pending' %}
+                                        <span class="badge bg-warning text-dark">Payment Pending</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Unpaid</span>
+                                    {% endif %}
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
-                    {% if participations|length > 8 %}<div class="p-2 small text-center text-muted">+ more in Manage view</div>{% endif %}
                 </div>
             </div>
         {% endif %}

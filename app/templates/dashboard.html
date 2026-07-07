@@ -46,6 +46,18 @@
                         <strong>Approved:</strong> {{ test.num_approved }} participants 
                         ({{ test.num_donors }} donors)
                     </div>
+
+                    {% if test.my_participation %}
+                    <div class="mt-1 small">
+                        <strong>Your status:</strong> 
+                        {% if test.my_participation.vial_donor %}
+                            <span class="badge bg-info">Donor</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Non-Donor</span>
+                        {% endif %}
+                        <span class="badge bg-success ms-1">Approved</span>
+                    </div>
+                    {% endif %}
                     
                     {% if current_user.is_admin %}
                         <div class="mt-2 small">

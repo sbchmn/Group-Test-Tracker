@@ -245,24 +245,25 @@ def test_detail(test_id):
     costs = test.calculate_costs()
     
     # Current user's participation (if any)
-    my_part = None
-    if not current_user.is_admin:
-        my_part = Participation.query.filter_by(
-            group_test_id=test_id, user_id=current_user.id
-        ).first()
+    my_part = Participation.query.filter_by(
+        group_test_id=test_id, user_id=current_user.id, approved=True
+    ).first()
     
-    # For admin: all participations; for member: just their own (or approved list if needed)
-    if current_user.is_admin:
-        parts = test.participations.all()
+    # Show full participant list (approved + pending) to admins + approved members
+    show_participant_list = current_user.is_admin or my_part is not None
+    
+    if show_participant_list:
+        parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
     else:
-        parts = [my_part] if my_part else []
+        parts = []
     
     return render_template(
         'group_test_detail.html',
         test=test,
         costs=costs,
         participations=parts,
-        my_part=my_part
+        my_part=my_part,
+        show_participant_list=show_participant_list
     )
 
 
@@ -281,6 +282,7 @@ def update_my_participant_status(test_id):
 
     if form.validate_on_submit():
         part.order_status = form.order_status.data
+        part.payment_status = form.payment_status.data
         if form.amount_paid.data is not None:
             part.amount_paid = form.amount_paid.data
         if form.notes.data:

@@ -207,7 +207,6 @@ class Participation(db.Model):
     pay_vial_collector = db.Column(db.Boolean, default=False)
     pay_lab = db.Column(db.Boolean, default=False)
     paid_lab = db.Column(db.Boolean, default=False)          # Admin verification
-    payment_verified = db.Column(db.Boolean, default=False)  # Admin can mark as verified
     
     # Financial tracking (admin or future auto)
     amount_owed = db.Column(db.Float, default=0.0)

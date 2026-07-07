@@ -11,6 +11,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf import CSRFProtect
 from dotenv import load_dotenv
+from sqlalchemy import inspect, text
 
 # Extensions (initialized in create_app to support factory)
 db = SQLAlchemy()
@@ -19,6 +20,64 @@ csrf = CSRFProtect()
 
 # Load .env early for config
 load_dotenv()
+
+
+def ensure_database_schema(app):
+    """Create tables when needed and add missing columns for existing databases."""
+    with app.app_context():
+        db.create_all()
+
+        inspector = inspect(db.engine)
+        preparer = db.engine.dialect.identifier_preparer
+
+        for table in db.metadata.sorted_tables:
+            table_name = table.name
+            if not inspector.has_table(table_name):
+                continue
+
+            existing_columns = {column['name'] for column in inspector.get_columns(table_name)}
+            for column in table.columns:
+                if column.name in existing_columns:
+                    continue
+
+                column_definition = column.type.compile(dialect=db.engine.dialect)
+                sql = (
+                    f"ALTER TABLE {preparer.quote(table_name)} "
+                    f"ADD COLUMN {preparer.quote(column.name)} {column_definition}"
+                )
+                db.session.execute(text(sql))
+
+            db.session.commit()
+
+            for column in table.columns:
+                if column.name not in existing_columns:
+                    if column.name == 'is_admin':
+                        db.session.execute(
+                            text(
+                                f"UPDATE {preparer.quote(table_name)} "
+                                f"SET {preparer.quote(column.name)} = 0 "
+                                f"WHERE {preparer.quote(column.name)} IS NULL"
+                            )
+                        )
+                    elif column.name == 'is_active':
+                        db.session.execute(
+                            text(
+                                f"UPDATE {preparer.quote(table_name)} "
+                                f"SET {preparer.quote(column.name)} = 1 "
+                                f"WHERE {preparer.quote(column.name)} IS NULL"
+                            )
+                        )
+                    elif column.name == 'created_at':
+                        db.session.execute(
+                            text(
+                                f"UPDATE {preparer.quote(table_name)} "
+                                f"SET {preparer.quote(column.name)} = CURRENT_TIMESTAMP "
+                                f"WHERE {preparer.quote(column.name)} IS NULL"
+                            )
+                        )
+
+            db.session.commit()
+
 
 def create_app(config_overrides=None):
     app = Flask(__name__, 
@@ -82,6 +141,8 @@ def create_app(config_overrides=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
+
+    ensure_database_schema(app)
     
     # Flask-Login config
     login_manager.login_view = 'main.login'
@@ -146,10 +207,9 @@ def create_app(config_overrides=None):
     
     @app.cli.command('init-db')
     def init_db():
-        """Create all tables. Safe to run multiple times (idempotent)."""
-        with app.app_context():
-            db.create_all()
-            click.echo("Database tables created/verified.")
+        """Create tables and add any missing columns for existing databases."""
+        ensure_database_schema(app)
+        click.echo("Database tables created/verified.")
     
     # === Shell context for easy debugging ===
     @app.shell_context_processor

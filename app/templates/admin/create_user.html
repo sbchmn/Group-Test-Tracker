@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Create New User{% endblock %}
+
+{% block content %}
+<h3>Create New User</h3>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.username.label(class="form-label") }}
+                    {{ form.username(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.email.label(class="form-label") }}
+                    {{ form.email(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.tg_username.label(class="form-label") }}
+                {{ form.tg_username(class="form-control") }}
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3 form-check mt-4">
+                    {{ form.is_admin(class="form-check-input") }}
+                    {{ form.is_admin.label(class="form-check-label") }}
+                </div>
+                <div class="col-md-4 mb-3 form-check mt-4">
+                    {{ form.is_active(class="form-check-input") }}
+                    {{ form.is_active.label(class="form-check-label") }}
+                </div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.password.label(class="form-label") }}
+                {{ form.password(class="form-control") }}
+                <div class="form-text">Leave blank to auto-generate a temporary password.</div>
+            </div>
+
+            <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

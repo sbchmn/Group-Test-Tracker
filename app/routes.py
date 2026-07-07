@@ -128,6 +128,17 @@ class ParticipantStatusForm(FlaskForm):
     submit = SubmitField('Update My Status')
 
 
+class UserForm(FlaskForm):
+    """Form for admins to create/edit users."""
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
+    is_admin = BooleanField('Administrator')
+    is_active = BooleanField('Active', default=True)
+    password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
+    submit = SubmitField('Save User')
+
+
 # ==================== DECORATORS ====================
 
 def admin_required(f):
@@ -510,6 +521,104 @@ def add_participant_to_test(test_id):
         return redirect(url_for('main.manage_participants', test_id=test.id))
 
     return render_template('admin/add_participant.html', form=form, test=test)
+
+
+# ==================== USER MANAGEMENT (Admin) ====================
+
+@main_bp.route('/admin/users')
+@login_required
+@admin_required
+def manage_users():
+    """Admin page to view all users."""
+    users = User.query.order_by(User.created_at.desc()).all()
+    return render_template('admin/manage_users.html', users=users)
+
+
+@main_bp.route('/admin/users/new', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def create_user():
+    """Admin creates a new user."""
+    form = UserForm()
+    if form.validate_on_submit():
+        if User.query.filter_by(username=form.username.data).first():
+            flash('Username already exists.', 'danger')
+            return render_template('admin/create_user.html', form=form)
+        if User.query.filter_by(email=form.email.data).first():
+            flash('Email already exists.', 'danger')
+            return render_template('admin/create_user.html', form=form)
+
+        user = User(
+            username=form.username.data,
+            email=form.email.data,
+            tg_username=form.tg_username.data,
+            is_admin=form.is_admin.data,
+            is_active=form.is_active.data
+        )
+        if form.password.data:
+            user.set_password(form.password.data)
+        else:
+            import secrets
+            temp_pass = secrets.token_urlsafe(8)
+            user.set_password(temp_pass)
+            flash(f'Temporary password generated: {temp_pass}', 'warning')
+
+        db.session.add(user)
+        db.session.commit()
+        flash(f'User "{user.username}" created successfully.', 'success')
+        return redirect(url_for('main.manage_users'))
+
+    return render_template('admin/create_user.html', form=form)
+
+
+@main_bp.route('/admin/users/<int:user_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_user(user_id):
+    """Admin edits an existing user."""
+    user = User.query.get_or_404(user_id)
+    form = UserForm(obj=user)
+    form.password.validators = [Optional(), Length(min=6)]
+
+    if form.validate_on_submit():
+        existing_username = User.query.filter(User.username == form.username.data, User.id != user_id).first()
+        existing_email = User.query.filter(User.email == form.email.data, User.id != user_id).first()
+
+        if existing_username:
+            flash('Username already taken.', 'danger')
+            return render_template('admin/edit_user.html', form=form, user=user)
+        if existing_email:
+            flash('Email already taken.', 'danger')
+            return render_template('admin/edit_user.html', form=form, user=user)
+
+        user.username = form.username.data
+        user.email = form.email.data
+        user.tg_username = form.tg_username.data
+        user.is_admin = form.is_admin.data
+        user.is_active = form.is_active.data
+
+        if form.password.data:
+            user.set_password(form.password.data)
+            flash('Password updated.', 'success')
+
+        db.session.commit()
+        flash(f'User "{user.username}" updated.', 'success')
+        return redirect(url_for('main.manage_users'))
+
+    return render_template('admin/edit_user.html', form=form, user=user)
+
+
+@main_bp.route('/admin/users/<int:user_id>/toggle-active', methods=['POST'])
+@login_required
+@admin_required
+def toggle_user_active(user_id):
+    """Quick toggle active/inactive."""
+    user = User.query.get_or_404(user_id)
+    user.is_active = not user.is_active
+    db.session.commit()
+    status = "activated" if user.is_active else "deactivated"
+    flash(f'User "{user.username}" {status}.', 'success')
+    return redirect(url_for('main.manage_users'))
 
 
 @main_bp.route('/admin/set-results/<int:test_id>', methods=['POST'])

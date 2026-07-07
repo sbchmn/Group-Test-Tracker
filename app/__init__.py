@@ -10,7 +10,6 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf import CSRFProtect
-from flask_migrate import Migrate
 from dotenv import load_dotenv
 
 # Extensions (initialized in create_app to support factory)
@@ -83,9 +82,6 @@ def create_app(config_overrides=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
-
-    # Flask-Migrate for database schema changes
-    Migrate(app, db)
     
     # Flask-Login config
     login_manager.login_view = 'main.login'

@@ -281,7 +281,6 @@ def update_my_participant_status(test_id):
 
     if form.validate_on_submit():
         part.order_status = form.order_status.data
-        part.payment_status = form.payment_status.data
         if form.amount_paid.data is not None:
             part.amount_paid = form.amount_paid.data
         if form.notes.data:

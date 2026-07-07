@@ -31,6 +31,10 @@
         <div class="card-header">Lab Tests &amp; Costs (from spreadsheet)</div>
         <div class="card-body">
             <!-- Dynamic Lab Test Items -->
+            <div class="mb-3">
+                {{ form.lab_name.label(class="form-label") }}
+                {{ form.lab_name(class="form-control", placeholder="e.g. North Lab, Eurofins, etc.") }}
+            </div>
             <div id="labTestsContainer">
                 <!-- Populated by JS or initial items if editing -->
             </div>
@@ -84,16 +88,19 @@ let labTestIndex = 0;
 function addLabTestRow(name = '', price = '', vials = '') {
     const container = document.getElementById('labTestsContainer');
     const row = document.createElement('div');
-    row.className = 'row g-2 mb-2 lab-test-row';
+    row.className = 'row g-2 mb-2 lab-test-row align-items-end';
     row.innerHTML = `
         <div class="col-md-5">
-            <input type="text" class="form-control form-control-sm" placeholder="Test name (e.g. MASS, PURITY + ID)" value="${name}">
+            <label class="form-label small">Item Name</label>
+            <input type="text" name="lab_item_name" class="form-control form-control-sm" placeholder="Test name (e.g. MASS, PURITY + ID)" value="${name}">
         </div>
         <div class="col-md-3">
-            <input type="number" step="0.01" class="form-control form-control-sm lab-price" placeholder="Price $" value="${price}" onchange="updateTotalLabCost()">
+            <label class="form-label small">Price</label>
+            <input type="number" step="0.01" name="lab_item_price" class="form-control form-control-sm lab-price" placeholder="Price $" value="${price}" onchange="updateTotalLabCost()">
         </div>
         <div class="col-md-2">
-            <input type="number" class="form-control form-control-sm" placeholder="Vials" value="${vials}">
+            <label class="form-label small">Vials</label>
+            <input type="number" name="lab_item_vials" class="form-control form-control-sm" placeholder="Vials" value="${vials}">
         </div>
         <div class="col-md-2">
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.lab-test-row').remove(); updateTotalLabCost()">×</button>

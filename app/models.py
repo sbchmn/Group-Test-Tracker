@@ -61,7 +61,8 @@ class GroupTest(db.Model):
     status = db.Column(db.String(20), default='recruiting', nullable=False, index=True)
     # Allowed: recruiting, testing, closed
     
-    # Lab testing costs - flexible itemized (JSON array of objects)
+    # Lab testing costs and provider details
+    lab_name = db.Column(db.String(200), nullable=True)
     # Example: [{"name": "MASS, PURITY + ID", "price": 360.0, "vials_needed": 1}, {"name": "STERILITY", "price": 290.0, "vials_needed": 0}]
     lab_test_details = db.Column(db.JSON, nullable=True)
     total_lab_cost = db.Column(db.Float, default=0.0, nullable=False)

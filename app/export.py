@@ -48,54 +48,51 @@ def generate_test_export(test: GroupTest) -> BytesIO:
 
     ws['A4'] = "Vendor"
     ws['B4'] = test.vendor or ""
-    ws['D4'] = "LAB TEST NAME"
-    ws['E4'] = "PRICE"
-    ws['F4'] = "# VIALS NEEDED"
+    ws['D4'] = "LAB / PROVIDER"
+    ws['E4'] = test.lab_name or ""
 
     ws['A5'] = "Batch Number"
     ws['B5'] = test.batch_number or ""
-    ws['D5'] = "MASS, PURITY + ID"
-    ws['E5'] = test.total_lab_cost or 0
-    ws['F5'] = 1  # representative
+    ws['D5'] = "LAB TEST NAME"
+    ws['E5'] = "PRICE"
+    ws['F5'] = "# VIALS NEEDED"
 
     ws['A6'] = "Compound"
     ws['B6'] = test.compound or ""
-    ws['D6'] = "STERILITY"
-    ws['E6'] = 0
-    ws['F6'] = 0
+    ws['D6'] = "STATUS"
+    ws['E6'] = test.status.upper()
 
     ws['A7'] = "Size"
     ws['B7'] = test.size or ""
-    ws['D7'] = "ENDOTOXIN ANALYSIS (10-1000 EU)"
-    ws['E7'] = 0
-    ws['F7'] = 0
+    ws['D7'] = "TOTAL LAB COST"
+    ws['E7'] = test.total_lab_cost or 0
+    ws['E7'].number_format = currency_format
 
-    ws['A8'] = "STATUS"
-    ws['B8'] = test.status.upper()
-    ws['D8'] = "VARIANCE"
-    ws['E8'] = 0
-    ws['F8'] = 0
+    ws['A8'] = "SHIPMENT TO LAB / COST"
+    ws['B8'] = test.shipping_cost or 0
+    ws['B8'].number_format = currency_format
 
-    ws['A9'] = "TOTAL LAB COST"
-    ws['B9'] = test.total_lab_cost or 0
-    ws['B9'].number_format = currency_format
-    ws['D9'] = "TOTAL LAB COST"
-    ws['E9'] = f"=E5+E6+E7+E8"  # formula example
+    ws['A9'] = "ORDER NUMBER"
+    ws['B9'] = test.order_number or ""
+    ws['D9'] = "QUOTE NUMBER"
+    ws['E9'] = test.quote_number or ""
 
-    # Shipment
-    ws['A11'] = "SHIPMENT TO LAB / COST"
-    ws['B11'] = test.shipping_cost or 0
-    ws['B11'].number_format = currency_format
-    ws['D11'] = "ORDER NUMBER"
-    ws['E11'] = test.order_number or ""
-    ws['G11'] = "QUOTE NUMBER"
-    ws['H11'] = test.quote_number or ""
+    ws['A10'] = "RESULTS LINK"
+    ws['B10'] = test.results_link or ""
+
+    if test.lab_test_details:
+        for idx, item in enumerate(test.lab_test_details, start=1):
+            row = 10 + idx
+            ws.cell(row=row, column=4, value=item.get('name') or '')
+            ws.cell(row=row, column=5, value=item.get('price') or 0)
+            ws.cell(row=row, column=5).number_format = currency_format
+            ws.cell(row=row, column=6, value=item.get('vials_needed') or 0)
 
     if test.status == 'closed' and test.results_link:
-        ws['A12'] = "RESULTS LINK (Closed)"
-        ws.merge_cells('B12:H12')
-        ws['B12'] = test.results_link
-        ws['B12'].font = Font(color="0563C1", underline="single")
+        ws['A11'] = "RESULTS LINK (Closed)"
+        ws.merge_cells('B11:E11')
+        ws['B11'] = test.results_link
+        ws['B11'].font = Font(color="0563C1", underline="single")
 
     # === PARTICIPANTS TABLE ===
     start_row = 15

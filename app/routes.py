@@ -62,6 +62,7 @@ class GroupTestForm(FlaskForm):
         ('closed', 'Closed (Results link visible to approved members)')
     ], validators=[DataRequired()])
     
+    lab_name = StringField('Lab / Provider', validators=[Optional(), Length(max=200)])
     total_lab_cost = FloatField('Total Lab Cost ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
     shipping_cost = FloatField('Shipping to Lab ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
     refund_per_donor = FloatField('Refund per Donor ($)', validators=[Optional(), NumberRange(min=0)], default=20.0)
@@ -357,6 +358,28 @@ def request_participation(test_id):
 def create_test():
     form = GroupTestForm()
     if form.validate_on_submit():
+        lab_items = []
+        names = request.form.getlist('lab_item_name')
+        prices = request.form.getlist('lab_item_price')
+        vials = request.form.getlist('lab_item_vials')
+        for name, price, vial_count in zip(names, prices, vials):
+            name = (name or '').strip()
+            if not name:
+                continue
+            try:
+                price_value = float(price or 0)
+            except ValueError:
+                price_value = 0.0
+            try:
+                vial_value = int(vial_count or 0)
+            except ValueError:
+                vial_value = 0
+            lab_items.append({
+                'name': name,
+                'price': round(price_value, 2),
+                'vials_needed': vial_value,
+            })
+
         test = GroupTest(
             title=form.title.data,
             description=form.description.data,
@@ -366,6 +389,8 @@ def create_test():
             compound=form.compound.data,
             size=form.size.data,
             status=form.status.data,
+            lab_name=form.lab_name.data or None,
+            lab_test_details=lab_items,
             total_lab_cost=form.total_lab_cost.data or 0.0,
             shipping_cost=form.shipping_cost.data or 0.0,
             refund_per_donor=form.refund_per_donor.data or 20.0,
@@ -390,6 +415,30 @@ def edit_test(test_id):
     
     if form.validate_on_submit():
         form.populate_obj(test)
+        lab_items = []
+        names = request.form.getlist('lab_item_name')
+        prices = request.form.getlist('lab_item_price')
+        vials = request.form.getlist('lab_item_vials')
+        for name, price, vial_count in zip(names, prices, vials):
+            name = (name or '').strip()
+            if not name:
+                continue
+            try:
+                price_value = float(price or 0)
+            except ValueError:
+                price_value = 0.0
+            try:
+                vial_value = int(vial_count or 0)
+            except ValueError:
+                vial_value = 0
+            lab_items.append({
+                'name': name,
+                'price': round(price_value, 2),
+                'vials_needed': vial_value,
+            })
+        test.lab_name = form.lab_name.data or None
+        test.lab_test_details = lab_items
+        test.total_lab_cost = form.total_lab_cost.data or 0.0
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
         db.session.commit()

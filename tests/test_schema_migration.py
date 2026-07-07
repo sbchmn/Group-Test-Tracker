@@ -34,6 +34,14 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("is_active", columns)
             self.assertIn("created_at", columns)
 
+    def test_latest_migration_includes_lab_name_column(self):
+        migration_dir = Path(__file__).resolve().parent.parent / "migrations" / "versions"
+        migration_files = sorted(migration_dir.glob("*.py"))
+        self.assertTrue(migration_files)
+
+        migration_text = "\n".join(path.read_text(encoding="utf-8") for path in migration_files)
+        self.assertIn("lab_name", migration_text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,6 +42,9 @@
                     
                     <dt class="col-sm-4">Order / Quote #</dt>
                     <dd class="col-sm-8">{{ test.order_number or '—' }} / {{ test.quote_number or '—' }}</dd>
+
+                    <dt class="col-sm-4">Lab / Provider</dt>
+                    <dd class="col-sm-8">{{ test.lab_name or '—' }}</dd>
                 </dl>
                 
                 {% if test.description %}
@@ -76,7 +79,21 @@
                 </div>
                 
                 <hr>
-                
+
+                {% if test.lab_test_details %}
+                    <div class="mb-3">
+                        <div class="fw-semibold mb-2">Lab Test Items</div>
+                        <ul class="list-group list-group-flush">
+                            {% for item in test.lab_test_details %}
+                            <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                <span>{{ item.name }}</span>
+                                <span class="text-muted small">${{ '%.2f'|format(item.price or 0) }} · {{ item.vials_needed }} vial{% if item.vials_needed != 1 %}s{% endif %}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+
                 <table class="table table-sm mb-0">
                     <tr>
                         <td>Total Lab + Shipping</td>

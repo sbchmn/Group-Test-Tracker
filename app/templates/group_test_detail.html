@@ -205,7 +205,7 @@
                                     <span class="badge bg-light text-dark">{{ p.order_status or 'pending' }}</span>
                                 </td>
                                 <td class="small text-success">
-                                    ${{ '%.2f'|format( max(0, (p.amount_owed or 0) - (p.amount_paid or 0)) ) }}
+                                    ${{ '%.2f'|format( (p.amount_owed or 0) - (p.amount_paid or 0) if (p.amount_owed or 0) > (p.amount_paid or 0) else 0 ) }}
                                     {% if p.amount_paid and p.amount_paid > 0 %}
                                         <br><small class="text-muted">(paid ${{ '%.2f'|format(p.amount_paid) }})</small>
                                     {% endif %}

@@ -112,7 +112,26 @@
                         <td class="text-end"><strong>${{ c.donor_pays }}</strong></td>
                     </tr>
                 </table>
-                <small class="text-muted d-block mt-2">Formula: Non-donors fund donor refunds via small uplift. Transparent &amp; fair. See model.py:calculate_costs() for exact logic.</small>
+
+                {% set uplift_per_non = (c.total_refund_pool / c.total_non_donors) if c.total_non_donors > 0 else 0 %}
+                <div class="alert alert-light border mt-3 mb-0">
+                    <div class="fw-semibold mb-2">How the split works for this group</div>
+                    <div class="small">
+                        <div>Fixed cost = lab cost + shipping = ${{ '%.2f'|format(c.total_fixed_cost) }}</div>
+                        <div>Base share before refunds = ${{ '%.2f'|format(c.base_per_person) }} each across {{ c.total_participants }} approved participants</div>
+                        {% if c.total_donors > 0 %}
+                            <div>Refund pool = {{ c.total_donors }} donor × ${{ '%.2f'|format(c.effective_donor_refund) }} = ${{ '%.2f'|format(c.total_refund_pool) }}</div>
+                        {% endif %}
+                        {% if c.total_non_donors > 0 %}
+                            <div>Uplift added to each non-donor = ${{ '%.2f'|format(c.total_refund_pool) }} ÷ {{ c.total_non_donors }} = ${{ '%.2f'|format(uplift_per_non) }}</div>
+                            <div>Non-donor pay = ${{ '%.2f'|format(c.base_per_person) }} + ${{ '%.2f'|format(uplift_per_non) }} = ${{ '%.2f'|format(c.non_donor_pays) }}</div>
+                        {% endif %}
+                        {% if c.total_donors > 0 %}
+                            <div>Donor pay = ${{ '%.2f'|format(c.base_per_person) }} − ${{ '%.2f'|format(c.effective_donor_refund) }} = ${{ '%.2f'|format(c.donor_pays) }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                <small class="text-muted d-block mt-2">Formula: Non-donors fund donor refunds via small uplift. Transparent &amp; fair.</small>
             </div>
         </div>
         

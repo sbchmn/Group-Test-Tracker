@@ -146,14 +146,15 @@ class GroupTest(db.Model):
         base_share = total_fixed / n_part
         
         if n_non == 0:
-            # All are donors: they still get refund but pool must cover from fixed or admin adjusts refund
-            donor_pays = max(0.0, base_share - refund_per)
+            # If there are no non-donors, the donor still receives the refund credit as a negative balance.
+            donor_pays = round(base_share - refund_per, 2)
             non_donor_pays = 0.0
         else:
-            # Non-donors fund the refund pool via uplift
+            # Non-donors fund the refund pool via uplift, and donors can end up with a negative balance
+            # when the refund exceeds their base share.
             uplift_per_non = total_refund_pool / n_non if n_non > 0 else 0.0
             non_donor_pays = round(base_share + uplift_per_non, 2)
-            donor_pays = round(max(0.0, base_share - refund_per), 2)
+            donor_pays = round(base_share - refund_per, 2)
         
         return {
             'total_participants': n_part,

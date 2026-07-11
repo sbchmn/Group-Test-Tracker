@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from app import create_app, db
-from app.models import GroupTest, User
+from app.models import GroupTest, Participation, User
 
 
 class LabCostTests(unittest.TestCase):
@@ -64,6 +64,57 @@ class LabCostTests(unittest.TestCase):
                 {"name": "MASS", "price": 360.0, "vials_needed": 1},
                 {"name": "STERILITY", "price": 240.0, "vials_needed": 0},
             ])
+
+    def test_donor_share_becomes_negative_when_refund_exceeds_base_share(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="refund-admin", email="refund-admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.flush()
+
+            for idx in range(11):
+                user = User(username=f"user{idx}", email=f"user{idx}@example.com", is_admin=False, is_active=True)
+                user.set_password("password")
+                db.session.add(user)
+            db.session.flush()
+
+            test = GroupTest(
+                title="Refund Test",
+                status="recruiting",
+                total_lab_cost=184.83,
+                shipping_cost=0.0,
+                refund_per_donor=20.0,
+                created_by=admin.id,
+            )
+            db.session.add(test)
+            db.session.flush()
+
+            for idx in range(10):
+                participation = Participation(
+                    group_test_id=test.id,
+                    user_id=idx + 2,
+                    approved=True,
+                    vial_donor=False,
+                )
+                db.session.add(participation)
+
+            donor_participation = Participation(
+                group_test_id=test.id,
+                user_id=1,
+                approved=True,
+                vial_donor=True,
+            )
+            db.session.add(donor_participation)
+            db.session.commit()
+
+            costs = test.calculate_costs()
+
+            self.assertEqual(costs["total_participants"], 11)
+            self.assertEqual(costs["total_donors"], 1)
+            self.assertEqual(costs["total_non_donors"], 10)
+            self.assertEqual(costs["donor_pays"], -3.2)
+            self.assertEqual(costs["non_donor_pays"], 18.8)
 
 
 if __name__ == "__main__":

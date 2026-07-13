@@ -65,6 +65,12 @@ class GroupTestForm(FlaskForm):
     lab_name = StringField('Lab / Provider', validators=[Optional(), Length(max=200)])
     total_lab_cost = FloatField('Total Lab Cost ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
     shipping_cost = FloatField('Shipping to Lab ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
+    donor_shipping_cost = FloatField('Donor Shipping Cost ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
+    donor_shipping_reimbursement = SelectField('Donor Shipping Reimbursement', choices=[
+        ('credit', 'Credit to the donor'),
+        ('participant', 'Covered by selected participant')
+    ], default='credit', validators=[Optional()])
+    donor_shipping_reimbursed_by_id = SelectField('Who covers it?', coerce=int, validators=[Optional()], choices=[])
     refund_per_donor = FloatField('Refund per Donor ($)', validators=[Optional(), NumberRange(min=0)], default=20.0)
     
     order_number = StringField('Order Number', validators=[Optional()])
@@ -153,6 +159,14 @@ def admin_required(f):
 
 
 # ==================== ROUTES ====================
+
+
+def populate_donor_shipping_choices(form):
+    users = User.query.order_by(User.username).all()
+    choices = [(0, 'Select a participant')]
+    choices.extend([(user.id, user.username) for user in users])
+    form.donor_shipping_reimbursed_by_id.choices = choices
+
 
 @main_bp.route('/')
 def index():
@@ -256,6 +270,9 @@ def test_detail(test_id):
         abort(403)
     
     costs = test.calculate_costs()
+    reimbursed_by_user = None
+    if test.donor_shipping_reimbursement == 'participant' and test.donor_shipping_reimbursed_by_id:
+        reimbursed_by_user = User.query.get(test.donor_shipping_reimbursed_by_id)
     
     # Current user's participation (if any)
     my_part = Participation.query.filter_by(
@@ -276,7 +293,8 @@ def test_detail(test_id):
         costs=costs,
         participations=parts,
         my_part=my_part,
-        show_participant_list=show_participant_list
+        show_participant_list=show_participant_list,
+        reimbursed_by_user=reimbursed_by_user
     )
 
 
@@ -357,6 +375,7 @@ def request_participation(test_id):
 @admin_required
 def create_test():
     form = GroupTestForm()
+    populate_donor_shipping_choices(form)
     if form.validate_on_submit():
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -393,6 +412,9 @@ def create_test():
             lab_test_details=lab_items,
             total_lab_cost=form.total_lab_cost.data or 0.0,
             shipping_cost=form.shipping_cost.data or 0.0,
+            donor_shipping_cost=form.donor_shipping_cost.data or 0.0,
+            donor_shipping_reimbursement=form.donor_shipping_reimbursement.data or 'credit',
+            donor_shipping_reimbursed_by_id=form.donor_shipping_reimbursed_by_id.data or None,
             refund_per_donor=form.refund_per_donor.data or 20.0,
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
@@ -412,6 +434,11 @@ def create_test():
 def edit_test(test_id):
     test = GroupTest.query.get_or_404(test_id)
     form = GroupTestForm(obj=test)  # Pre-populate
+    populate_donor_shipping_choices(form)
+    if form.donor_shipping_reimbursed_by_id.data in (None, '') and test.donor_shipping_reimbursed_by_id:
+        form.donor_shipping_reimbursed_by_id.data = test.donor_shipping_reimbursed_by_id
+    elif form.donor_shipping_reimbursed_by_id.data is None:
+        form.donor_shipping_reimbursed_by_id.data = 0
     
     if form.validate_on_submit():
         form.populate_obj(test)
@@ -439,6 +466,9 @@ def edit_test(test_id):
         test.lab_name = form.lab_name.data or None
         test.lab_test_details = lab_items
         test.total_lab_cost = form.total_lab_cost.data or 0.0
+        test.donor_shipping_cost = form.donor_shipping_cost.data or 0.0
+        test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
+        test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
         db.session.commit()

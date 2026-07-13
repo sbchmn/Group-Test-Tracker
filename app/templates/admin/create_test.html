@@ -56,6 +56,18 @@
                     <small class="text-muted">Credit given to each vial donor</small>
                 </div>
             </div>
+            <div class="row mt-3">
+                <div class="col-md-4">
+                    {{ form.donor_shipping_cost.label(class="form-label") }}{{ form.donor_shipping_cost(class="form-control", step="0.01") }}
+                    <small class="text-muted">Shipping cost from donor(s) to the organizer</small>
+                </div>
+                <div class="col-md-4">
+                    {{ form.donor_shipping_reimbursement.label(class="form-label") }}{{ form.donor_shipping_reimbursement(class="form-select") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.donor_shipping_reimbursed_by_id.label(class="form-label") }}{{ form.donor_shipping_reimbursed_by_id(class="form-select") }}
+                </div>
+            </div>
         </div>
     </div>
     

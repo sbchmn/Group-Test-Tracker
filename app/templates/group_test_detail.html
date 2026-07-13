@@ -134,7 +134,10 @@
                         {% endif %}
                         {% if (test.donor_shipping_cost or 0) > 0 %}
                             <div>Donor-shipping cost = ${{ '%.2f'|format(test.donor_shipping_cost or 0) }}</div>
-                            <div>Reimbursement policy = {{ 'credit to the donor' if test.donor_shipping_reimbursement == 'credit' else 'covered by participants' }}</div>
+                            <div>Reimbursement policy = {{ 'credit to the donor' if test.donor_shipping_reimbursement == 'credit' else 'covered by participant' }}</div>
+                            {% if test.donor_shipping_reimbursement == 'participant' and reimbursed_by_user %}
+                                <div>Covered by = {{ reimbursed_by_user.username }}</div>
+                            {% endif %}
                         {% endif %}
                         {% if c.total_donors > 0 %}
                             <div>Donor pay = ${{ '%.2f'|format(c.base_per_person) }} − ${{ '%.2f'|format(c.effective_donor_refund) }} = ${{ '%.2f'|format(c.donor_pays) }}</div>

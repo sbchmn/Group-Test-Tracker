@@ -65,6 +65,50 @@ class LabCostTests(unittest.TestCase):
                 {"name": "STERILITY", "price": 240.0, "vials_needed": 0},
             ])
 
+    def test_create_test_saves_donor_shipping_reimbursement_selection(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin2", email="admin2@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            participant = User(username="participant", email="participant@example.com", is_admin=False, is_active=True)
+            participant.set_password("password")
+            db.session.add_all([admin, participant])
+            db.session.commit()
+            participant_id = participant.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin2", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            "/admin/create-test",
+            data={
+                "title": "Shipping Policy Test",
+                "status": "recruiting",
+                "total_lab_cost": "100",
+                "shipping_cost": "20",
+                "donor_shipping_cost": "15",
+                "donor_shipping_reimbursement": "participant",
+                "donor_shipping_reimbursed_by_id": str(participant_id),
+                "refund_per_donor": "0",
+                "lab_name": "North Lab",
+                "lab_item_name": ["MASS"],
+                "lab_item_price": ["100"],
+                "lab_item_vials": ["1"],
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            test = GroupTest.query.filter_by(title="Shipping Policy Test").first()
+            self.assertIsNotNone(test)
+            self.assertEqual(test.donor_shipping_reimbursement, "participant")
+            self.assertEqual(test.donor_shipping_reimbursed_by_id, participant.id)
+
     def test_donor_share_becomes_negative_when_refund_exceeds_base_share(self):
         with self.app.app_context():
             db.create_all()

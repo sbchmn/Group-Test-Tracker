@@ -67,6 +67,9 @@ class GroupTest(db.Model):
     lab_test_details = db.Column(db.JSON, nullable=True)
     total_lab_cost = db.Column(db.Float, default=0.0, nullable=False)
     shipping_cost = db.Column(db.Float, default=0.0, nullable=False)  # Shipment to lab
+    donor_shipping_cost = db.Column(db.Float, default=0.0, nullable=False)  # Shipment from donor(s) to organizer
+    donor_shipping_reimbursement = db.Column(db.String(40), default='credit', nullable=False)  # credit or participant
+    donor_shipping_reimbursed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     
     # Admin tracking
     order_number = db.Column(db.String(100), nullable=True)
@@ -124,9 +127,10 @@ class GroupTest(db.Model):
         n_donors = self.num_donors
         n_non = self.num_non_donors
         
-        total_fixed = (self.total_lab_cost or 0.0) + (self.shipping_cost or 0.0)
+        total_fixed = (self.total_lab_cost or 0.0) + (self.shipping_cost or 0.0) + (self.donor_shipping_cost or 0.0)
         refund_per = self.refund_per_donor or 0.0
         total_refund_pool = refund_per * n_donors if n_donors > 0 else 0.0
+        donor_shipping_cost = self.donor_shipping_cost or 0.0
         
         if n_part == 0:
             return {
@@ -135,6 +139,7 @@ class GroupTest(db.Model):
                 'total_non_donors': 0,
                 'total_fixed_cost': round(total_fixed, 2),
                 'total_refund_pool': round(total_refund_pool, 2),
+                'donor_shipping_cost': round(self.donor_shipping_cost or 0.0, 2),
                 'base_per_person': 0.0,
                 'donor_pays': 0.0,
                 'non_donor_pays': 0.0,
@@ -155,6 +160,9 @@ class GroupTest(db.Model):
             uplift_per_non = total_refund_pool / n_non if n_non > 0 else 0.0
             non_donor_pays = round(base_share + uplift_per_non, 2)
             donor_pays = round(base_share - refund_per, 2)
+
+        if donor_shipping_cost > 0 and self.donor_shipping_reimbursement == 'credit' and n_donors > 0:
+            donor_pays = round(donor_pays - donor_shipping_cost / n_donors, 2)
         
         return {
             'total_participants': n_part,

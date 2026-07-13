@@ -116,6 +116,47 @@ class LabCostTests(unittest.TestCase):
             self.assertEqual(costs["donor_pays"], -3.2)
             self.assertEqual(costs["non_donor_pays"], 18.8)
 
+    def test_donor_shipping_cost_is_added_to_shared_pool_and_credited(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="shipping-admin", email="shipping-admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.flush()
+
+            donor = User(username="donor", email="donor@example.com", is_admin=False, is_active=True)
+            donor.set_password("password")
+            non_donor = User(username="non-donor", email="non-donor@example.com", is_admin=False, is_active=True)
+            non_donor.set_password("password")
+            db.session.add_all([donor, non_donor])
+            db.session.flush()
+
+            test = GroupTest(
+                title="Shipping Test",
+                status="recruiting",
+                total_lab_cost=100.0,
+                shipping_cost=20.0,
+                donor_shipping_cost=15.0,
+                donor_shipping_reimbursement='credit',
+                refund_per_donor=0.0,
+                created_by=admin.id,
+            )
+            db.session.add(test)
+            db.session.flush()
+
+            db.session.add_all([
+                Participation(group_test_id=test.id, user_id=donor.id, approved=True, vial_donor=True),
+                Participation(group_test_id=test.id, user_id=non_donor.id, approved=True, vial_donor=False),
+            ])
+            db.session.commit()
+
+            costs = test.calculate_costs()
+
+            self.assertEqual(costs["total_fixed_cost"], 135.0)
+            self.assertEqual(costs["base_per_person"], 67.5)
+            self.assertEqual(costs["donor_pays"], 52.5)
+            self.assertEqual(costs["non_donor_pays"], 67.5)
+
 
 if __name__ == "__main__":
     unittest.main()

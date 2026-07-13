@@ -99,6 +99,12 @@
                         <td>Total Lab + Shipping</td>
                         <td class="text-end fw-bold">${{ c.total_fixed_cost }}</td>
                     </tr>
+                    {% if (test.donor_shipping_cost or 0) > 0 %}
+                    <tr>
+                        <td>Donor-specific shipping</td>
+                        <td class="text-end">${{ '%.2f'|format(test.donor_shipping_cost or 0) }}</td>
+                    </tr>
+                    {% endif %}
                     <tr>
                         <td>Refund Pool (to {{ c.total_donors }} donors × ${{ c.effective_donor_refund }})</td>
                         <td class="text-end text-success">− ${{ c.total_refund_pool }}</td>
@@ -125,6 +131,10 @@
                         {% if c.total_non_donors > 0 %}
                             <div>Uplift added to each non-donor = ${{ '%.2f'|format(c.total_refund_pool) }} ÷ {{ c.total_non_donors }} = ${{ '%.2f'|format(uplift_per_non) }}</div>
                             <div>Non-donor pay = ${{ '%.2f'|format(c.base_per_person) }} + ${{ '%.2f'|format(uplift_per_non) }} = ${{ '%.2f'|format(c.non_donor_pays) }}</div>
+                        {% endif %}
+                        {% if (test.donor_shipping_cost or 0) > 0 %}
+                            <div>Donor-shipping cost = ${{ '%.2f'|format(test.donor_shipping_cost or 0) }}</div>
+                            <div>Reimbursement policy = {{ 'credit to the donor' if test.donor_shipping_reimbursement == 'credit' else 'covered by participants' }}</div>
                         {% endif %}
                         {% if c.total_donors > 0 %}
                             <div>Donor pay = ${{ '%.2f'|format(c.base_per_person) }} − ${{ '%.2f'|format(c.effective_donor_refund) }} = ${{ '%.2f'|format(c.donor_pays) }}</div>

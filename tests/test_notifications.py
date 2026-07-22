@@ -72,6 +72,45 @@ class NotificationTests(unittest.TestCase):
             self.assertIn("post-prune entry", contents)
             self.assertLess(len(contents), 400000)
 
+    def test_edit_notification_template_updates_existing_template(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            template = NotificationTemplate(name="Old Template", email_subject="Old", email_body="Old body")
+            db.session.add(template)
+            db.session.commit()
+            template_id = template.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin", "password": "secret"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            f"/admin/notification-templates/{template_id}/edit",
+            data={
+                "name": "Updated Template",
+                "description": "Updated description",
+                "email_subject": "Updated subject",
+                "email_body": "Updated body",
+                "telegram_body": "Updated telegram",
+                "hide_from_participant_notifications": False,
+                "is_default_password_reset": False,
+                "is_active": True,
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            refreshed = NotificationTemplate.query.get(template_id)
+            self.assertEqual(refreshed.name, "Updated Template")
+            self.assertEqual(refreshed.email_subject, "Updated subject")
+            self.assertEqual(refreshed.email_body, "Updated body")
+
     def test_send_mailjet_message_posts_to_mailjet_api(self):
         with self.app.app_context():
             db.create_all()

@@ -3,7 +3,7 @@
 {% block title %}Notification Templates{% endblock %}
 
 {% block content %}
-<h3>Notification Templates</h3>
+<h3>{% if editing_template %}Edit Notification Template{% else %}Notification Templates{% endif %}</h3>
 <p class="text-muted">Create reusable email/Telegram templates for participant updates and password resets.</p>
 
 <div class="card mb-4">
@@ -50,6 +50,9 @@
                 Use variables like {{ username }}, {{ amount_owed }}, {{ test_title }}, {{ test_link }}, and {{ new_password }}.
             </div>
             <button type="submit" class="btn btn-success mt-3">{{ form.submit.label.text }}</button>
+            {% if editing_template %}
+            <a href="{{ url_for('main.notification_templates') }}" class="btn btn-secondary mt-3">Cancel Edit</a>
+            {% endif %}
             <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary mt-3">Back</a>
         </form>
     </div>
@@ -67,6 +70,9 @@
                     <td>{{ template.name }}</td>
                     <td>{% if template.is_default_password_reset %}Password Reset{% else %}Participant{% endif %}</td>
                     <td>{% if template.is_active %}Yes{% else %}No{% endif %}</td>
+                    <td class="text-end">
+                        <a href="{{ url_for('main.edit_notification_template', template_id=template.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

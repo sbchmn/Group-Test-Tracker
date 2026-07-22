@@ -713,7 +713,32 @@ def notification_templates():
         flash('Notification template created.', 'success')
         return redirect(url_for('main.notification_templates'))
     templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
-    return render_template('admin/notification_templates.html', form=form, templates=templates)
+    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=None)
+
+
+@main_bp.route('/admin/notification-templates/<int:template_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_notification_template(template_id):
+    template = NotificationTemplate.query.get_or_404(template_id)
+    form = NotificationTemplateForm(obj=template)
+    form.submit.label.text = 'Save Changes'
+
+    if form.validate_on_submit():
+        template.name = form.name.data
+        template.description = form.description.data
+        template.email_subject = form.email_subject.data
+        template.email_body = form.email_body.data
+        template.telegram_body = form.telegram_body.data
+        template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
+        template.is_default_password_reset = form.is_default_password_reset.data
+        template.is_active = form.is_active.data
+        db.session.commit()
+        flash('Notification template updated.', 'success')
+        return redirect(url_for('main.notification_templates'))
+
+    templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
+    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=template)
 
 
 @main_bp.route('/admin/notification-config', methods=['GET', 'POST'])

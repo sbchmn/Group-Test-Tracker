@@ -59,6 +59,31 @@ class NotificationTests(unittest.TestCase):
             self.assertTrue(mock_send.called)
             self.assertEqual(mock_send.call_args.args[1], "email")
 
+    def test_register_route_sends_welcome_email_with_login_link(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="service_base_url", value="https://example.test"))
+            db.session.commit()
+
+        with patch("app.routes.send_notification_message", return_value=True) as mock_send:
+            response = self.client.post(
+                "/register",
+                data={
+                    "username": "newuser",
+                    "email": "new@example.com",
+                    "password": "secretpass",
+                    "confirm_password": "secretpass",
+                    "tg_username": "",
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_send.called)
+        self.assertEqual(mock_send.call_args.args[1], "email")
+        self.assertIn("newuser", mock_send.call_args.args[3])
+        self.assertIn("https://example.test/login", mock_send.call_args.args[3])
+
     def test_notification_log_writes_and_prunes(self):
         with self.app.app_context():
             log_path = append_notification_log("initial entry")

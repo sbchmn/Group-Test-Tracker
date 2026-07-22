@@ -8,7 +8,7 @@ Main Blueprint - All Routes, Form Classes, and Business Logic
 """
 
 from flask import (
-    Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify, send_file
+    Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify, send_file, current_app
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
@@ -25,7 +25,7 @@ import os
 
 from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig
 from .export import generate_test_export
-from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template
+from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template, send_notification_message
 
 main_bp = Blueprint('main', __name__)
 
@@ -159,6 +159,7 @@ class NotificationTemplateForm(FlaskForm):
     telegram_body = TextAreaField('Telegram Message', validators=[Optional()])
     hide_from_participant_notifications = BooleanField('Hide from "Notify Test Participants"')
     is_default_password_reset = BooleanField('Default Password Reset Template')
+    is_default_registration_welcome = BooleanField('Default Registration Welcome Template')
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Template')
 
@@ -234,6 +235,29 @@ def register():
         user.set_password(form.password.data)
         db.session.add(user)
         db.session.commit()
+
+        base_url = str(
+            NotificationConfig.query.filter_by(key='service_base_url').first().value if NotificationConfig.query.filter_by(key='service_base_url').first() else ''
+        ).strip()
+        if not base_url:
+            base_url = current_app.config.get('SERVER_NAME') or 'http://localhost'
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = f'https://{base_url}'
+        login_url = f"{base_url.rstrip('/')}/login"
+        template = NotificationTemplate.query.filter_by(is_default_registration_welcome=True, is_active=True).first()
+        subject = template.email_subject or 'Your account was created successfully' if template else 'Your account was created successfully'
+        body = (
+            render_notification_template(template.email_body or '', {'username': user.username, 'login_url': login_url})
+            if template and template.email_body
+            else (
+                f"Hello {user.username},\n\n"
+                f"Your account was created successfully.\n"
+                f"Your username is: {user.username}\n"
+                f"You can sign in here: {login_url}\n"
+            )
+        )
+        send_notification_message(user, 'email', subject, body)
+
         flash('Registration successful! Please login.', 'success')
         return redirect(url_for('main.login'))
     return render_template('register.html', form=form)
@@ -721,6 +745,7 @@ def notification_templates():
             telegram_body=form.telegram_body.data,
             hide_from_participant_notifications=form.hide_from_participant_notifications.data,
             is_default_password_reset=form.is_default_password_reset.data,
+            is_default_registration_welcome=form.is_default_registration_welcome.data,
             is_active=form.is_active.data,
         )
         db.session.add(template)
@@ -747,6 +772,7 @@ def edit_notification_template(template_id):
         template.telegram_body = form.telegram_body.data
         template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
         template.is_default_password_reset = form.is_default_password_reset.data
+        template.is_default_registration_welcome = form.is_default_registration_welcome.data
         template.is_active = form.is_active.data
         db.session.commit()
         flash('Notification template updated.', 'success')

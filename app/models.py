@@ -57,6 +57,7 @@ class NotificationTemplate(db.Model):
     telegram_body = db.Column(db.Text, nullable=True)
     hide_from_participant_notifications = db.Column(db.Boolean, default=False, nullable=False)
     is_default_password_reset = db.Column(db.Boolean, default=False, nullable=False)
+    is_default_registration_welcome = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

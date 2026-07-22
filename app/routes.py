@@ -151,6 +151,17 @@ class UserForm(FlaskForm):
     submit = SubmitField('Save User')
 
 
+class ProfileForm(FlaskForm):
+    """Form for users to edit their own profile details."""
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
+    receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
+    submit = SubmitField('Save Profile')
+
+
 class NotificationTemplateForm(FlaskForm):
     name = StringField('Template Name', validators=[DataRequired(), Length(max=120)])
     description = TextAreaField('Description', validators=[Optional()])
@@ -320,6 +331,39 @@ def send_password_reset_admin(user_id):
     return redirect(url_for('main.manage_users'))
 
 
+@main_bp.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    """Allow users to update their own profile info and password."""
+    form = ProfileForm(obj=current_user)
+    if form.validate_on_submit():
+        existing_username = User.query.filter(User.username == form.username.data, User.id != current_user.id).first()
+        existing_email = User.query.filter(User.email == form.email.data, User.id != current_user.id).first()
+
+        if existing_username:
+            flash('Username already taken.', 'danger')
+            return render_template('profile.html', form=form)
+        if existing_email:
+            flash('Email already registered.', 'danger')
+            return render_template('profile.html', form=form)
+
+        current_user.username = form.username.data
+        current_user.email = form.email.data
+        current_user.tg_username = form.tg_username.data or None
+        current_user.receive_group_test_notifications = form.receive_group_test_notifications.data
+        current_user.notification_channel = form.notification_channel.data or 'email'
+
+        if form.password.data:
+            current_user.set_password(form.password.data)
+            flash('Password updated.', 'success')
+
+        db.session.commit()
+        flash('Profile updated.', 'success')
+        return redirect(url_for('main.profile'))
+
+    return render_template('profile.html', form=form)
+
+
 @main_bp.route('/dashboard')
 @login_required
 def dashboard():
@@ -476,6 +520,19 @@ def request_participation(test_id):
         )
         db.session.add(part)
         db.session.commit()
+
+        admin_users = User.query.filter_by(is_admin=True, is_active=True).all()
+        if admin_users:
+            subject = f"New participation request for {test.title}"
+            body = (
+                f"A new participation request was submitted by {current_user.username} for the test \"{test.title}\".\n"
+                f"Email: {current_user.email}\n"
+                f"Telegram: {current_user.tg_username or 'Not provided'}\n"
+                f"Review the request here: {request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}\n"
+            )
+            for admin_user in admin_users:
+                send_notification_message(admin_user, admin_user.notification_channel or 'email', subject, body)
+
         flash('Participation request submitted successfully. Admin will review shortly.', 'success')
         return redirect(url_for('main.dashboard'))
     

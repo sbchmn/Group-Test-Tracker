@@ -218,6 +218,15 @@ def populate_donor_shipping_choices(form):
     form.donor_shipping_reimbursed_by_id.choices = choices
 
 
+def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
+    if not value:
+        return ''
+    value = str(value)
+    if len(value) <= reveal_prefix + reveal_suffix:
+        return value
+    return f"{value[:reveal_prefix]}{'*' * (len(value) - reveal_prefix - reveal_suffix)}{value[-reveal_suffix:]}"
+
+
 @main_bp.route('/')
 def index():
     if current_user.is_authenticated:
@@ -863,10 +872,10 @@ def notification_config():
 
     if not form.is_submitted():
         configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
-        form.mailjet_api_key.data = configs.get('mailjet_api_key')
-        form.mailjet_secret_key.data = configs.get('mailjet_secret_key')
+        form.mailjet_api_key.data = mask_secret(configs.get('mailjet_api_key'))
+        form.mailjet_secret_key.data = mask_secret(configs.get('mailjet_secret_key'))
         form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
-        form.telegram_bot_token.data = configs.get('telegram_bot_token')
+        form.telegram_bot_token.data = mask_secret(configs.get('telegram_bot_token'))
         form.service_base_url.data = configs.get('service_base_url')
         form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
     log_contents = read_notification_log()

@@ -16,13 +16,16 @@ from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
     FloatField, DateField, SelectField, SubmitField, FieldList, FormField
 )
-from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo
+from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
 from functools import wraps
 
 from . import db
-from .models import User, GroupTest, Participation
+import os
+
+from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig
 from .export import generate_test_export
+from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template
 
 main_bp = Blueprint('main', __name__)
 
@@ -65,6 +68,12 @@ class GroupTestForm(FlaskForm):
     lab_name = StringField('Lab / Provider', validators=[Optional(), Length(max=200)])
     total_lab_cost = FloatField('Total Lab Cost ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
     shipping_cost = FloatField('Shipping to Lab ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
+    donor_shipping_cost = FloatField('Donor Shipping Cost ($)', validators=[Optional(), NumberRange(min=0)], default=0.0)
+    donor_shipping_reimbursement = SelectField('Donor Shipping Reimbursement', choices=[
+        ('credit', 'Credit to the donor'),
+        ('participant', 'Covered by selected participant')
+    ], default='credit', validators=[Optional()])
+    donor_shipping_reimbursed_by_id = SelectField('Who covers it?', coerce=int, validators=[Optional()], choices=[])
     refund_per_donor = FloatField('Refund per Donor ($)', validators=[Optional(), NumberRange(min=0)], default=20.0)
     
     order_number = StringField('Order Number', validators=[Optional()])
@@ -136,8 +145,43 @@ class UserForm(FlaskForm):
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
     is_admin = BooleanField('Administrator')
     is_active = BooleanField('Active', default=True)
+    receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
     password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
     submit = SubmitField('Save User')
+
+
+class NotificationTemplateForm(FlaskForm):
+    name = StringField('Template Name', validators=[DataRequired(), Length(max=120)])
+    description = TextAreaField('Description', validators=[Optional()])
+    email_subject = StringField('Email Subject', validators=[Optional(), Length(max=200)])
+    email_body = TextAreaField('Email Message (HTML)', validators=[Optional()])
+    telegram_body = TextAreaField('Telegram Message', validators=[Optional()])
+    hide_from_participant_notifications = BooleanField('Hide from "Notify Test Participants"')
+    is_default_password_reset = BooleanField('Default Password Reset Template')
+    is_active = BooleanField('Active', default=True)
+    submit = SubmitField('Save Template')
+
+
+class NotificationConfigForm(FlaskForm):
+    mailjet_api_key = StringField('Mailjet API Key', validators=[Optional()])
+    mailjet_secret_key = StringField('Mailjet Secret Key', validators=[Optional()])
+    mailjet_sender_email = StringField('Mailjet Sender Email', validators=[Optional(), Email()])
+    telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
+    service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
+    notification_debug_enabled = BooleanField('Enable debug-level notification logs')
+    submit = SubmitField('Save Configuration')
+
+
+class PasswordResetForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    submit = SubmitField('Send Reset')
+
+
+class NotifyParticipantsForm(FlaskForm):
+    template_id = SelectField('Notification Template', coerce=int, validators=[DataRequired()])
+    submit = SubmitField('Send Notifications')
 
 
 # ==================== DECORATORS ====================
@@ -153,6 +197,14 @@ def admin_required(f):
 
 
 # ==================== ROUTES ====================
+
+
+def populate_donor_shipping_choices(form):
+    users = User.query.order_by(User.username).all()
+    choices = [(0, 'Select a participant')]
+    choices.extend([(user.id, user.username) for user in users])
+    form.donor_shipping_reimbursed_by_id.choices = choices
+
 
 @main_bp.route('/')
 def index():
@@ -211,6 +263,26 @@ def logout():
     return redirect(url_for('main.index'))
 
 
+@main_bp.route('/password-reset', methods=['GET', 'POST'])
+def password_reset():
+    if current_user.is_authenticated:
+        return redirect(url_for('main.dashboard'))
+    form = PasswordResetForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user:
+            new_password = os.urandom(6).hex()
+            user.set_password(new_password)
+            user.notification_channel = form.notification_channel.data or user.notification_channel or 'email'
+            db.session.commit()
+            send_password_reset(user, new_password)
+            flash('A password reset message has been sent.', 'success')
+        else:
+            flash('No account matched that username.', 'warning')
+        return redirect(url_for('main.login'))
+    return render_template('password_reset.html', form=form)
+
+
 @main_bp.route('/dashboard')
 @login_required
 def dashboard():
@@ -248,7 +320,7 @@ def dashboard():
     return render_template('dashboard.html', tests=tests, current_user=current_user)
 
 
-@main_bp.route('/test/<int:test_id>')
+@main_bp.route('/test/<int:test_id>', methods=['GET', 'POST'])
 @login_required
 def test_detail(test_id):
     test = GroupTest.query.get_or_404(test_id)
@@ -256,6 +328,9 @@ def test_detail(test_id):
         abort(403)
     
     costs = test.calculate_costs()
+    reimbursed_by_user = None
+    if test.donor_shipping_reimbursement == 'participant' and test.donor_shipping_reimbursed_by_id:
+        reimbursed_by_user = User.query.get(test.donor_shipping_reimbursed_by_id)
     
     # Current user's participation (if any)
     my_part = Participation.query.filter_by(
@@ -269,6 +344,23 @@ def test_detail(test_id):
         parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
     else:
         parts = []
+
+    form = NotifyParticipantsForm()
+    templates = NotificationTemplate.query.filter_by(is_active=True, hide_from_participant_notifications=False).order_by(NotificationTemplate.name).all()
+    form.template_id.choices = [(template.id, template.name) for template in templates]
+
+    if current_user.is_admin and form.validate_on_submit():
+        template = NotificationTemplate.query.get_or_404(form.template_id.data)
+        sent = 0
+        for part in parts:
+            if part.user_id and part.user and part.approved and part.user.receive_group_test_notifications:
+                amount_owed = None
+                if part.user_id == current_user.id:
+                    amount_owed = costs.get('non_donor_pays' if not part.vial_donor else 'donor_pays', 0)
+                send_group_test_notification(test, part.user, template, amount_owed=amount_owed)
+                sent += 1
+        flash(f'Sent notifications to {sent} participant(s).', 'success')
+        return redirect(url_for('main.test_detail', test_id=test_id))
     
     return render_template(
         'group_test_detail.html',
@@ -276,7 +368,10 @@ def test_detail(test_id):
         costs=costs,
         participations=parts,
         my_part=my_part,
-        show_participant_list=show_participant_list
+        show_participant_list=show_participant_list,
+        reimbursed_by_user=reimbursed_by_user,
+        notify_form=form,
+        notification_templates=templates
     )
 
 
@@ -357,6 +452,7 @@ def request_participation(test_id):
 @admin_required
 def create_test():
     form = GroupTestForm()
+    populate_donor_shipping_choices(form)
     if form.validate_on_submit():
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -393,6 +489,9 @@ def create_test():
             lab_test_details=lab_items,
             total_lab_cost=form.total_lab_cost.data or 0.0,
             shipping_cost=form.shipping_cost.data or 0.0,
+            donor_shipping_cost=form.donor_shipping_cost.data or 0.0,
+            donor_shipping_reimbursement=form.donor_shipping_reimbursement.data or 'credit',
+            donor_shipping_reimbursed_by_id=form.donor_shipping_reimbursed_by_id.data or None,
             refund_per_donor=form.refund_per_donor.data or 20.0,
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
@@ -412,6 +511,11 @@ def create_test():
 def edit_test(test_id):
     test = GroupTest.query.get_or_404(test_id)
     form = GroupTestForm(obj=test)  # Pre-populate
+    populate_donor_shipping_choices(form)
+    if form.donor_shipping_reimbursed_by_id.data in (None, '') and test.donor_shipping_reimbursed_by_id:
+        form.donor_shipping_reimbursed_by_id.data = test.donor_shipping_reimbursed_by_id
+    elif form.donor_shipping_reimbursed_by_id.data is None:
+        form.donor_shipping_reimbursed_by_id.data = 0
     
     if form.validate_on_submit():
         form.populate_obj(test)
@@ -439,6 +543,9 @@ def edit_test(test_id):
         test.lab_name = form.lab_name.data or None
         test.lab_test_details = lab_items
         test.total_lab_cost = form.total_lab_cost.data or 0.0
+        test.donor_shipping_cost = form.donor_shipping_cost.data or 0.0
+        test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
+        test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
         db.session.commit()
@@ -587,6 +694,89 @@ def add_participant_to_test(test_id):
 
 # ==================== USER MANAGEMENT (Admin) ====================
 
+@main_bp.route('/admin/notification-templates', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def notification_templates():
+    form = NotificationTemplateForm()
+    if form.validate_on_submit():
+        template = NotificationTemplate(
+            name=form.name.data,
+            description=form.description.data,
+            email_subject=form.email_subject.data,
+            email_body=form.email_body.data,
+            telegram_body=form.telegram_body.data,
+            hide_from_participant_notifications=form.hide_from_participant_notifications.data,
+            is_default_password_reset=form.is_default_password_reset.data,
+            is_active=form.is_active.data,
+        )
+        db.session.add(template)
+        db.session.commit()
+        flash('Notification template created.', 'success')
+        return redirect(url_for('main.notification_templates'))
+    templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
+    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=None)
+
+
+@main_bp.route('/admin/notification-templates/<int:template_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_notification_template(template_id):
+    template = NotificationTemplate.query.get_or_404(template_id)
+    form = NotificationTemplateForm(obj=template)
+    form.submit.label.text = 'Save Changes'
+
+    if form.validate_on_submit():
+        template.name = form.name.data
+        template.description = form.description.data
+        template.email_subject = form.email_subject.data
+        template.email_body = form.email_body.data
+        template.telegram_body = form.telegram_body.data
+        template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
+        template.is_default_password_reset = form.is_default_password_reset.data
+        template.is_active = form.is_active.data
+        db.session.commit()
+        flash('Notification template updated.', 'success')
+        return redirect(url_for('main.notification_templates'))
+
+    templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
+    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=template)
+
+
+@main_bp.route('/admin/notification-config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def notification_config():
+    form = NotificationConfigForm()
+    if form.validate_on_submit():
+        for key, value in {
+            'mailjet_api_key': form.mailjet_api_key.data,
+            'mailjet_secret_key': form.mailjet_secret_key.data,
+            'mailjet_sender_email': form.mailjet_sender_email.data,
+            'telegram_bot_token': form.telegram_bot_token.data,
+            'service_base_url': form.service_base_url.data,
+            'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
+        }.items():
+            config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+            config.value = value or None
+            db.session.add(config)
+        db.session.commit()
+        append_notification_log('configuration: credentials updated')
+        flash('Notification configuration saved.', 'success')
+        return redirect(url_for('main.notification_config'))
+
+    if not form.is_submitted():
+        configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+        form.mailjet_api_key.data = configs.get('mailjet_api_key')
+        form.mailjet_secret_key.data = configs.get('mailjet_secret_key')
+        form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
+        form.telegram_bot_token.data = configs.get('telegram_bot_token')
+        form.service_base_url.data = configs.get('service_base_url')
+        form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
+    log_contents = read_notification_log()
+    return render_template('admin/notification_config.html', form=form, log_contents=log_contents)
+
+
 @main_bp.route('/admin/users')
 @login_required
 @admin_required
@@ -615,7 +805,9 @@ def create_user():
             email=form.email.data,
             tg_username=form.tg_username.data,
             is_admin=form.is_admin.data,
-            is_active=form.is_active.data
+            is_active=form.is_active.data,
+            receive_group_test_notifications=form.receive_group_test_notifications.data,
+            notification_channel=form.notification_channel.data or 'email'
         )
         if form.password.data:
             user.set_password(form.password.data)
@@ -658,6 +850,8 @@ def edit_user(user_id):
         user.tg_username = form.tg_username.data
         user.is_admin = form.is_admin.data
         user.is_active = form.is_active.data
+        user.receive_group_test_notifications = form.receive_group_test_notifications.data
+        user.notification_channel = form.notification_channel.data or 'email'
 
         if form.password.data:
             user.set_password(form.password.data)

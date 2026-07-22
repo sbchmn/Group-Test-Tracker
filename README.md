@@ -84,6 +84,20 @@ This is production-ready structure, well-commented, follows Flask best practices
 - Export to .xlsx matching original spreadsheet format (now implemented — see Export button on test pages).
 - Telegram bot integration for notifications (given TG usernames).
 
+## Notification Template Variables
+Notification templates support simple double-curly placeholders such as `{{ username }}`.
+
+The following variables are currently available when rendering notification templates:
+
+- `username`: the recipient's username.
+- `new_password`: the newly generated password for password-reset notifications.
+- `amount_owed`: the participant balance owed, formatted as a two-decimal string for group-test notifications.
+- `test_title`: the title of the related group test.
+- `test_link`: the web URL for the related group test.
+- `test_id`: the numeric ID of the related group test as a string.
+
+Use these names exactly in both the email and Telegram template bodies.
+
 ## Testing & Quality
 - All routes protected appropriately.
 - Unique participation per user+test.

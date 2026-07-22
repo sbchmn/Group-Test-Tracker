@@ -21,6 +21,8 @@ class User(UserMixin, db.Model):
     tg_username = db.Column(db.String(80), nullable=True, index=True)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    receive_group_test_notifications = db.Column(db.Boolean, default=True, nullable=False)
+    notification_channel = db.Column(db.String(20), default='email', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
@@ -42,6 +44,30 @@ class User(UserMixin, db.Model):
     
     def __repr__(self):
         return f'<User {self.username}>'
+
+
+class NotificationTemplate(db.Model):
+    __tablename__ = 'notification_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    description = db.Column(db.Text, nullable=True)
+    email_subject = db.Column(db.String(200), nullable=True)
+    email_body = db.Column(db.Text, nullable=True)
+    telegram_body = db.Column(db.Text, nullable=True)
+    hide_from_participant_notifications = db.Column(db.Boolean, default=False, nullable=False)
+    is_default_password_reset = db.Column(db.Boolean, default=False, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class NotificationConfig(db.Model):
+    __tablename__ = 'notification_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    value = db.Column(db.Text, nullable=True)
 
 
 class GroupTest(db.Model):
@@ -67,6 +93,9 @@ class GroupTest(db.Model):
     lab_test_details = db.Column(db.JSON, nullable=True)
     total_lab_cost = db.Column(db.Float, default=0.0, nullable=False)
     shipping_cost = db.Column(db.Float, default=0.0, nullable=False)  # Shipment to lab
+    donor_shipping_cost = db.Column(db.Float, default=0.0, nullable=False)  # Shipment from donor(s) to organizer
+    donor_shipping_reimbursement = db.Column(db.String(40), default='credit', nullable=False)  # credit or participant
+    donor_shipping_reimbursed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     
     # Admin tracking
     order_number = db.Column(db.String(100), nullable=True)
@@ -124,9 +153,10 @@ class GroupTest(db.Model):
         n_donors = self.num_donors
         n_non = self.num_non_donors
         
-        total_fixed = (self.total_lab_cost or 0.0) + (self.shipping_cost or 0.0)
+        total_fixed = (self.total_lab_cost or 0.0) + (self.shipping_cost or 0.0) + (self.donor_shipping_cost or 0.0)
         refund_per = self.refund_per_donor or 0.0
         total_refund_pool = refund_per * n_donors if n_donors > 0 else 0.0
+        donor_shipping_cost = self.donor_shipping_cost or 0.0
         
         if n_part == 0:
             return {
@@ -135,6 +165,7 @@ class GroupTest(db.Model):
                 'total_non_donors': 0,
                 'total_fixed_cost': round(total_fixed, 2),
                 'total_refund_pool': round(total_refund_pool, 2),
+                'donor_shipping_cost': round(self.donor_shipping_cost or 0.0, 2),
                 'base_per_person': 0.0,
                 'donor_pays': 0.0,
                 'non_donor_pays': 0.0,
@@ -155,6 +186,9 @@ class GroupTest(db.Model):
             uplift_per_non = total_refund_pool / n_non if n_non > 0 else 0.0
             non_donor_pays = round(base_share + uplift_per_non, 2)
             donor_pays = round(base_share - refund_per, 2)
+
+        if donor_shipping_cost > 0 and self.donor_shipping_reimbursement == 'credit' and n_donors > 0:
+            donor_pays = round(donor_pays - donor_shipping_cost / n_donors, 2)
         
         return {
             'total_participants': n_part,

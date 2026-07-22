@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Notification Configuration{% endblock %}
+
+{% block content %}
+<h3>Notification Configuration</h3>
+<p class="text-muted">Store the credentials needed for Mailjet and Telegram.</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.mailjet_api_key.label(class="form-label") }}
+                {{ form.mailjet_api_key(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.mailjet_secret_key.label(class="form-label") }}
+                {{ form.mailjet_secret_key(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.mailjet_sender_email.label(class="form-label") }}
+                {{ form.mailjet_sender_email(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.telegram_bot_token.label(class="form-label") }}
+                {{ form.telegram_bot_token(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.service_base_url.label(class="form-label") }}
+                {{ form.service_base_url(class="form-control", placeholder="https://your-domain.example") }}
+                <div class="form-text">Used to build fully qualified links like {{ '{{ test_link }}' }} in notification templates.</div>
+            </div>
+            <div class="form-check mb-3">
+                {{ form.notification_debug_enabled(class="form-check-input") }}
+                {{ form.notification_debug_enabled.label(class="form-check-label") }}
+            </div>
+            <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Back</a>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Notification Log</div>
+    <div class="card-body">
+        <pre class="mb-0 small" style="white-space: pre-wrap; word-break: break-word;">{{ log_contents or 'No notification activity yet.' }}</pre>
+    </div>
+</div>
+{% endblock %}

@@ -81,6 +81,11 @@ window.onload = function() {
             <div class="col-md-4">{{ form.refund_per_donor.label(class="form-label") }}{{ form.refund_per_donor(class="form-control", step="0.01") }}</div>
         </div>
         <div class="row mt-3">
+            <div class="col-md-4">{{ form.donor_shipping_cost.label(class="form-label") }}{{ form.donor_shipping_cost(class="form-control", step="0.01") }}</div>
+            <div class="col-md-4">{{ form.donor_shipping_reimbursement.label(class="form-label") }}{{ form.donor_shipping_reimbursement(class="form-select") }}</div>
+            <div class="col-md-4">{{ form.donor_shipping_reimbursed_by_id.label(class="form-label") }}{{ form.donor_shipping_reimbursed_by_id(class="form-select") }}</div>
+        </div>
+        <div class="row mt-3">
             <div class="col-md-4">{{ form.order_number.label(class="form-label") }}{{ form.order_number(class="form-control") }}</div>
             <div class="col-md-4">{{ form.quote_number.label(class="form-label") }}{{ form.quote_number(class="form-control") }}</div>
             <div class="col-md-4">{{ form.status.label(class="form-label") }}{{ form.status(class="form-select") }}</div>

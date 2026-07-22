@@ -3,6 +3,7 @@ import json
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -52,6 +53,40 @@ def _get_user_attr(user, attr, default=None):
     return default
 
 
+def _notification_log_path():
+    base_dir = os.path.join(current_app.root_path, os.pardir)
+    log_dir = os.path.join(base_dir, "instance")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "notification.log")
+
+
+def append_notification_log(message):
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {message}\n"
+    path = _notification_log_path()
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(line)
+
+    max_bytes = current_app.config.get("NOTIFICATION_LOG_MAX_BYTES", 200000)
+    if os.path.getsize(path) > max_bytes:
+        with open(path, "r", encoding="utf-8") as handle:
+            contents = handle.read()
+        if len(contents) > max_bytes:
+            keep = max_bytes // 2
+            trimmed = contents[-keep:] if keep > 0 else ""
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(trimmed)
+    return path
+
+
+def read_notification_log():
+    path = _notification_log_path()
+    if not os.path.exists(path):
+        return ""
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
 def render_notification_template(template_text, context):
     if not template_text:
         return ""
@@ -66,6 +101,7 @@ def send_notification_message(user, channel, subject, body):
 
 
 def send_mailjet_message(user, subject, body):
+    append_notification_log(f"mailjet: queued for {getattr(user, 'username', 'unknown')}")
     api_key = _get_config("mailjet_api_key")
     secret_key = _get_config("mailjet_secret_key")
     sender_email = _get_config("mailjet_sender_email")
@@ -104,12 +140,15 @@ def send_mailjet_message(user, subject, body):
     try:
         with urlopen(request, context=None) as response:
             response.read()
+        append_notification_log(f"mailjet: sent to {recipient_email}")
         return True
-    except (HTTPError, URLError, TimeoutError, ValueError):
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        append_notification_log(f"mailjet: failed for {recipient_email}: {exc}")
         return False
 
 
 def send_telegram_message(user, body):
+    append_notification_log(f"telegram: queued for {getattr(user, 'username', 'unknown')}")
     bot_token = _get_config("telegram_bot_token")
     chat_id = _get_user_attr(user, "tg_username", None) or None
     if not bot_token or not chat_id:
@@ -122,8 +161,10 @@ def send_telegram_message(user, body):
     try:
         with urlopen(request, context=None) as response:
             response.read()
+        append_notification_log(f"telegram: sent to {chat_id}")
         return True
-    except (HTTPError, URLError, TimeoutError, ValueError):
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        append_notification_log(f"telegram: failed for {chat_id}: {exc}")
         return False
 
 

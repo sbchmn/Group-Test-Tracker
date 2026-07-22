@@ -82,6 +82,8 @@ def create_app(config_overrides=None):
         app.config.update(config_overrides)
     
     # === Initialize Extensions ===
+    # Keep migration history intact when changing database schema: prefer adding a new
+    # Alembic revision on top of the existing chain rather than rewriting earlier ones.
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)

@@ -25,7 +25,7 @@ import os
 
 from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig
 from .export import generate_test_export
-from .notifications import send_password_reset, send_group_test_notification, render_notification_template
+from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template
 
 main_bp = Blueprint('main', __name__)
 
@@ -732,6 +732,7 @@ def notification_config():
             config.value = value or None
             db.session.add(config)
         db.session.commit()
+        append_notification_log('configuration: credentials updated')
         flash('Notification configuration saved.', 'success')
         return redirect(url_for('main.notification_config'))
 
@@ -741,7 +742,8 @@ def notification_config():
         form.mailjet_secret_key.data = configs.get('mailjet_secret_key')
         form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
         form.telegram_bot_token.data = configs.get('telegram_bot_token')
-    return render_template('admin/notification_config.html', form=form)
+    log_contents = read_notification_log()
+    return render_template('admin/notification_config.html', form=form, log_contents=log_contents)
 
 
 @main_bp.route('/admin/users')

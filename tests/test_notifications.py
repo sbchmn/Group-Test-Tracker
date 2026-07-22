@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from app import create_app, db
 from app.models import NotificationConfig, NotificationTemplate, User
-from app.notifications import render_notification_template, send_mailjet_message, send_telegram_message
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_telegram_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -58,6 +58,19 @@ class NotificationTests(unittest.TestCase):
             self.assertNotEqual(refreshed.password_hash, "")
             self.assertTrue(mock_send.called)
             self.assertEqual(mock_send.call_args.args[1], "email")
+
+    def test_notification_log_writes_and_prunes(self):
+        with self.app.app_context():
+            log_path = append_notification_log("initial entry")
+            self.assertTrue(Path(log_path).exists())
+            with open(log_path, "a", encoding="utf-8") as handle:
+                handle.write("x" * 300000)
+
+            append_notification_log("post-prune entry")
+            contents = read_notification_log()
+
+            self.assertIn("post-prune entry", contents)
+            self.assertLess(len(contents), 400000)
 
     def test_send_mailjet_message_posts_to_mailjet_api(self):
         with self.app.app_context():

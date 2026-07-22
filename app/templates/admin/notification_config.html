@@ -26,6 +26,10 @@
                 {{ form.telegram_bot_token.label(class="form-label") }}
                 {{ form.telegram_bot_token(class="form-control") }}
             </div>
+            <div class="form-check mb-3">
+                {{ form.notification_debug_enabled(class="form-check-input") }}
+                {{ form.notification_debug_enabled.label(class="form-check-label") }}
+            </div>
             <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
             <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Back</a>
         </form>

@@ -111,6 +111,16 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(refreshed.email_subject, "Updated subject")
             self.assertEqual(refreshed.email_body, "Updated body")
 
+    def test_debug_logging_toggle_persists_and_writes_debug_entries(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="notification_debug_enabled", value="true"))
+            db.session.commit()
+            append_notification_log("debug-only entry", debug=True)
+            contents = read_notification_log()
+
+        self.assertIn("debug-only entry", contents)
+
     def test_send_mailjet_message_posts_to_mailjet_api(self):
         with self.app.app_context():
             db.create_all()

@@ -60,7 +60,10 @@ def _notification_log_path():
     return os.path.join(log_dir, "notification.log")
 
 
-def append_notification_log(message):
+def append_notification_log(message, debug=False):
+    if debug and str(_get_config("notification_debug_enabled", "false")).lower() != "true":
+        return None
+
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {message}\n"
     path = _notification_log_path()

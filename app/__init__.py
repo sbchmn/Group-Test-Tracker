@@ -30,7 +30,14 @@ def create_app(config_overrides=None):
     
     # === Configuration ===
     # SECRET_KEY required for sessions, CSRF, Flask-Login
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-insecure-change-in-prod')
+    testing_mode = bool(config_overrides and config_overrides.get('TESTING'))
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        if testing_mode:
+            secret_key = 'test-secret-key'
+        else:
+            raise RuntimeError('SECRET_KEY environment variable is required for this application.')
+    app.config['SECRET_KEY'] = secret_key
     
     # Database URL handling - supports PostgreSQL, MySQL 8+, and SQLite
     database_url = os.environ.get('DATABASE_URL')

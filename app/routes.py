@@ -283,6 +283,19 @@ def password_reset():
     return render_template('password_reset.html', form=form)
 
 
+@main_bp.route('/admin/users/<int:user_id>/send-password-reset', methods=['POST'])
+@login_required
+@admin_required
+def send_password_reset_admin(user_id):
+    user = User.query.get_or_404(user_id)
+    new_password = os.urandom(6).hex()
+    user.set_password(new_password)
+    db.session.commit()
+    send_password_reset(user, new_password)
+    flash(f'A password reset message was sent to {user.username}.', 'success')
+    return redirect(url_for('main.manage_users'))
+
+
 @main_bp.route('/dashboard')
 @login_required
 def dashboard():
@@ -813,9 +826,9 @@ def create_user():
             user.set_password(form.password.data)
         else:
             import secrets
-            temp_pass = secrets.token_urlsafe(8)
+            temp_pass = secrets.token_urlsafe(12)
             user.set_password(temp_pass)
-            flash(f'Temporary password generated: {temp_pass}', 'warning')
+            flash('A temporary password was generated for the new user. Share it securely through a trusted channel.', 'warning')
 
         db.session.add(user)
         db.session.commit()

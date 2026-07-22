@@ -57,6 +57,10 @@
                     <td class="small text-muted">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>
                     <td class="text-end">
                         <a href="{{ url_for('main.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <form method="POST" action="{{ url_for('main.send_password_reset_admin', user_id=user.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-info">Send Password Reset</button>
+                        </form>
                         <form method="POST" action="{{ url_for('main.toggle_user_active', user_id=user.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-warning">

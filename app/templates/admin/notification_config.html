@@ -26,6 +26,11 @@
                 {{ form.telegram_bot_token.label(class="form-label") }}
                 {{ form.telegram_bot_token(class="form-control") }}
             </div>
+            <div class="mb-3">
+                {{ form.service_base_url.label(class="form-label") }}
+                {{ form.service_base_url(class="form-control", placeholder="https://your-domain.example") }}
+                <div class="form-text">Used to build fully qualified links like {{ '{{ test_link }}' }} in notification templates.</div>
+            </div>
             <div class="form-check mb-3">
                 {{ form.notification_debug_enabled(class="form-check-input") }}
                 {{ form.notification_debug_enabled.label(class="form-check-label") }}

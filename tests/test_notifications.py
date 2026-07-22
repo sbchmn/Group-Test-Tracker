@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from app import create_app, db
 from app.models import NotificationConfig, NotificationTemplate, User
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_telegram_message
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -148,6 +148,59 @@ class NotificationTests(unittest.TestCase):
         request = mock_urlopen.call_args.args[0]
         self.assertEqual(request.full_url, "https://api.mailjet.com/v3.1/send")
 
+    def test_send_mailjet_message_treats_error_messages_as_failure(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="mailer", email="mailer@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add_all([
+                NotificationConfig(key="mailjet_api_key", value="api-key"),
+                NotificationConfig(key="mailjet_secret_key", value="secret-key"),
+                NotificationConfig(key="mailjet_sender_email", value="sender@example.com"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"Messages":[{"Status":"error","Errors":[{"ErrorMessage":"invalid address"}]}]}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_mailjet_message(user, "Hello", "Body")
+
+        self.assertFalse(result)
+
+    def test_send_mailjet_message_debug_logs_full_response_when_enabled(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="mailer", email="mailer@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add_all([
+                NotificationConfig(key="mailjet_api_key", value="api-key"),
+                NotificationConfig(key="mailjet_secret_key", value="secret-key"),
+                NotificationConfig(key="mailjet_sender_email", value="sender@example.com"),
+                NotificationConfig(key="notification_debug_enabled", value="true"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"Messages":[{"Status":"error","Errors":[{"ErrorMessage":"invalid address"}]}]}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                send_mailjet_message(user, "Hello", "Body")
+
+        with self.app.app_context():
+            log_contents = read_notification_log()
+
+        self.assertIn("mailjet: response", log_contents)
+        self.assertIn("invalid address", log_contents)
+
     def test_send_telegram_message_posts_to_telegram_api(self):
         with self.app.app_context():
             db.create_all()
@@ -220,6 +273,27 @@ class NotificationTests(unittest.TestCase):
         self.assertIn('"chat_id": "@demo"', log_contents)
         self.assertIn("telegram: response", log_contents)
         self.assertIn("\"ok\": true", log_contents)
+
+    def test_send_notification_message_falls_back_to_email_when_telegram_requires_start(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="fallbacker", email="fallbacker@example.com", notification_channel="telegram")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add_all([
+                NotificationConfig(key="mailjet_api_key", value="api-key"),
+                NotificationConfig(key="mailjet_secret_key", value="secret-key"),
+                NotificationConfig(key="mailjet_sender_email", value="sender@example.com"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.send_telegram_message", return_value=False) as mock_telegram, \
+                 patch("app.notifications.send_mailjet_message", return_value=True) as mock_mailjet:
+                result = send_notification_message(user, "telegram", "Reset", "Body")
+
+        self.assertTrue(result)
+        mock_telegram.assert_called_once()
+        mock_mailjet.assert_called_once()
 
 
 if __name__ == "__main__":

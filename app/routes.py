@@ -16,7 +16,7 @@ from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
     FloatField, DateField, SelectField, SubmitField, FieldList, FormField
 )
-from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo
+from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
 from functools import wraps
 
@@ -168,6 +168,7 @@ class NotificationConfigForm(FlaskForm):
     mailjet_secret_key = StringField('Mailjet Secret Key', validators=[Optional()])
     mailjet_sender_email = StringField('Mailjet Sender Email', validators=[Optional(), Email()])
     telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
+    service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
     notification_debug_enabled = BooleanField('Enable debug-level notification logs')
     submit = SubmitField('Save Configuration')
 
@@ -753,6 +754,7 @@ def notification_config():
             'mailjet_secret_key': form.mailjet_secret_key.data,
             'mailjet_sender_email': form.mailjet_sender_email.data,
             'telegram_bot_token': form.telegram_bot_token.data,
+            'service_base_url': form.service_base_url.data,
             'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
         }.items():
             config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
@@ -769,6 +771,7 @@ def notification_config():
         form.mailjet_secret_key.data = configs.get('mailjet_secret_key')
         form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
         form.telegram_bot_token.data = configs.get('telegram_bot_token')
+        form.service_base_url.data = configs.get('service_base_url')
         form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
     log_contents = read_notification_log()
     return render_template('admin/notification_config.html', form=form, log_contents=log_contents)

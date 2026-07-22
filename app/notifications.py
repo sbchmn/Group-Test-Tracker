@@ -99,7 +99,14 @@ def render_notification_template(template_text, context):
 
 def send_notification_message(user, channel, subject, body):
     if channel == "telegram":
-        return send_telegram_message(user, body)
+        sent = send_telegram_message(user, body)
+        if sent:
+            return True
+
+        append_notification_log(
+            f"telegram: falling back to email for {getattr(user, 'username', 'unknown')}"
+        )
+        return send_mailjet_message(user, subject, body)
     return send_mailjet_message(user, subject, body)
 
 
@@ -139,10 +146,43 @@ def send_mailjet_message(user, subject, body):
         },
         method="POST",
     )
+    append_notification_log(
+        f"mailjet: request url=https://api.mailjet.com/v3.1/send method=POST headers={{'Content-Type': 'application/json'}} payload={json.dumps(payload, ensure_ascii=False)}",
+        debug=True,
+    )
 
     try:
         with urlopen(request, context=None) as response:
-            response.read()
+            response_body = response.read().decode("utf-8", errors="replace")
+
+        try:
+            parsed_response = json.loads(response_body) if response_body else {}
+        except ValueError:
+            parsed_response = {}
+
+        if isinstance(parsed_response, dict):
+            append_notification_log(
+                f"mailjet: response for {recipient_email}: {json.dumps(parsed_response, ensure_ascii=False)}",
+                debug=True,
+            )
+            messages = parsed_response.get("Messages")
+            if isinstance(messages, list):
+                failed_messages = [
+                    msg for msg in messages
+                    if isinstance(msg, dict) and msg.get("Status") == "error"
+                ]
+                if failed_messages:
+                    errors = []
+                    for msg in failed_messages:
+                        errors.extend(
+                            err.get("ErrorMessage") or str(err)
+                            for err in msg.get("Errors", [])
+                            if isinstance(err, dict)
+                        )
+                    detail = "; ".join(errors) if errors else "Mailjet returned per-message errors"
+                    append_notification_log(f"mailjet: failed for {recipient_email}: {detail}")
+                    return False
+
         append_notification_log(f"mailjet: sent to {recipient_email}")
         return True
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
@@ -227,11 +267,17 @@ def send_password_reset(user, new_password):
 
 
 def send_group_test_notification(test, user, template, amount_owed=None):
+    base_url = str(_get_config("service_base_url") or "").strip()
+    if not base_url:
+        base_url = current_app.config.get("SERVER_NAME") or "http://localhost"
+    if not base_url.startswith(("http://", "https://")):
+        base_url = f"https://{base_url}"
+
     context = {
         "username": user.username,
         "amount_owed": f"{amount_owed:.2f}" if amount_owed is not None else "",
         "test_title": test.title,
-        "test_link": f"{current_app.config.get('SERVER_NAME', 'http://localhost')}/test/{test.id}",
+        "test_link": f"{base_url}/test/{test.id}",
         "test_id": str(test.id),
     }
     email_subject = render_notification_template(template.email_subject or "", context)

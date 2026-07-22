@@ -100,6 +100,27 @@ def create_app(config_overrides=None):
     # === Register Blueprints ===
     from .routes import main_bp
     app.register_blueprint(main_bp)
+
+    # === Notification defaults ===
+    with app.app_context():
+        from .models import NotificationTemplate
+        try:
+            if not NotificationTemplate.query.filter_by(is_default_password_reset=True).first():
+                default_template = NotificationTemplate(
+                    name='Default Password Reset',
+                    description='Default password reset message',
+                    email_subject='Your password has been reset',
+                    email_body='<p>Hello {{ username }},</p><p>Your temporary password is: {{ new_password }}</p>',
+                    telegram_body='Hello {{ username }}, your temporary password is: {{ new_password }}',
+                    is_default_password_reset=True,
+                    is_active=True,
+                )
+                db.session.add(default_template)
+                db.session.commit()
+        except Exception:
+            # The table may not exist yet when the app boots in a fresh test/database context.
+            # The normal create_all() path will populate it afterward.
+            db.session.rollback()
     
     # === CLI Commands (for admin bootstrap on DO) ===
     from .models import User

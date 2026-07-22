@@ -35,6 +35,15 @@
                     {{ form.is_active(class="form-check-input") }}
                     {{ form.is_active.label(class="form-check-label") }}
                 </div>
+                <div class="col-md-4 mb-3 form-check mt-4">
+                    {{ form.receive_group_test_notifications(class="form-check-input") }}
+                    {{ form.receive_group_test_notifications.label(class="form-check-label") }}
+                </div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.notification_channel.label(class="form-label") }}
+                {{ form.notification_channel(class="form-select") }}
             </div>
 
             <div class="mb-3">

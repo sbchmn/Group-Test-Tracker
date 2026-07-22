@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Notification Configuration{% endblock %}
+
+{% block content %}
+<h3>Notification Configuration</h3>
+<p class="text-muted">Store the credentials needed for Mailjet and Telegram.</p>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.mailjet_api_key.label(class="form-label") }}
+                {{ form.mailjet_api_key(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.mailjet_secret_key.label(class="form-label") }}
+                {{ form.mailjet_secret_key(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.mailjet_sender_email.label(class="form-label") }}
+                {{ form.mailjet_sender_email(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.telegram_bot_token.label(class="form-label") }}
+                {{ form.telegram_bot_token(class="form-control") }}
+            </div>
+            <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Back</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -21,6 +21,8 @@ class User(UserMixin, db.Model):
     tg_username = db.Column(db.String(80), nullable=True, index=True)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    receive_group_test_notifications = db.Column(db.Boolean, default=True, nullable=False)
+    notification_channel = db.Column(db.String(20), default='email', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
@@ -42,6 +44,30 @@ class User(UserMixin, db.Model):
     
     def __repr__(self):
         return f'<User {self.username}>'
+
+
+class NotificationTemplate(db.Model):
+    __tablename__ = 'notification_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    description = db.Column(db.Text, nullable=True)
+    email_subject = db.Column(db.String(200), nullable=True)
+    email_body = db.Column(db.Text, nullable=True)
+    telegram_body = db.Column(db.Text, nullable=True)
+    hide_from_participant_notifications = db.Column(db.Boolean, default=False, nullable=False)
+    is_default_password_reset = db.Column(db.Boolean, default=False, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class NotificationConfig(db.Model):
+    __tablename__ = 'notification_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    value = db.Column(db.Text, nullable=True)
 
 
 class GroupTest(db.Model):

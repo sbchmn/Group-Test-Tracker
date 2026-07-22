@@ -9,6 +9,8 @@
     <a href="{{ url_for('main.create_user') }}" class="btn btn-success">
         <i class="bi bi-person-plus"></i> Add New User
     </a>
+    <a href="{{ url_for('main.notification_templates') }}" class="btn btn-outline-primary ms-2">Manage Templates</a>
+    <a href="{{ url_for('main.notification_config') }}" class="btn btn-outline-info ms-2">Notification Config</a>
     <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary ms-2">Back to Dashboard</a>
 </div>
 
@@ -22,6 +24,7 @@
                     <th>TG</th>
                     <th>Role</th>
                     <th>Status</th>
+                    <th>Notify</th>
                     <th>Created</th>
                     <th class="text-end">Actions</th>
                 </tr>
@@ -44,6 +47,13 @@
                             <span class="badge bg-success">Active</span>
                         {% else %}
                             <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.receive_group_test_notifications %}
+                            <span class="badge bg-info">{{ user.notification_channel|title }}</span>
+                        {% else %}
+                            <span class="badge bg-light text-muted">Off</span>
                         {% endif %}
                     </td>
                     <td class="small text-muted">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>

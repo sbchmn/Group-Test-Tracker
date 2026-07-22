@@ -271,6 +271,7 @@ def password_reset():
         if user:
             new_password = os.urandom(6).hex()
             user.set_password(new_password)
+            user.notification_channel = form.notification_channel.data or user.notification_channel or 'email'
             db.session.commit()
             send_password_reset(user, new_password)
             flash('A password reset message has been sent.', 'success')

@@ -1,11 +1,11 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app import create_app, db
-from app.models import NotificationTemplate, User
-from app.notifications import render_notification_template
+from app.models import NotificationConfig, NotificationTemplate, User
+from app.notifications import render_notification_template, send_mailjet_message, send_telegram_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -39,7 +39,7 @@ class NotificationTests(unittest.TestCase):
     def test_password_reset_route_uses_selected_channel_and_updates_password(self):
         with self.app.app_context():
             db.create_all()
-            user = User(username="resetter", email="resetter@example.com", notification_channel="email", receive_group_test_notifications=True)
+            user = User(username="resetter", email="resetter@example.com", notification_channel="telegram", receive_group_test_notifications=True)
             user.set_password("old-password")
             db.session.add(user)
             db.session.commit()
@@ -57,6 +57,58 @@ class NotificationTests(unittest.TestCase):
             self.assertIsNotNone(refreshed)
             self.assertNotEqual(refreshed.password_hash, "")
             self.assertTrue(mock_send.called)
+            self.assertEqual(mock_send.call_args.args[1], "email")
+
+    def test_send_mailjet_message_posts_to_mailjet_api(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="mailer", email="mailer@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add_all([
+                NotificationConfig(key="mailjet_api_key", value="api-key"),
+                NotificationConfig(key="mailjet_secret_key", value="secret-key"),
+                NotificationConfig(key="mailjet_sender_email", value="sender@example.com"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"message":"success"}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_mailjet_message(user, "Hello", "Body")
+
+        self.assertTrue(result)
+        mock_urlopen.assert_called_once()
+        request = mock_urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.mailjet.com/v3.1/send")
+
+    def test_send_telegram_message_posts_to_telegram_api(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="telegramer", email="telegramer@example.com", tg_username="@demo")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="bot-token"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_telegram_message(user, "Body")
+
+        self.assertTrue(result)
+        mock_urlopen.assert_called_once()
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn("https://api.telegram.org/botbot-token/sendMessage", request.full_url)
+        self.assertIn("chat_id=%40demo", request.full_url)
 
 
 if __name__ == "__main__":

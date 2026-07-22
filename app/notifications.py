@@ -1,6 +1,11 @@
+import base64
+import json
 import os
 import re
 from datetime import datetime
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 from flask import current_app
 
 from . import db
@@ -12,6 +17,39 @@ def _get_config(key, default=None):
     if item is None:
         return default
     return item.value
+
+
+def _get_user_attr(user, attr, default=None):
+    if user is None:
+        return default
+
+    try:
+        return getattr(user, attr, default)
+    except Exception:
+        pass
+
+    try:
+        return user.__dict__.get(attr, default)
+    except Exception:
+        pass
+
+    try:
+        user_id = user.id
+    except Exception:
+        user_id = None
+
+    if user_id is not None:
+        try:
+            fresh_user = db.session.get(User, int(user_id))
+        except Exception:
+            fresh_user = None
+        if fresh_user is not None:
+            try:
+                return getattr(fresh_user, attr, default)
+            except Exception:
+                pass
+
+    return default
 
 
 def render_notification_template(template_text, context):
@@ -34,20 +72,59 @@ def send_mailjet_message(user, subject, body):
     if not api_key or not secret_key or not sender_email:
         return False
 
-    # Placeholder implementation for the requested architecture.
-    # In production, this would call Mailjet's API.
-    return True
+    recipient_email = _get_user_attr(user, "email", None)
+    recipient_name = _get_user_attr(user, "username", None)
+    if not recipient_email:
+        return False
+
+    payload = {
+        "Messages": [
+            {
+                "From": {"Email": sender_email, "Name": "Group Test Tracker"},
+                "To": [{"Email": recipient_email, "Name": recipient_name or recipient_email}],
+                "Subject": subject,
+                "TextPart": body,
+                "HTMLPart": body,
+            }
+        ]
+    }
+
+    data = json.dumps(payload).encode("utf-8")
+    auth_string = base64.b64encode(f"{api_key}:{secret_key}".encode("utf-8")).decode("ascii")
+    request = Request(
+        "https://api.mailjet.com/v3.1/send",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {auth_string}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, context=None) as response:
+            response.read()
+        return True
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        return False
 
 
 def send_telegram_message(user, body):
     bot_token = _get_config("telegram_bot_token")
-    chat_id = user.tg_username if user.tg_username else None
+    chat_id = _get_user_attr(user, "tg_username", None) or None
     if not bot_token or not chat_id:
         return False
 
-    # Placeholder implementation for the requested architecture.
-    # In production, this would call Telegram Bot API.
-    return True
+    payload = urlencode({"chat_id": chat_id, "text": body})
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?{payload}"
+    request = Request(url, method="GET")
+
+    try:
+        with urlopen(request, context=None) as response:
+            response.read()
+        return True
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        return False
 
 
 def send_password_reset(user, new_password):

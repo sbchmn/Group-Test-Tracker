@@ -160,12 +160,18 @@ def send_telegram_message(user, body):
     if not chat_id.startswith("@") and not re.fullmatch(r"-?\d+", chat_id):
         chat_id = f"@{chat_id}"
 
-    payload = json.dumps({"chat_id": chat_id, "text": body}).encode("utf-8")
+    payload = {"chat_id": chat_id, "text": body}
+    payload_json = json.dumps(payload, ensure_ascii=False)
     safe_token = quote(bot_token, safe="")
     url = f"https://api.telegram.org/bot{safe_token}/sendMessage"
+    debug_url = "https://api.telegram.org/bot<redacted>/sendMessage"
+    append_notification_log(
+        f"telegram: request url={debug_url} method=POST headers={{'Content-Type': 'application/json'}} payload={payload_json}",
+        debug=True,
+    )
     request = Request(
         url,
-        data=payload,
+        data=payload_json.encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -178,6 +184,14 @@ def send_telegram_message(user, body):
             parsed_response = json.loads(response_body) if response_body else {}
         except ValueError:
             parsed_response = {}
+
+        if isinstance(parsed_response, dict):
+            append_notification_log(
+                f"telegram: response for {chat_id}: {json.dumps(parsed_response, ensure_ascii=False)}",
+                debug=True,
+            )
+        elif response_body:
+            append_notification_log(f"telegram: response for {chat_id}: {response_body}", debug=True)
 
         if isinstance(parsed_response, dict) and parsed_response.get("ok") is True:
             append_notification_log(f"telegram: sent to {chat_id}")
@@ -195,6 +209,7 @@ def send_telegram_message(user, body):
             except Exception:
                 error_body = str(exc)
         append_notification_log(f"telegram: failed for {chat_id}: {exc} | {error_body}")
+        append_notification_log(f"telegram: exception details for {chat_id}: {exc} | {error_body}", debug=True)
         return False
 
 

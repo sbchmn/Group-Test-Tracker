@@ -192,6 +192,35 @@ class NotificationTests(unittest.TestCase):
 
         self.assertFalse(result)
 
+    def test_send_telegram_message_debug_logs_request_and_response_details(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="telegramer", email="telegramer@example.com", tg_username="demo")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="notification_debug_enabled", value="true"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                send_telegram_message(user, "Body")
+
+        with self.app.app_context():
+            log_contents = read_notification_log()
+
+        self.assertIn("telegram: request", log_contents)
+        self.assertIn('"chat_id": "@demo"', log_contents)
+        self.assertIn("telegram: response", log_contents)
+        self.assertIn("\"ok\": true", log_contents)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -170,7 +170,27 @@ class NotificationTests(unittest.TestCase):
         mock_urlopen.assert_called_once()
         request = mock_urlopen.call_args.args[0]
         self.assertIn("https://api.telegram.org/bot123456%3AABC/sendMessage", request.full_url)
-        self.assertIn("chat_id=%40demo", request.full_url)
+        self.assertEqual(request.data, b'{"chat_id": "@demo", "text": "Body"}')
+
+    def test_send_telegram_message_treats_failed_bot_api_response_as_failure(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="telegramer", email="telegramer@example.com", tg_username="demo")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_telegram_message(user, "Body")
+
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

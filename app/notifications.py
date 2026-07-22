@@ -160,18 +160,41 @@ def send_telegram_message(user, body):
     if not chat_id.startswith("@") and not re.fullmatch(r"-?\d+", chat_id):
         chat_id = f"@{chat_id}"
 
-    payload = urlencode({"chat_id": chat_id, "text": body})
+    payload = json.dumps({"chat_id": chat_id, "text": body}).encode("utf-8")
     safe_token = quote(bot_token, safe="")
-    url = f"https://api.telegram.org/bot{safe_token}/sendMessage?{payload}"
-    request = Request(url, method="GET")
+    url = f"https://api.telegram.org/bot{safe_token}/sendMessage"
+    request = Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
 
     try:
         with urlopen(request, context=None) as response:
-            response.read()
-        append_notification_log(f"telegram: sent to {chat_id}")
-        return True
+            response_body = response.read().decode("utf-8", errors="replace")
+
+        try:
+            parsed_response = json.loads(response_body) if response_body else {}
+        except ValueError:
+            parsed_response = {}
+
+        if isinstance(parsed_response, dict) and parsed_response.get("ok") is True:
+            append_notification_log(f"telegram: sent to {chat_id}")
+            return True
+
+        description = parsed_response.get("description") if isinstance(parsed_response, dict) else None
+        detail = description or response_body or "empty response"
+        append_notification_log(f"telegram: failed for {chat_id}: {detail}")
+        return False
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-        append_notification_log(f"telegram: failed for {chat_id}: {exc}")
+        error_body = ""
+        if isinstance(exc, HTTPError):
+            try:
+                error_body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                error_body = str(exc)
+        append_notification_log(f"telegram: failed for {chat_id}: {exc} | {error_body}")
         return False
 
 

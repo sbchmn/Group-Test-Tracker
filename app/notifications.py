@@ -149,13 +149,17 @@ def send_mailjet_message(user, subject, body):
 
 def send_telegram_message(user, body):
     append_notification_log(f"telegram: queued for {getattr(user, 'username', 'unknown')}")
-    bot_token = _get_config("telegram_bot_token")
-    chat_id = _get_user_attr(user, "tg_username", None) or None
+    bot_token = str(_get_config("telegram_bot_token") or "").strip()
+    chat_id = str(_get_user_attr(user, "tg_username", None) or "").strip()
     if not bot_token or not chat_id:
         return False
 
+    if not chat_id.startswith("@") and not re.fullmatch(r"-?\d+", chat_id):
+        chat_id = f"@{chat_id}"
+
     payload = urlencode({"chat_id": chat_id, "text": body})
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?{payload}"
+    safe_token = quote(bot_token, safe="")
+    url = f"https://api.telegram.org/bot{safe_token}/sendMessage?{payload}"
     request = Request(url, method="GET")
 
     try:

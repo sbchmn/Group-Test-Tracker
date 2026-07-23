@@ -1,110 +1,118 @@
-# Group Test Manager - Web Tool for DigitalOcean
+# Group Test Manager
 
-A full-stack Flask web application to replace manual spreadsheets for managing group lab tests (e.g., mass spectrometry, purity, endotoxin, sterility for research compounds/peptides). 
+Group Test Manager is a Flask-based web app for coordinating group lab tests, participant requests, cost sharing, and notification-driven follow-up without relying on spreadsheets.
 
-## Features Implemented (MVP in Scope)
-- **Admin Login & Management**: Secure admin creates/edits group tests with all key parameters from the original spreadsheet (vendor, batch, compound, lab test details as dynamic list, costs, shipping, status).
-- **User Registration/Login**: Users register with username, email, password, optional TG username. Uses secure password hashing.
-- **Dashboard Logic**:
-  - After login, users see:
-    - Recruiting/open tests: Can request participation (form with name, TG, US-based, state, vial donor flag, notes).
-    - Testing/Closed tests: Only visible if user is an *approved* participant.
-  - Admin sees all tests + management links.
-- **Participation Workflow**: Request -> Admin approves/denies (updates Participation record with approved flag, can edit payment/vial/order fields).
-- **Cost Calculations**: Admin sets `total_lab_cost`, `shipping_cost`, `refund_per_donor`. Dashboard and test detail show computed summary:
-  - # Approved participants, # Donors, # Non-donors.
-  - Net costs, base per person, donor vs non-donor effective cost (refunds funded by slight uplift to non-donors for fairness). Clear formulas in UI and code comments.
-- **Results Link**: When admin sets status=closed and provides results_link (e.g. Google Drive, hosted PDF, or DO Spaces URL), it appears only to approved members on their dashboard/test view.
-- **Export / Backup to Excel**: One-click export generates .xlsx formatted like your original "MassPurity & Endo" spreadsheet, including all participant data, costs, and Calculations section with live Excel formulas. Includes results link when closed. Accessible to admins + approved members on closed tests.
-- **Tracking Fields**: Per-participant: vial_donor, us_based, state, order_status, pay_lab/paid_lab, amount_paid/owed, notes. Matches original sheet columns.
-- **Responsive UI**: Bootstrap 5, clean dashboard with status badges, cards for tests, tables for participants (admin can inline edit key fields via forms or future AJAX).
-- **Security**: Flask-Login sessions, @login_required, admin checks, CSRF via Flask-WTF (forms), password hash, unique constraints.
+## Application map
 
-## Tech Stack (Researched for DO)
-- **Backend**: Python 3.12+, Flask 3.x, Flask-SQLAlchemy, Flask-Login, Flask-WTF.
-- **DB**: PostgreSQL (recommended) or MySQL 8+ via `pymysql`. Both work with `DATABASE_URL`. SQLite fallback for local dev. DO Managed MySQL or Postgres both supported.
-- **Frontend**: Jinja2 templates + Bootstrap 5 (CDN) + minimal vanilla JS for dynamic lab test rows in admin form.
-- **Deploy**: Gunicorn. Designed for DigitalOcean App Platform (easiest) or Droplet + Nginx.
+The app is organized around a single Flask app factory and a small set of domain modules:
 
-This is production-ready structure, well-commented, follows Flask best practices, extensible (e.g. add payments Stripe later, notifications, file uploads for COAs via DO Spaces).
+- App factory and configuration: [app/__init__.py](app/__init__.py)
+  - Creates the Flask app, loads environment settings, wires SQLAlchemy/Flask-Login/CSRF, registers the main blueprint, and exposes CLI commands such as `create-admin` and `init-db`.
+- Data model: [app/models.py](app/models.py)
+  - Defines users, group tests, participations, notification templates, and notification configuration.
+- Route layer and business logic: [app/routes.py](app/routes.py)
+  - Handles authentication, registration, password reset, profile editing, dashboard routing, group-test CRUD, participant requests/approvals, exports, and admin management screens.
+- Notification layer: [app/notifications.py](app/notifications.py)
+  - Sends Mailjet email and Telegram messages, renders template variables, appends notification logs, and handles fallback behavior.
+- Templates and UI: [app/templates](app/templates)
+  - Contains the Bootstrap-based interface for public pages, dashboard, test detail, and admin workflows.
+- Database migrations: [migrations/versions](migrations/versions)
+  - Tracks schema changes for the app over time.
 
-## Local Development Setup
-1. `cd group_test_tool`
-2. `python3 -m venv venv && source venv/bin/activate`
-3. `pip install -r requirements.txt`
-4. `cp .env.example .env` (edit SECRET_KEY, optional DATABASE_URL=sqlite:///dev.db)
-5. `flask --app app run` or `python run.py`
-6. Register first user, then use Flask shell or provided CLI to promote to admin:
+## Feature inventory
+
+### Public and authenticated user flows
+- User registration with username, email, password, and optional Telegram username.
+- Login and logout with Flask-Login session protection.
+- Password reset flow that can send a reset message through email or Telegram.
+- Self-service profile editing for the signed-in user, including username, email, Telegram username, notification settings, and password.
+- Dashboard that shows recruiting tests to all users and testing/closed tests only to approved participants.
+
+### Group-test workflow
+- Admin can create and edit group tests with fields such as title, description, start date, vendor, batch number, compound, size, lab/provider, cost inputs, shipping, donor-reimbursement policy, and results link.
+- Users can request to join recruiting tests.
+- Admins can approve, remove, or manually add participants.
+- Each participant record tracks fields such as name, Telegram username, approval status, verified/active flags, order/payment state, donor status, state, and notes.
+- Cost calculations are computed from the group test inputs and displayed in the UI for both admins and approved participants.
+
+### Admin capabilities
+- Manage users, create/edit accounts, toggle active status, and trigger password resets.
+- Manage notification templates and notification configuration.
+- Send participant notifications for a test using a selected template.
+- Export test data to Excel-compatible output for backup or reporting.
+- View and manage participant approvals and status updates.
+
+### Notifications and templating
+- Supports Mailjet email delivery and Telegram delivery.
+- Uses a configurable service base URL to build fully qualified links into notifications.
+- Supports editable notification templates for:
+  - default password reset emails
+  - default registration welcome emails
+  - participant notification emails/Telegram messages
+- Debug logging can be enabled for notification request/response details.
+- Existing notification config values are displayed partially masked in the admin form for safety.
+
+### Security and data handling
+- Password hashing uses Werkzeug’s strong password hashing.
+- Login and admin routes are protected by Flask-Login and route decorators.
+- CSRF protection is enabled for forms.
+- Unique constraints and access rules help prevent duplicate participation entries and unauthorized access.
+
+## Environment and deployment notes
+
+The app expects these runtime settings:
+
+- `SECRET_KEY`: required in production and non-test environments.
+- `DATABASE_URL`: optional; if absent the app falls back to a local SQLite file for development.
+- `FLASK_ENV`: optional; useful for local development and deployment hints.
+- `NOTIFICATION_LOG_MAX_BYTES`: optional; controls notification log size trimming.
+
+Recommended deployment target: DigitalOcean App Platform or a similar container or VM-based deployment with Gunicorn and a managed PostgreSQL or MySQL database.
+
+## Local development
+
+1. Create and activate a Python virtual environment.
+2. Install dependencies from `requirements.txt`.
+3. Create a local `.env` file and set at least `SECRET_KEY`.
+4. Run the app with `python run.py` or `flask --app app run`.
+5. Initialize the database and apply migrations if needed:
    ```bash
-   flask shell
-   >>> from app.models import User, db
-   >>> u = User.query.filter_by(username='yourname').first()
-   >>> u.is_admin = True
-   >>> db.session.commit()
-   ```
-   Or run: `flask create-admin --username admin --email admin@example.com --password changeme` (CLI registered in app).
-
-7. Initialize and apply database migrations:
-   ```bash
-   flask --app app db init
-   flask --app app db migrate -m "Initial schema"
    flask --app app db upgrade head
    ```
-8. Login as admin, create first GroupTest, etc.
+6. Create the first admin user with the CLI helper:
+   ```bash
+   flask --app app create-admin --username admin --email admin@example.com --password changeme
+   ```
 
-## DigitalOcean Deployment (Recommended: App Platform)
-1. Push this folder to a GitHub/GitLab repo (or use DO "Create App" from repo).
-2. In DO Console > Apps > Create App:
-   - Connect repo.
-   - Environment: Python.
-   - Build Command: `pip install -r requirements.txt`
-   - Run Command: `gunicorn --bind 0.0.0.0:$PORT "app:create_app()"`   (or use Procfile)
-   - Add **Component** > Database > PostgreSQL (dev or prod plan). This sets `DATABASE_URL` env var automatically.
-   - Add Environment Variables:
-     - `SECRET_KEY` = (generate strong random, e.g. `openssl rand -hex 32`)
-     - `FLASK_ENV` = production (optional)
-   - Optional: Add custom domain, auto-deploy on git push.
-3. After deploy, use **Console** tab or `doctl apps exec` to run the `flask create-admin` or shell to set your admin user (register via the live app first, then promote).
-4. Scale as needed. Backups via DO Postgres.
+## Testing
 
-**Security Notes**: Never commit .env or real SECRET_KEY. Use DO App secrets. For results files, host PDFs publicly or use signed DO Spaces URLs + auth check in future enhancement.
+Run the regression suite with:
 
-## Key Files
-- `app/__init__.py`: App factory, config, extensions init, CLI commands.
-- `app/models.py`: SQLAlchemy models with relationships, properties for counts/costs, password methods.
-- `app/routes.py`: All routes + forms handling + cost calc logic (well tested formulas).
-- `app/templates/`: base.html, dashboard.html (role-aware), group_test_detail.html, admin forms, login/register.
-- `requirements.txt`, `run.py`, `.env.example`, `Procfile` (for some deploys).
+```bash
+python -m pytest
+```
 
-## Future Enhancements (Out of Current Scope but Easy to Add)
-- AJAX for participant status updates without page reload.
-- Email notifications on approve/results (Flask-Mail).
-- File upload for lab reports (Flask-Uploads or DO Spaces boto3).
-- Advanced cost overrides per participant.
-- Export to .xlsx matching original spreadsheet format (now implemented — see Export button on test pages).
-- Telegram bot integration for notifications (given TG usernames).
+## Notification template variables
 
-## Notification Template Variables
-Notification templates support simple double-curly placeholders such as `{{ username }}`.
+Template variables are rendered with double-curly placeholders such as `{{ username }}`.
 
-The following variables are currently available when rendering notification templates:
+The following variables are currently available:
 
-- `username`: the recipient's username.
-- `new_password`: the newly generated password for password-reset notifications.
+- `username`: the recipient’s username.
+- `new_password`: the newly generated password used in password-reset notifications.
 - `amount_owed`: the participant balance owed, formatted as a two-decimal string for group-test notifications.
 - `test_title`: the title of the related group test.
-- `test_link`: the web URL for the related group test.
+- `test_link`: the fully qualified web URL for the related group test.
 - `test_id`: the numeric ID of the related group test as a string.
+- `login_url`: the fully qualified login URL used in registration welcome emails.
 
-Use these names exactly in both the email and Telegram template bodies.
+Use these names exactly in both email and Telegram templates.
 
-## Testing & Quality
-- All routes protected appropriately.
-- Unique participation per user+test.
-- Status-driven visibility rigorously enforced in queries.
-- Cost math: See `calculate_costs()` in routes.py - manually verified edge cases (0 donors, 1 participant, etc.).
-- No verbose magic; explicit, commented, maintainable.
+## Key project files
 
-Built to spec, on time, ready for production use on DigitalOcean. Replace your spreadsheet today! 
-
-If you need expansions (e.g. payment gateway, multi-admin, advanced analytics), provide feedback.
+- [app/__init__.py](app/__init__.py): app factory, configuration, CLI registration, and extension initialization.
+- [app/models.py](app/models.py): SQLAlchemy models and relationships.
+- [app/routes.py](app/routes.py): route handlers, forms, feature logic, and permissions.
+- [app/notifications.py](app/notifications.py): notification rendering, delivery, and logging.
+- [app/templates](app/templates): UI templates for public, authenticated, and admin experiences.
+- [migrations/versions](migrations/versions): migration history.

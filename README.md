@@ -44,6 +44,7 @@ The app is organized around a single Flask app factory and a small set of domain
 
 ### Notifications and templating
 - Supports Mailjet email delivery and Telegram delivery.
+- Telegram notification support is still a work in progress and may require additional validation or refinement depending on the deployment environment.
 - Uses a configurable service base URL to build fully qualified links into notifications.
 - Supports editable notification templates for:
   - default password reset emails

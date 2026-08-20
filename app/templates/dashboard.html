@@ -2,9 +2,22 @@
 
 {% block title %}Dashboard{% endblock %}
 
+{% block extra_head %}
+<style>
+    .dashboard-controls .form-select,
+    .dashboard-controls .form-check-input,
+    .dashboard-controls .btn { min-height: 38px; }
+    .test-card-hidden { opacity: 0.55; }
+    .tag-pill { font-size: 0.78rem; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
+    <div>
+        <h2 class="mb-1"><i class="bi bi-speedometer2"></i> Dashboard</h2>
+        <p class="text-muted mb-0">Sort, group, and hide tests from your own dashboard view.</p>
+    </div>
     {% if current_user.is_admin %}
         <a href="{{ url_for('main.create_test') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg"></i> Create New Group Test
@@ -12,70 +25,128 @@
     {% endif %}
 </div>
 
-{% if not tests %}
+<form method="GET" class="card mb-4 dashboard-controls">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Group by</label>
+                <select name="group_by" class="form-select">
+                    <option value="status" {% if group_by == 'status' %}selected{% endif %}>Status</option>
+                    <option value="title" {% if group_by == 'title' %}selected{% endif %}>Name</option>
+                    <option value="tags" {% if group_by == 'tags' %}selected{% endif %}>Tags</option>
+                    <option value="none" {% if group_by == 'none' %}selected{% endif %}>No grouping</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Sort by</label>
+                <select name="sort_by" class="form-select">
+                    <option value="updated_at" {% if sort_by == 'updated_at' %}selected{% endif %}>Newest</option>
+                    <option value="title" {% if sort_by == 'title' %}selected{% endif %}>Name</option>
+                    <option value="tags" {% if sort_by == 'tags' %}selected{% endif %}>Tags</option>
+                    <option value="status" {% if sort_by == 'status' %}selected{% endif %}>Status</option>
+                </select>
+            </div>
+            <div class="col-md-3 form-check mt-4 pt-2">
+                <input class="form-check-input" type="checkbox" value="1" id="showHidden" name="show_hidden" {% if show_hidden %}checked{% endif %}>
+                <label class="form-check-label" for="showHidden">Show hidden tests</label>
+            </div>
+            <div class="col-md-3 text-md-end">
+                <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if not grouped_tests %}
     <div class="alert alert-info">
         No group tests available yet{% if current_user.is_admin %}. Create one above.{% else %}. Check back soon for recruiting tests.{% endif %}
     </div>
 {% endif %}
 
-<div class="row">
-    {% for test in tests %}
-        {% set visible = test.can_user_see(current_user) %}
-        {% if visible or current_user.is_admin %}
-        <div class="col-lg-6 col-xl-4 mb-4">
-            <div class="card h-100 {% if current_user.is_admin %}admin-only{% endif %}">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span class="fw-bold">{{ test.title }}</span>
-                    {% if test.status == 'recruiting' %}
-                        <span class="badge bg-success status-badge">Recruiting</span>
-                    {% elif test.status == 'testing' %}
-                        <span class="badge bg-warning text-dark status-badge">Testing</span>
-                    {% else %}
-                        <span class="badge bg-secondary status-badge">Closed</span>
-                    {% endif %}
-                </div>
-                <div class="card-body">
-                    <p class="text-muted small mb-2">
-                        {{ test.compound or 'Compound' }} • {{ test.vendor or 'Vendor TBD' }} • Started {{ test.start_date or 'N/A' }}
-                    </p>
-                    {% if test.description %}
-                        <p class="small">{{ test.description[:120] }}{% if test.description|length > 120 %}...{% endif %}</p>
-                    {% endif %}
-                    
-                    <div class="small text-muted">
-                        <strong>Approved:</strong> {{ test.num_approved }} participants 
-                        ({{ test.num_donors }} donors)
-                    </div>
-
-                    {% if test.my_participation %}
-                    <div class="mt-1 small">
-                        <strong>Your status:</strong> 
-                        {% if test.my_participation.vial_donor %}
-                            <span class="badge bg-info">Donor</span>
-                        {% else %}
-                            <span class="badge bg-secondary">Non-Donor</span>
-                        {% endif %}
-                        <span class="badge bg-success ms-1">Approved</span>
-                    </div>
-                    {% endif %}
-                    
-                    {% if current_user.is_admin %}
-                        <div class="mt-2 small">
-                            <a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-                            <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-sm btn-outline-primary">Manage Participants</a>
+{% for group in grouped_tests %}
+    <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0">{{ group.label }}</h5>
+            <span class="text-muted small">{{ group.tests|length }} test{% if group.tests|length != 1 %}s{% endif %}</span>
+        </div>
+        <div class="row">
+            {% for test in group.tests %}
+            <div class="col-lg-6 col-xl-4 mb-4">
+                <div class="card h-100 {% if current_user.is_admin %}admin-only{% endif %} {% if test.hidden_from_dashboard %}test-card-hidden{% endif %}">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">{{ test.title }}</span>
+                        <div class="d-flex gap-2 align-items-center">
+                            {% if test.hidden_from_dashboard %}
+                                <span class="badge bg-dark status-badge">Hidden</span>
+                            {% endif %}
+                            {% if test.status == 'recruiting' %}
+                                <span class="badge bg-success status-badge">Recruiting</span>
+                            {% elif test.status == 'testing' %}
+                                <span class="badge bg-warning text-dark status-badge">Testing</span>
+                            {% else %}
+                                <span class="badge bg-secondary status-badge">Closed</span>
+                            {% endif %}
                         </div>
-                    {% endif %}
-                </div>
-                <div class="card-footer bg-white">
-                    <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-sm btn-primary stretched-link w-100">
-                        View Details {% if test.status == 'recruiting' and not current_user.is_admin %}&amp; Request Join{% endif %}
-                    </a>
+                    </div>
+                    <div class="card-body">
+                        {% if test.tag_names() %}
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                {% for tag in test.tags %}
+                                    <span class="badge rounded-pill text-bg-light border text-dark tag-pill">{{ tag.name }}</span>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <p class="text-muted small mb-2">
+                            {{ test.compound or 'Compound' }} • {{ test.vendor or 'Vendor TBD' }} • Started {{ test.start_date or 'N/A' }}
+                        </p>
+                        {% if test.description %}
+                            <p class="small">{{ test.description[:120] }}{% if test.description|length > 120 %}...{% endif %}</p>
+                        {% endif %}
+
+                        <div class="small text-muted">
+                            <strong>Approved:</strong> {{ test.num_approved }} participants
+                            ({{ test.num_donors }} donors)
+                        </div>
+
+                        {% if test.my_participation %}
+                        <div class="mt-1 small">
+                            <strong>Your status:</strong>
+                            {% if test.my_participation.vial_donor %}
+                                <span class="badge bg-info">Donor</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Non-Donor</span>
+                            {% endif %}
+                            <span class="badge bg-success ms-1">Approved</span>
+                        </div>
+                        {% endif %}
+
+                        {% if current_user.is_admin %}
+                            <div class="mt-2 small d-flex flex-wrap gap-2">
+                                <a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                                <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-sm btn-outline-primary">Manage Participants</a>
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-footer bg-white d-flex gap-2">
+                        <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-sm btn-primary flex-grow-1">
+                            View Details {% if test.status == 'recruiting' and not current_user.is_admin %}&amp; Request Join{% endif %}
+                        </a>
+                        <form method="POST" action="{{ url_for('main.toggle_dashboard_hidden', test_id=test.id) }}" class="m-0">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="group_by" value="{{ group_by }}">
+                            <input type="hidden" name="sort_by" value="{{ sort_by }}">
+                            <input type="hidden" name="show_hidden" value="{{ '1' if show_hidden else '0' }}">
+                            <button type="submit" class="btn btn-sm {% if test.hidden_from_dashboard %}btn-outline-success{% else %}btn-outline-dark{% endif %}">
+                                {% if test.hidden_from_dashboard %}Unhide{% else %}Hide{% endif %}
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
+            {% endfor %}
         </div>
-        {% endif %}
-    {% endfor %}
-</div>
+    </div>
+{% endfor %}
 
 {% if current_user.is_admin %}
 <div class="mt-4 p-3 bg-light rounded">

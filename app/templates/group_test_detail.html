@@ -17,6 +17,13 @@
             {{ test.status.title() }}
         </span>
         {% if test.start_date %}<span class="text-muted ms-2">Started {{ test.start_date }}</span>{% endif %}
+        {% if test.tag_names() %}
+            <div class="mt-2 d-flex flex-wrap gap-1">
+                {% for tag in test.tags %}
+                    <span class="badge rounded-pill text-bg-light border text-dark">{{ tag.name }}</span>
+                {% endfor %}
+            </div>
+        {% endif %}
     </div>
     
     {% if current_user.is_admin %}
@@ -170,6 +177,9 @@
                 <h6><i class="bi bi-link-45deg"></i> Test Results Available</h6>
                 <a href="{{ test.results_link }}" target="_blank" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
                 <small class="d-block mt-1 text-muted">This link is only visible to approved participants.</small>
+                {% if test.results_posted_at %}
+                    <small class="d-block text-muted">Posted {{ test.results_posted_at }}</small>
+                {% endif %}
             </div>
         {% elif test.status == 'closed' and current_user.is_admin %}
             <div class="alert alert-warning">

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}My Results{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h3 class="mb-1">My Results</h3>
+        <p class="text-muted mb-0">Results from your approved tests plus admin-posted public results.</p>
+    </div>
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">Back to Dashboard</a>
+</div>
+
+<form method="GET" class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Search</label>
+                <input type="search" name="q" class="form-control" value="{{ query }}" placeholder="Search results, summaries, tags, or links">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Sort by</label>
+                <select name="sort_by" class="form-select">
+                    <option value="posted_at" {% if sort_by == 'posted_at' %}selected{% endif %}>Posted date/time</option>
+                    <option value="title" {% if sort_by == 'title' %}selected{% endif %}>Title</option>
+                    <option value="tags" {% if sort_by == 'tags' %}selected{% endif %}>Tags</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Direction</label>
+                <select name="sort_dir" class="form-select">
+                    <option value="desc" {% if sort_dir == 'desc' %}selected{% endif %}>Desc</option>
+                    <option value="asc" {% if sort_dir == 'asc' %}selected{% endif %}>Asc</option>
+                </select>
+            </div>
+            <div class="col-md-2 text-md-end">
+                <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Results</span>
+        <span class="text-muted small">{{ results|length }} item{% if results|length != 1 %}s{% endif %}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if results %}
+            <div class="list-group list-group-flush">
+                {% for result in results %}
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between gap-3">
+                            <div class="flex-grow-1">
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+                                    <strong>{{ result.title }}</strong>
+                                    <span class="badge bg-light text-dark border">{{ result.source_label }}</span>
+                                    {% for tag in result.tags %}
+                                        <span class="badge rounded-pill text-bg-light border text-dark">{{ tag }}</span>
+                                    {% endfor %}
+                                </div>
+                                <div class="small text-muted mb-1">Posted {{ result.posted_at }}</div>
+                                {% if result.summary %}
+                                    <div class="small mb-2">{{ result.summary }}</div>
+                                {% endif %}
+                                <a href="{{ result.results_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Open Results</a>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="p-4 text-muted">No results matched your search.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

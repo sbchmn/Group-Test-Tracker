@@ -33,6 +33,7 @@
 - Added admin group-test delete support from the edit page.
 - Fixed participant notification rendering to use each participant's own amount owed.
 - Expanded dashboard grouping to include compound and made filter panels collapsible on dashboard and My Results pages.
+- Filter panels on dashboard and My Results now default collapsed to avoid reopening automatically for users.
 
 ## Risks and Assumptions
 - Tags should be normalized to a shared tag table so they work across group tests and public results.

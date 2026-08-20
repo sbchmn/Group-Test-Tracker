@@ -9,9 +9,9 @@ The app is organized around a single Flask app factory and a small set of domain
 - App factory and configuration: [app/__init__.py](app/__init__.py)
   - Creates the Flask app, loads environment settings, wires SQLAlchemy/Flask-Login/CSRF, registers the main blueprint, and exposes CLI commands such as `create-admin` and `init-db`.
 - Data model: [app/models.py](app/models.py)
-  - Defines users, group tests, participations, notification templates, and notification configuration.
+  - Defines users, group tests, participations, reusable tags, public results, notification templates, and notification configuration.
 - Route layer and business logic: [app/routes.py](app/routes.py)
-  - Handles authentication, registration, password reset, profile editing, dashboard routing, group-test CRUD, participant requests/approvals, exports, and admin management screens.
+  - Handles authentication, registration, password reset, profile editing, dashboard routing, My Results, group-test CRUD, public-results CRUD, participant requests/approvals, exports, and admin management screens.
 - Notification layer: [app/notifications.py](app/notifications.py)
   - Sends Mailjet email and Telegram messages, renders template variables, appends notification logs, and handles fallback behavior.
 - Templates and UI: [app/templates](app/templates)
@@ -29,11 +29,17 @@ The app is organized around a single Flask app factory and a small set of domain
 - Dashboard that shows recruiting tests to all users and testing/closed tests only to approved participants.
 
 ### Group-test workflow
-- Admin can create and edit group tests with fields such as title, description, start date, vendor, batch number, compound, size, lab/provider, cost inputs, shipping, donor-reimbursement policy, and results link.
+- Admin can create and edit group tests with fields such as title, description, start date, vendor, batch number, compound, size, lab/provider, cost inputs, shipping, donor-reimbursement policy, results link, and reusable tags.
 - Users can request to join recruiting tests.
 - Admins can approve, remove, or manually add participants.
 - Each participant record tracks fields such as name, Telegram username, approval status, verified/active flags, order/payment state, donor status, state, and notes.
 - Cost calculations are computed from the group test inputs and displayed in the UI for both admins and approved participants.
+- Admins can delete group tests from the edit page.
+
+### Results and dashboard UX
+- The dashboard can be grouped and sorted by status, name, or tags, and users can hide tests from their own dashboard view.
+- The My Results page combines closed group-test results for approved members with admin-created public results.
+- Public results can be created and edited by admins, and both group tests and public results support searchable tags.
 
 ### Admin capabilities
 - Manage users, create/edit accounts, toggle active status, and trigger password resets.
@@ -41,6 +47,7 @@ The app is organized around a single Flask app factory and a small set of domain
 - Send participant notifications for a test using a selected template.
 - Export test data to Excel-compatible output for backup or reporting.
 - View and manage participant approvals and status updates.
+- Manage admin-created public results.
 
 ### Notifications and templating
 - Supports Mailjet email delivery and Telegram delivery.
@@ -90,7 +97,7 @@ Recommended deployment target: DigitalOcean App Platform or a similar container 
 Run the regression suite with:
 
 ```bash
-python -m pytest
+python -m unittest
 ```
 
 ## Notification template variables

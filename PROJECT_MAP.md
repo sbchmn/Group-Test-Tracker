@@ -48,3 +48,6 @@
 
 ## Validation Results
 - Focused test slice passed: `tests.test_notifications`, `tests.test_lab_costs`, and `tests.test_schema_migration`.
+
+## Documentation Updates
+- README updated to cover tags, public results, dashboard controls, and the current unittest-based validation command.

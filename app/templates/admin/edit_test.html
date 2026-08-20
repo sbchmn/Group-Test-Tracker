@@ -47,6 +47,27 @@ function updateTotalLabCost() {
     if (totalField) totalField.value = total.toFixed(2);
 }
 
+function attachTagPicker(input) {
+    if (!input) return;
+    const openPicker = () => {
+        if (typeof input.showPicker === 'function') {
+            try {
+                input.showPicker();
+            } catch (error) {
+                // Some browsers block picker display outside a trusted gesture.
+            }
+        }
+    };
+
+    input.addEventListener('focus', openPicker);
+    input.addEventListener('click', openPicker);
+    input.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            openPicker();
+        }
+    });
+}
+
 window.onload = function() {
     const container = document.getElementById('labTestsContainer');
     if (container.children.length === 0) {
@@ -59,6 +80,8 @@ window.onload = function() {
             addLabTestRow('STERILITY', '290', '0');
         {% endif %}
     }
+
+    attachTagPicker(document.querySelector('[data-tag-picker="true"]'));
 }
 </script>
 {% endblock scripts %}
@@ -91,7 +114,7 @@ window.onload = function() {
         </div>
         <div class="mb-3 mt-3">
             {{ form.tag_names.label(class="form-label") }}
-            {{ form.tag_names(class="form-control", list="tagSuggestions", placeholder="Shed GB#3, tirz") }}
+            {{ form.tag_names(class="form-control", list="tagSuggestions", placeholder="Shed GB#3, tirz", **{'data-tag-picker': 'true'}) }}
             <datalist id="tagSuggestions">
                 {% for tag_name in tag_suggestions %}
                     <option value="{{ tag_name }}"></option>

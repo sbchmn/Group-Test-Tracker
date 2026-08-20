@@ -8,7 +8,7 @@ Main Blueprint - All Routes, Form Classes, and Business Logic
 """
 
 from flask import (
-    Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify, send_file
+    Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify, send_file, current_app
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
@@ -23,9 +23,9 @@ from functools import wraps
 from . import db
 import os
 
-from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig
+from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig, Tag, PublicResult, DashboardHiddenGroupTest
 from .export import generate_test_export
-from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template
+from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template, send_notification_message
 
 main_bp = Blueprint('main', __name__)
 
@@ -82,8 +82,17 @@ class GroupTestForm(FlaskForm):
     # results_link only relevant when closed; shown in template conditionally
     results_link = StringField('Results Link (URL - shown only to approved members when Closed)', 
                                validators=[Optional(), Length(max=500)])
+    tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     
     submit = SubmitField('Save Group Test')
+
+
+class PublicResultForm(FlaskForm):
+    title = StringField('Result Title', validators=[DataRequired(), Length(max=200)])
+    summary = TextAreaField('Summary / Notes', validators=[Optional()])
+    results_link = StringField('Results Link', validators=[DataRequired(), Length(max=500)])
+    tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    submit = SubmitField('Save Public Result')
 
 
 class ParticipationRequestForm(FlaskForm):
@@ -151,6 +160,17 @@ class UserForm(FlaskForm):
     submit = SubmitField('Save User')
 
 
+class ProfileForm(FlaskForm):
+    """Form for users to edit their own profile details."""
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
+    receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
+    submit = SubmitField('Save Profile')
+
+
 class NotificationTemplateForm(FlaskForm):
     name = StringField('Template Name', validators=[DataRequired(), Length(max=120)])
     description = TextAreaField('Description', validators=[Optional()])
@@ -159,6 +179,7 @@ class NotificationTemplateForm(FlaskForm):
     telegram_body = TextAreaField('Telegram Message', validators=[Optional()])
     hide_from_participant_notifications = BooleanField('Hide from "Notify Test Participants"')
     is_default_password_reset = BooleanField('Default Password Reset Template')
+    is_default_registration_welcome = BooleanField('Default Registration Welcome Template')
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Template')
 
@@ -206,6 +227,71 @@ def populate_donor_shipping_choices(form):
     form.donor_shipping_reimbursed_by_id.choices = choices
 
 
+def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
+    if not value:
+        return ''
+    value = str(value)
+    if len(value) <= reveal_prefix + reveal_suffix:
+        return value
+    return f"{value[:reveal_prefix]}{'*' * (len(value) - reveal_prefix - reveal_suffix)}{value[-reveal_suffix:]}"
+
+
+def parse_tag_names(tag_text):
+    if not tag_text:
+        return []
+    seen = set()
+    tags = []
+    for raw_tag in str(tag_text).replace('\n', ',').split(','):
+        name = raw_tag.strip()
+        if not name:
+            continue
+        normalized = name.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(name)
+    return tags
+
+
+def get_or_create_tags(tag_text):
+    tags = []
+    for name in parse_tag_names(tag_text):
+        normalized = name.lower()
+        tag = Tag.query.filter_by(normalized_name=normalized).first()
+        if tag is None:
+            tag = Tag(name=name, normalized_name=normalized)
+            db.session.add(tag)
+            db.session.flush()
+        tags.append(tag)
+    return tags
+
+
+def apply_tags_to_record(record, tag_text):
+    record.set_tags(get_or_create_tags(tag_text))
+
+
+def get_all_tag_names():
+    return [tag.name for tag in Tag.query.order_by(Tag.name).all()]
+
+
+def get_group_test_sort_value(test, sort_by):
+    if sort_by == 'title':
+        return (test.title or '').lower()
+    if sort_by == 'tags':
+        return test.tag_names().lower()
+    if sort_by == 'status':
+        return (test.status or '').lower()
+    return test.updated_at or datetime.min
+
+
+def get_result_sort_value(result, sort_by):
+    if sort_by == 'title':
+        return (result['title'] or '').lower()
+    if sort_by == 'tags':
+        return result['tag_text'].lower()
+    return result['posted_at'] or datetime.min
+
+
 @main_bp.route('/')
 def index():
     if current_user.is_authenticated:
@@ -234,6 +320,29 @@ def register():
         user.set_password(form.password.data)
         db.session.add(user)
         db.session.commit()
+
+        base_url = str(
+            NotificationConfig.query.filter_by(key='service_base_url').first().value if NotificationConfig.query.filter_by(key='service_base_url').first() else ''
+        ).strip()
+        if not base_url:
+            base_url = current_app.config.get('SERVER_NAME') or 'http://localhost'
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = f'https://{base_url}'
+        login_url = f"{base_url.rstrip('/')}/login"
+        template = NotificationTemplate.query.filter_by(is_default_registration_welcome=True, is_active=True).first()
+        subject = template.email_subject or 'Your account was created successfully' if template else 'Your account was created successfully'
+        body = (
+            render_notification_template(template.email_body or '', {'username': user.username, 'login_url': login_url})
+            if template and template.email_body
+            else (
+                f"Hello {user.username},\n\n"
+                f"Your account was created successfully.\n"
+                f"Your username is: {user.username}\n"
+                f"You can sign in here: {login_url}\n"
+            )
+        )
+        send_notification_message(user, 'email', subject, body)
+
         flash('Registration successful! Please login.', 'success')
         return redirect(url_for('main.login'))
     return render_template('register.html', form=form)
@@ -283,6 +392,52 @@ def password_reset():
     return render_template('password_reset.html', form=form)
 
 
+@main_bp.route('/admin/users/<int:user_id>/send-password-reset', methods=['POST'])
+@login_required
+@admin_required
+def send_password_reset_admin(user_id):
+    user = User.query.get_or_404(user_id)
+    new_password = os.urandom(6).hex()
+    user.set_password(new_password)
+    db.session.commit()
+    send_password_reset(user, new_password)
+    flash(f'A password reset message was sent to {user.username}.', 'success')
+    return redirect(url_for('main.manage_users'))
+
+
+@main_bp.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    """Allow users to update their own profile info and password."""
+    form = ProfileForm(obj=current_user)
+    if form.validate_on_submit():
+        existing_username = User.query.filter(User.username == form.username.data, User.id != current_user.id).first()
+        existing_email = User.query.filter(User.email == form.email.data, User.id != current_user.id).first()
+
+        if existing_username:
+            flash('Username already taken.', 'danger')
+            return render_template('profile.html', form=form)
+        if existing_email:
+            flash('Email already registered.', 'danger')
+            return render_template('profile.html', form=form)
+
+        current_user.username = form.username.data
+        current_user.email = form.email.data
+        current_user.tg_username = form.tg_username.data or None
+        current_user.receive_group_test_notifications = form.receive_group_test_notifications.data
+        current_user.notification_channel = form.notification_channel.data or 'email'
+
+        if form.password.data:
+            current_user.set_password(form.password.data)
+            flash('Password updated.', 'success')
+
+        db.session.commit()
+        flash('Profile updated.', 'success')
+        return redirect(url_for('main.profile'))
+
+    return render_template('profile.html', form=form)
+
+
 @main_bp.route('/dashboard')
 @login_required
 def dashboard():
@@ -293,6 +448,10 @@ def dashboard():
       * recruiting tests (can request)
       * testing/closed tests ONLY if they have an approved Participation.
     """
+    group_by = request.args.get('group_by', 'status')
+    sort_by = request.args.get('sort_by', 'updated_at')
+    show_hidden = str(request.args.get('show_hidden', '0')).lower() in ('1', 'true', 'yes', 'on')
+
     if current_user.is_admin:
         tests = GroupTest.query.order_by(GroupTest.updated_at.desc()).all()
     else:
@@ -315,9 +474,104 @@ def dashboard():
             if t.id not in seen:
                 seen.add(t.id)
                 tests.append(t)
-        tests.sort(key=lambda x: x.updated_at, reverse=True)
-    
-    return render_template('dashboard.html', tests=tests, current_user=current_user)
+
+    membership_map = {
+        part.group_test_id: part
+        for part in Participation.query.filter_by(user_id=current_user.id, approved=True).all()
+    }
+    hidden_test_ids = {
+        item.group_test_id
+        for item in DashboardHiddenGroupTest.query.filter_by(user_id=current_user.id).all()
+    }
+
+    annotated_tests = []
+    for test in tests:
+        test.my_participation = membership_map.get(test.id)
+        test.hidden_from_dashboard = test.id in hidden_test_ids
+        if show_hidden or not test.hidden_from_dashboard:
+            annotated_tests.append(test)
+
+    def group_label(test):
+        if group_by == 'title':
+            return (test.title or 'Untitled').strip()[:1].upper() or '#'
+        if group_by == 'compound':
+            return (test.compound or 'Unspecified Compound').strip() or 'Unspecified Compound'
+        if group_by == 'tags':
+            return test.primary_tag() or 'Untagged'
+        if group_by == 'none':
+            return 'All Tests'
+        return test.status.title()
+
+    def group_sort_key(test):
+        if sort_by == 'title':
+            return (test.title or '').lower()
+        if sort_by == 'compound':
+            return (test.compound or '').lower()
+        if sort_by == 'tags':
+            return test.tag_names().lower()
+        if sort_by == 'status':
+            status_order = {'recruiting': 0, 'testing': 1, 'closed': 2}
+            return (status_order.get(test.status, 99), (test.title or '').lower())
+        return test.updated_at or datetime.min
+
+    grouped_tests = []
+    if group_by == 'none':
+        grouped_tests.append({
+            'label': 'All Tests',
+            'key': 'all',
+            'tests': sorted(annotated_tests, key=group_sort_key, reverse=sort_by == 'updated_at'),
+        })
+    else:
+        grouped = {}
+        for test in annotated_tests:
+            grouped.setdefault(group_label(test), []).append(test)
+
+        if group_by == 'status':
+            group_order = {'Recruiting': 0, 'Testing': 1, 'Closed': 2}
+            group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
+        else:
+            group_names = sorted(grouped.keys(), key=str.lower)
+
+        for label in group_names:
+            grouped_tests.append({
+                'label': label,
+                'key': label.lower().replace(' ', '-'),
+                'tests': sorted(grouped[label], key=group_sort_key, reverse=sort_by == 'updated_at'),
+            })
+
+    return render_template(
+        'dashboard.html',
+        tests=annotated_tests,
+        grouped_tests=grouped_tests,
+        current_user=current_user,
+        group_by=group_by,
+        sort_by=sort_by,
+        show_hidden=show_hidden,
+    )
+
+
+@main_bp.route('/dashboard/hide/<int:test_id>', methods=['POST'])
+@login_required
+def toggle_dashboard_hidden(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if not test.can_user_see(current_user):
+        abort(403)
+
+    hidden = DashboardHiddenGroupTest.query.filter_by(user_id=current_user.id, group_test_id=test.id).first()
+    if hidden:
+        db.session.delete(hidden)
+        flash(f'"{test.title}" is visible on your dashboard again.', 'success')
+    else:
+        db.session.add(DashboardHiddenGroupTest(user_id=current_user.id, group_test_id=test.id))
+        flash(f'"{test.title}" is now hidden from your dashboard.', 'info')
+
+    db.session.commit()
+    return redirect(url_for(
+        'main.dashboard',
+        group_by=request.form.get('group_by', 'status'),
+        sort_by=request.form.get('sort_by', 'updated_at'),
+        show_hidden=request.form.get('show_hidden', '0'),
+    ))
 
 
 @main_bp.route('/test/<int:test_id>', methods=['GET', 'POST'])
@@ -354,9 +608,9 @@ def test_detail(test_id):
         sent = 0
         for part in parts:
             if part.user_id and part.user and part.approved and part.user.receive_group_test_notifications:
-                amount_owed = None
-                if part.user_id == current_user.id:
-                    amount_owed = costs.get('non_donor_pays' if not part.vial_donor else 'donor_pays', 0)
+                amount_owed = part.amount_owed
+                if amount_owed is None:
+                    amount_owed = costs.get('donor_pays' if part.vial_donor else 'non_donor_pays', 0)
                 send_group_test_notification(test, part.user, template, amount_owed=amount_owed)
                 sent += 1
         flash(f'Sent notifications to {sent} participant(s).', 'success')
@@ -372,6 +626,117 @@ def test_detail(test_id):
         reimbursed_by_user=reimbursed_by_user,
         notify_form=form,
         notification_templates=templates
+    )
+
+
+@main_bp.route('/my-results')
+@login_required
+def my_results():
+    group_by = request.args.get('group_by', 'none')
+    sort_by = request.args.get('sort_by', 'posted_at')
+    sort_dir = request.args.get('sort_dir', 'desc')
+    query = (request.args.get('q') or '').strip().lower()
+
+    group_results = []
+    member_tests = (
+        GroupTest.query
+        .join(Participation)
+        .filter(
+            Participation.user_id == current_user.id,
+            Participation.approved == True,
+            GroupTest.status == 'closed',
+            GroupTest.results_link.isnot(None),
+        )
+        .all()
+    )
+    for test in member_tests:
+        group_results.append({
+            'kind': 'group_test',
+            'title': test.title,
+            'summary': test.description or '',
+            'results_link': test.results_link,
+            'posted_at': test.results_posted_at or test.updated_at or test.created_at,
+            'source_label': test.title,
+            'tags': [tag.name for tag in test.tags],
+            'tag_text': test.tag_names(),
+            'search_text': ' '.join([
+                test.title or '',
+                test.description or '',
+                test.results_link or '',
+                test.tag_names(),
+            ]),
+        })
+
+    public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+    for result in public_results:
+        group_results.append({
+            'kind': 'public_result',
+            'title': result.title,
+            'summary': result.summary or '',
+            'results_link': result.results_link,
+            'posted_at': result.posted_at,
+            'source_label': 'Public Result',
+            'tags': [tag.name for tag in result.tags],
+            'tag_text': result.tag_names(),
+            'search_text': ' '.join([
+                result.title or '',
+                result.summary or '',
+                result.results_link or '',
+                result.tag_names(),
+            ]),
+        })
+
+    if query:
+        group_results = [item for item in group_results if query in item['search_text'].lower()]
+
+    reverse = str(sort_dir).lower() != 'asc'
+    if sort_by == 'title':
+        group_results.sort(key=lambda item: (item['title'] or '').lower(), reverse=reverse)
+    elif sort_by == 'tags':
+        group_results.sort(key=lambda item: item['tag_text'].lower(), reverse=reverse)
+    else:
+        group_results.sort(key=lambda item: item['posted_at'] or datetime.min, reverse=reverse)
+
+    grouped_results = []
+    if group_by == 'none':
+        grouped_results.append({
+            'label': 'All Results',
+            'results': group_results,
+        })
+    else:
+        grouped = {}
+        for item in group_results:
+            if group_by == 'tags':
+                tags = item['tags'] or ['Untagged']
+                for tag in tags:
+                    grouped.setdefault(tag, []).append(item)
+            elif group_by == 'date':
+                label = item['posted_at'].strftime('%Y-%m-%d') if item['posted_at'] else 'Unknown Date'
+                grouped.setdefault(label, []).append(item)
+            elif group_by == 'source':
+                grouped.setdefault(item['source_label'] or 'Other', []).append(item)
+            else:
+                grouped.setdefault((item['title'] or 'Untitled')[0].upper(), []).append(item)
+
+        if group_by == 'date':
+            group_names = sorted(grouped.keys(), reverse=reverse)
+        else:
+            group_names = sorted(grouped.keys(), key=str.lower)
+
+        for label in group_names:
+            grouped_results.append({
+                'label': label,
+                'results': grouped[label],
+            })
+
+    return render_template(
+        'my_results.html',
+        results=group_results,
+        grouped_results=grouped_results,
+        group_by=group_by,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        query=query,
     )
 
 
@@ -439,6 +804,19 @@ def request_participation(test_id):
         )
         db.session.add(part)
         db.session.commit()
+
+        admin_users = User.query.filter_by(is_admin=True, is_active=True).all()
+        if admin_users:
+            subject = f"New participation request for {test.title}"
+            body = (
+                f"A new participation request was submitted by {current_user.username} for the test \"{test.title}\".\n"
+                f"Email: {current_user.email}\n"
+                f"Telegram: {current_user.tg_username or 'Not provided'}\n"
+                f"Review the request here: {request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}\n"
+            )
+            for admin_user in admin_users:
+                send_notification_message(admin_user, admin_user.notification_channel or 'email', subject, body)
+
         flash('Participation request submitted successfully. Admin will review shortly.', 'success')
         return redirect(url_for('main.dashboard'))
     
@@ -453,6 +831,8 @@ def request_participation(test_id):
 def create_test():
     form = GroupTestForm()
     populate_donor_shipping_choices(form)
+    if not form.is_submitted():
+        form.tag_names.data = ''
     if form.validate_on_submit():
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -496,13 +876,16 @@ def create_test():
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
             results_link=form.results_link.data if form.status.data == 'closed' else None,
+            results_posted_at=datetime.utcnow() if form.status.data == 'closed' and form.results_link.data else None,
             created_by=current_user.id
         )
         db.session.add(test)
+        db.session.flush()
+        apply_tags_to_record(test, form.tag_names.data)
         db.session.commit()
         flash(f'Group test "{test.title}" created successfully.', 'success')
         return redirect(url_for('main.test_detail', test_id=test.id))
-    return render_template('admin/create_test.html', form=form)
+    return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names())
 
 
 @main_bp.route('/admin/edit-test/<int:test_id>', methods=['GET', 'POST'])
@@ -512,6 +895,8 @@ def edit_test(test_id):
     test = GroupTest.query.get_or_404(test_id)
     form = GroupTestForm(obj=test)  # Pre-populate
     populate_donor_shipping_choices(form)
+    if not form.is_submitted():
+        form.tag_names.data = test.tag_names()
     if form.donor_shipping_reimbursed_by_id.data in (None, '') and test.donor_shipping_reimbursed_by_id:
         form.donor_shipping_reimbursed_by_id.data = test.donor_shipping_reimbursed_by_id
     elif form.donor_shipping_reimbursed_by_id.data is None:
@@ -546,13 +931,17 @@ def edit_test(test_id):
         test.donor_shipping_cost = form.donor_shipping_cost.data or 0.0
         test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
         test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
+        apply_tags_to_record(test, form.tag_names.data)
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
+            test.results_posted_at = None
+        elif test.results_link and not test.results_posted_at:
+            test.results_posted_at = datetime.utcnow()
         db.session.commit()
         flash('Group test updated.', 'success')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
-    return render_template('admin/edit_test.html', form=form, test=test)
+    return render_template('admin/edit_test.html', form=form, test=test, tag_suggestions=get_all_tag_names())
 
 
 @main_bp.route('/admin/manage-participants/<int:test_id>')
@@ -708,6 +1097,7 @@ def notification_templates():
             telegram_body=form.telegram_body.data,
             hide_from_participant_notifications=form.hide_from_participant_notifications.data,
             is_default_password_reset=form.is_default_password_reset.data,
+            is_default_registration_welcome=form.is_default_registration_welcome.data,
             is_active=form.is_active.data,
         )
         db.session.add(template)
@@ -734,6 +1124,7 @@ def edit_notification_template(template_id):
         template.telegram_body = form.telegram_body.data
         template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
         template.is_default_password_reset = form.is_default_password_reset.data
+        template.is_default_registration_welcome = form.is_default_registration_welcome.data
         template.is_active = form.is_active.data
         db.session.commit()
         flash('Notification template updated.', 'success')
@@ -767,10 +1158,10 @@ def notification_config():
 
     if not form.is_submitted():
         configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
-        form.mailjet_api_key.data = configs.get('mailjet_api_key')
-        form.mailjet_secret_key.data = configs.get('mailjet_secret_key')
+        form.mailjet_api_key.data = mask_secret(configs.get('mailjet_api_key'))
+        form.mailjet_secret_key.data = mask_secret(configs.get('mailjet_secret_key'))
         form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
-        form.telegram_bot_token.data = configs.get('telegram_bot_token')
+        form.telegram_bot_token.data = mask_secret(configs.get('telegram_bot_token'))
         form.service_base_url.data = configs.get('service_base_url')
         form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
     log_contents = read_notification_log()
@@ -813,9 +1204,9 @@ def create_user():
             user.set_password(form.password.data)
         else:
             import secrets
-            temp_pass = secrets.token_urlsafe(8)
+            temp_pass = secrets.token_urlsafe(12)
             user.set_password(temp_pass)
-            flash(f'Temporary password generated: {temp_pass}', 'warning')
+            flash('A temporary password was generated for the new user. Share it securely through a trusted channel.', 'warning')
 
         db.session.add(user)
         db.session.commit()
@@ -887,9 +1278,92 @@ def set_results_link(test_id):
     test.results_link = link if link else None
     if test.status != 'closed':
         test.status = 'closed'
+    if test.results_link and not test.results_posted_at:
+        test.results_posted_at = datetime.utcnow()
     db.session.commit()
     flash('Results link updated and test marked closed (if needed). Visible only to approved members.', 'success')
     return redirect(url_for('main.test_detail', test_id=test_id))
+
+
+@main_bp.route('/admin/delete-test/<int:test_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_test(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    title = test.title
+    db.session.delete(test)
+    db.session.commit()
+    flash(f'Group test "{title}" was deleted.', 'warning')
+    return redirect(url_for('main.dashboard'))
+
+
+@main_bp.route('/admin/public-results', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def manage_public_results():
+    form = PublicResultForm()
+    if form.validate_on_submit():
+        result = PublicResult(
+            title=form.title.data,
+            summary=form.summary.data,
+            results_link=form.results_link.data.strip(),
+            created_by=current_user.id,
+        )
+        db.session.add(result)
+        db.session.flush()
+        apply_tags_to_record(result, form.tag_names.data)
+        db.session.commit()
+        flash('Public result created.', 'success')
+        return redirect(url_for('main.manage_public_results'))
+
+    public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+    return render_template(
+        'admin/public_results.html',
+        form=form,
+        public_results=public_results,
+        tag_suggestions=get_all_tag_names(),
+    )
+
+
+@main_bp.route('/admin/public-results/<int:result_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_public_result(result_id):
+    result = PublicResult.query.get_or_404(result_id)
+    form = PublicResultForm(obj=result)
+    form.submit.label.text = 'Save Changes'
+    if not form.is_submitted():
+        form.tag_names.data = result.tag_names()
+
+    if form.validate_on_submit():
+        result.title = form.title.data
+        result.summary = form.summary.data
+        result.results_link = form.results_link.data.strip()
+        apply_tags_to_record(result, form.tag_names.data)
+        db.session.commit()
+        flash('Public result updated.', 'success')
+        return redirect(url_for('main.manage_public_results'))
+
+    public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+    return render_template(
+        'admin/public_results.html',
+        form=form,
+        public_results=public_results,
+        editing_result=result,
+        tag_suggestions=get_all_tag_names(),
+    )
+
+
+@main_bp.route('/admin/public-results/<int:result_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_public_result(result_id):
+    result = PublicResult.query.get_or_404(result_id)
+    title = result.title
+    db.session.delete(result)
+    db.session.commit()
+    flash(f'Public result "{title}" was deleted.', 'warning')
+    return redirect(url_for('main.manage_public_results'))
 
 
 # ==================== API-ish for future (minimal) ====================

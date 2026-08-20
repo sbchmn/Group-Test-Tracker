@@ -1,8 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Edit {{ test.title }}{% block scripts %}
+{% block title %}Edit {{ test.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .danger-zone {
+        border: 1px solid rgba(220, 53, 69, 0.25);
+        background: rgba(220, 53, 69, 0.04);
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
 <script>
-let labTestIndex = 0;
 function addLabTestRow(name = '', price = '', vials = '') {
     const container = document.getElementById('labTestsContainer');
     const row = document.createElement('div');
@@ -27,6 +37,7 @@ function addLabTestRow(name = '', price = '', vials = '') {
     container.appendChild(row);
     updateTotalLabCost();
 }
+
 function updateTotalLabCost() {
     let total = 0;
     document.querySelectorAll('#labTestsContainer .lab-price').forEach(input => {
@@ -35,6 +46,32 @@ function updateTotalLabCost() {
     const totalField = document.getElementById('total_lab_cost');
     if (totalField) totalField.value = total.toFixed(2);
 }
+
+function attachTagMenu(input, menu, button) {
+    if (!input || !menu || !button) return;
+
+    const addSelectedTag = () => {
+        const selectedTag = (menu.value || '').trim();
+        if (!selectedTag) return;
+
+        const tags = (input.value || '')
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean);
+
+        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
+            tags.push(selectedTag);
+            input.value = tags.join(', ');
+        }
+
+        menu.value = '';
+        input.focus();
+    };
+
+    button.addEventListener('click', addSelectedTag);
+    menu.addEventListener('change', addSelectedTag);
+}
+
 window.onload = function() {
     const container = document.getElementById('labTestsContainer');
     if (container.children.length === 0) {
@@ -47,16 +84,30 @@ window.onload = function() {
             addLabTestRow('STERILITY', '290', '0');
         {% endif %}
     }
+
+    attachTagMenu(
+        document.querySelector('[data-tag-input="true"]'),
+        document.querySelector('[data-tag-menu="true"]'),
+        document.querySelector('[data-tag-add="true"]')
+    );
 }
 </script>
 {% endblock scripts %}
-{% endblock %}
 
 {% block content %}
-<h3>Edit Group Test</h3>
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h3 class="mb-1">Edit Group Test</h3>
+        <p class="text-muted mb-0">Update tags, status, results links, and lab details from one place.</p>
+    </div>
+    <form method="POST" action="{{ url_for('main.delete_test', test_id=test.id) }}" onsubmit="return confirm('Delete this group test and all attached participations?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger">Delete Test</button>
+    </form>
+</div>
+
 <form method="POST" novalidate>
     {{ form.hidden_tag() }}
-    <!-- For brevity in MVP, reuse create form fields. In production would factor partial. -->
     <div class="card mb-3"><div class="card-body">
         <div class="row">
             <div class="col-md-8 mb-3">{{ form.title.label(class="form-label") }}{{ form.title(class="form-control") }}</div>
@@ -68,6 +119,20 @@ window.onload = function() {
             <div class="col-md-3">{{ form.batch_number.label(class="form-label") }}{{ form.batch_number(class="form-control") }}</div>
             <div class="col-md-3">{{ form.compound.label(class="form-label") }}{{ form.compound(class="form-control") }}</div>
             <div class="col-md-3">{{ form.size.label(class="form-label") }}{{ form.size(class="form-control") }}</div>
+        </div>
+        <div class="mb-3 mt-3">
+            {{ form.tag_names.label(class="form-label") }}
+            {{ form.tag_names(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
+            <div class="input-group">
+                <select class="form-select" data-tag-menu="true">
+                    <option value="">Choose an existing tag</option>
+                    {% for tag_name in tag_suggestions %}
+                        <option value="{{ tag_name }}">{{ tag_name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
+            </div>
+            <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas.</small>
         </div>
     </div></div>
     
@@ -90,7 +155,7 @@ window.onload = function() {
             <div class="col-md-4">{{ form.quote_number.label(class="form-label") }}{{ form.quote_number(class="form-control") }}</div>
             <div class="col-md-4">{{ form.status.label(class="form-label") }}{{ form.status(class="form-select") }}</div>
         </div>
-        {{ form.results_link.label(class="form-label") }}{{ form.results_link(class="form-control") }}
+        {{ form.results_link.label(class="form-label mt-3") }}{{ form.results_link(class="form-control") }}
     </div></div>
     
     <button type="submit" class="btn btn-primary">Save Changes</button>

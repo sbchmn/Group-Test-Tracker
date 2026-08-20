@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Public Results{% endblock %}
+
+{% block scripts %}
+<script>
+function attachTagPicker(input) {
+    if (!input) return;
+    const openPicker = () => {
+        if (typeof input.showPicker === 'function') {
+            try {
+                input.showPicker();
+            } catch (error) {
+                // Some browsers block picker display outside a trusted gesture.
+            }
+        }
+    };
+
+    input.addEventListener('focus', openPicker);
+    input.addEventListener('click', openPicker);
+    input.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            openPicker();
+        }
+    });
+}
+
+function attachTagMenu(input, menu, button) {
+    if (!input || !menu || !button) return;
+
+    const addSelectedTag = () => {
+        const selectedTag = (menu.value || '').trim();
+        if (!selectedTag) return;
+
+        const tags = (input.value || '')
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean);
+
+        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
+            tags.push(selectedTag);
+            input.value = tags.join(', ');
+        }
+
+        menu.value = '';
+        input.focus();
+    };
+
+    button.addEventListener('click', addSelectedTag);
+    menu.addEventListener('change', addSelectedTag);
+}
+
+window.addEventListener('DOMContentLoaded', function() {
+    attachTagMenu(
+        document.querySelector('[data-tag-input="true"]'),
+        document.querySelector('[data-tag-menu="true"]'),
+        document.querySelector('[data-tag-add="true"]')
+    );
+});
+</script>
+{% endblock scripts %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h3 class="mb-1">Public Results</h3>
+        <p class="text-muted mb-0">Create and edit results entries that appear on every user's My Results page.</p>
+    </div>
+    <a href="{{ url_for('main.my_results') }}" class="btn btn-outline-secondary">View My Results</a>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header">{{ 'Edit Public Result' if editing_result else 'New Public Result' }}</div>
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+                    {% if editing_result %}
+                        <input type="hidden" name="editing_result_id" value="{{ editing_result.id }}">
+                    {% endif %}
+                    <div class="mb-3">
+                        {{ form.title.label(class="form-label") }}
+                        {{ form.title(class="form-control", placeholder="Result title") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.summary.label(class="form-label") }}
+                        {{ form.summary(class="form-control", rows=4, placeholder="Optional summary or notes") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.results_link.label(class="form-label") }}
+                        {{ form.results_link(class="form-control", placeholder="https://...") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.tag_names.label(class="form-label") }}
+                        {{ form.tag_names(class="form-control mb-2", placeholder="tirz, Shed GB#3", **{'data-tag-input': 'true'}) }}
+                        <div class="input-group">
+                            <select class="form-select" data-tag-menu="true">
+                                <option value="">Choose an existing tag</option>
+                                {% for tag_name in tag_suggestions %}
+                                    <option value="{{ tag_name }}">{{ tag_name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+                    {% if editing_result %}
+                        <a href="{{ url_for('main.manage_public_results') }}" class="btn btn-secondary ms-2">Cancel Edit</a>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">Existing Public Results</div>
+            <div class="card-body p-0">
+                {% if public_results %}
+                    <div class="list-group list-group-flush">
+                        {% for result in public_results %}
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between gap-3">
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                                            <strong>{{ result.title }}</strong>
+                                            {% for tag in result.tags %}
+                                                <span class="badge rounded-pill text-bg-light border text-dark">{{ tag.name }}</span>
+                                            {% endfor %}
+                                        </div>
+                                        {% if result.summary %}
+                                            <div class="small text-muted mb-1">{{ result.summary }}</div>
+                                        {% endif %}
+                                        <div class="small text-muted">Posted {{ result.posted_at }}</div>
+                                        <a href="{{ result.results_link }}" target="_blank" class="small">Open result</a>
+                                    </div>
+                                    <div class="d-flex flex-column gap-2">
+                                        <a href="{{ url_for('main.edit_public_result', result_id=result.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                                        <form method="POST" action="{{ url_for('main.delete_public_result', result_id=result.id) }}" onsubmit="return confirm('Delete this public result?')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger w-100">Delete</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="p-3 text-muted">No public results have been created yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

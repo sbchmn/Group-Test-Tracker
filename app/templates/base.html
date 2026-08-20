@@ -32,6 +32,12 @@
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('main.my_results') }}">My Results</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('main.profile') }}">My Profile</a>
+                        </li>
                         {% if current_user.is_admin %}
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -39,6 +45,7 @@
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
                                 <li><a class="dropdown-item" href="{{ url_for('main.create_test') }}">Create Test</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('main.manage_public_results') }}">Public Results</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.manage_users') }}">Manage Users</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.notification_templates') }}">Manage Templates</a></li>
@@ -51,6 +58,7 @@
                                 {{ current_user.username }}
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="{{ url_for('main.profile') }}">My Profile</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.logout') }}">Logout</a></li>
                             </ul>
                         </li>

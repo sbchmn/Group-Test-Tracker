@@ -11,6 +11,20 @@ from flask_login import UserMixin
 from . import db
 import json
 
+
+group_test_tags = db.Table(
+    'group_test_tags',
+    db.Column('group_test_id', db.Integer, db.ForeignKey('group_tests.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('tag_id', db.Integer, db.ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True),
+)
+
+
+public_result_tags = db.Table(
+    'public_result_tags',
+    db.Column('public_result_id', db.Integer, db.ForeignKey('public_results.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('tag_id', db.Integer, db.ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True),
+)
+
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
     
@@ -32,6 +46,12 @@ class User(UserMixin, db.Model):
         lazy='dynamic',
         cascade='all, delete-orphan'
     )
+    hidden_dashboard_tests = db.relationship(
+        'DashboardHiddenGroupTest',
+        backref='user',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
     
     def set_password(self, password: str):
         """Hash password using Werkzeug (scrypt or pbkdf2, strong defaults)."""
@@ -46,6 +66,60 @@ class User(UserMixin, db.Model):
         return f'<User {self.username}>'
 
 
+class Tag(db.Model):
+    __tablename__ = 'tags'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    normalized_name = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f'<Tag {self.name}>'
+
+
+class DashboardHiddenGroupTest(db.Model):
+    __tablename__ = 'dashboard_hidden_group_tests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    group_test_id = db.Column(db.Integer, db.ForeignKey('group_tests.id', ondelete='CASCADE'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'group_test_id', name='_dashboard_hidden_user_test_uc'),
+    )
+
+
+class PublicResult(db.Model):
+    __tablename__ = 'public_results'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    summary = db.Column(db.Text, nullable=True)
+    results_link = db.Column(db.String(500), nullable=False)
+    posted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    tags = db.relationship(
+        'Tag',
+        secondary=public_result_tags,
+        lazy='select',
+        order_by='Tag.name',
+    )
+
+    def set_tags(self, tags):
+        self.tags = tags
+
+    def tag_names(self):
+        return ', '.join(tag.name for tag in self.tags)
+
+    def __repr__(self):
+        return f'<PublicResult {self.title}>'
+
+
 class NotificationTemplate(db.Model):
     __tablename__ = 'notification_templates'
 
@@ -57,6 +131,7 @@ class NotificationTemplate(db.Model):
     telegram_body = db.Column(db.Text, nullable=True)
     hide_from_participant_notifications = db.Column(db.Boolean, default=False, nullable=False)
     is_default_password_reset = db.Column(db.Boolean, default=False, nullable=False)
+    is_default_registration_welcome = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -103,6 +178,7 @@ class GroupTest(db.Model):
     
     # Results - only shown to approved participants when status == 'closed'
     results_link = db.Column(db.String(500), nullable=True)
+    results_posted_at = db.Column(db.DateTime, nullable=True)
     
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -119,6 +195,21 @@ class GroupTest(db.Model):
         cascade='all, delete-orphan',
         order_by='Participation.requested_at'
     )
+    tags = db.relationship(
+        'Tag',
+        secondary=group_test_tags,
+        lazy='select',
+        order_by='Tag.name',
+    )
+
+    def set_tags(self, tags):
+        self.tags = tags
+
+    def tag_names(self):
+        return ', '.join(tag.name for tag in self.tags)
+
+    def primary_tag(self):
+        return self.tags[0].name if self.tags else ''
     
     @property
     def approved_participations(self):
@@ -213,6 +304,11 @@ class GroupTest(db.Model):
         if self.status in ('testing', 'closed'):
             return self.participations.filter_by(user_id=user.id, approved=True).first() is not None
         return False
+
+    def is_hidden_for_user(self, user) -> bool:
+        if not user or not getattr(user, 'is_authenticated', False):
+            return False
+        return DashboardHiddenGroupTest.query.filter_by(user_id=user.id, group_test_id=self.id).first() is not None
     
     def __repr__(self):
         return f'<GroupTest {self.id} {self.title} [{self.status}]>'

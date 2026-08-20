@@ -24,6 +24,20 @@
                 <div class="col-md-3 mb-3">{{ form.compound.label(class="form-label") }}{{ form.compound(class="form-control") }}</div>
                 <div class="col-md-3 mb-3">{{ form.size.label(class="form-label") }}{{ form.size(class="form-control") }}</div>
             </div>
+            <div class="mb-3">
+                {{ form.tag_names.label(class="form-label") }}
+                {{ form.tag_names(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
+                <div class="input-group">
+                    <select class="form-select" data-tag-menu="true">
+                        <option value="">Choose an existing tag</option>
+                        {% for tag_name in tag_suggestions %}
+                            <option value="{{ tag_name }}">{{ tag_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
+                </div>
+                <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas.</small>
+            </div>
         </div>
     </div>
     
@@ -133,6 +147,52 @@ function updateTotalLabCost() {
     }
 }
 
+function attachTagPicker(input) {
+    if (!input) return;
+    const openPicker = () => {
+        if (typeof input.showPicker === 'function') {
+            try {
+                input.showPicker();
+            } catch (error) {
+                // Some browsers block picker display outside a trusted gesture.
+            }
+        }
+    };
+
+    input.addEventListener('focus', openPicker);
+    input.addEventListener('click', openPicker);
+    input.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            openPicker();
+        }
+    });
+}
+
+function attachTagMenu(input, menu, button) {
+    if (!input || !menu || !button) return;
+
+    const addSelectedTag = () => {
+        const selectedTag = (menu.value || '').trim();
+        if (!selectedTag) return;
+
+        const tags = (input.value || '')
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean);
+
+        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
+            tags.push(selectedTag);
+            input.value = tags.join(', ');
+        }
+
+        menu.value = '';
+        input.focus();
+    };
+
+    button.addEventListener('click', addSelectedTag);
+    menu.addEventListener('change', addSelectedTag);
+}
+
 // Optional: seed one example row on load for convenience (admin can delete)
 window.onload = function() {
     const container = document.getElementById('labTestsContainer');
@@ -141,6 +201,12 @@ window.onload = function() {
         addLabTestRow('STERILITY', '290', '0');
         addLabTestRow('ENDOTOXIN ANALYSIS', '180', '0');
     }
+
+    attachTagMenu(
+        document.querySelector('[data-tag-input="true"]'),
+        document.querySelector('[data-tag-menu="true"]'),
+        document.querySelector('[data-tag-add="true"]')
+    );
 }
 </script>
 {% endblock scripts %}

@@ -109,6 +109,45 @@ class LabCostTests(unittest.TestCase):
             self.assertEqual(test.donor_shipping_reimbursement, "participant")
             self.assertEqual(test.donor_shipping_reimbursed_by_id, participant.id)
 
+    def test_create_test_saves_tags_and_results_timestamp(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="tag-admin", email="tag-admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "tag-admin", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            "/admin/create-test",
+            data={
+                "title": "Tagged Closed Test",
+                "status": "closed",
+                "results_link": "https://example.test/results",
+                "total_lab_cost": "100",
+                "shipping_cost": "20",
+                "refund_per_donor": "0",
+                "tag_names": "Shed GB#3, tirz",
+                "lab_item_name": ["MASS"],
+                "lab_item_price": ["100"],
+                "lab_item_vials": ["1"],
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            test = GroupTest.query.filter_by(title="Tagged Closed Test").first()
+            self.assertIsNotNone(test)
+            self.assertIsNotNone(test.results_posted_at)
+            self.assertEqual([tag.name for tag in test.tags], ["Shed GB#3", "tirz"])
+
     def test_donor_share_becomes_negative_when_refund_exceeds_base_share(self):
         with self.app.app_context():
             db.create_all()

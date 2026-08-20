@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app import create_app, db
-from app.models import NotificationConfig, NotificationTemplate, User
+from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, User
 from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message
 
 
@@ -58,6 +58,31 @@ class NotificationTests(unittest.TestCase):
             self.assertNotEqual(refreshed.password_hash, "")
             self.assertTrue(mock_send.called)
             self.assertEqual(mock_send.call_args.args[1], "email")
+
+    def test_register_route_sends_welcome_email_with_login_link(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="service_base_url", value="https://example.test"))
+            db.session.commit()
+
+        with patch("app.routes.send_notification_message", return_value=True) as mock_send:
+            response = self.client.post(
+                "/register",
+                data={
+                    "username": "newuser",
+                    "email": "new@example.com",
+                    "password": "secretpass",
+                    "confirm_password": "secretpass",
+                    "tg_username": "",
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_send.called)
+        self.assertEqual(mock_send.call_args.args[1], "email")
+        self.assertIn("newuser", mock_send.call_args.args[3])
+        self.assertIn("https://example.test/login", mock_send.call_args.args[3])
 
     def test_notification_log_writes_and_prunes(self):
         with self.app.app_context():
@@ -294,6 +319,85 @@ class NotificationTests(unittest.TestCase):
         self.assertTrue(result)
         mock_telegram.assert_called_once()
         mock_mailjet.assert_called_once()
+
+    def test_group_test_notifications_use_each_participants_amount(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            member_one = User(username="member1", email="member1@example.com")
+            member_one.set_password("secret")
+            member_two = User(username="member2", email="member2@example.com")
+            member_two.set_password("secret")
+            test = GroupTest(title="Notify Test", status="closed", created_by=1, results_link="https://example.test/results")
+            template = NotificationTemplate(name="Notify Template", email_subject="Hi {{ username }}", email_body="Owed {{ amount_owed }} on {{ test_title }}")
+            db.session.add_all([admin, member_one, member_two, test, template])
+            db.session.flush()
+            db.session.add_all([
+                Participation(group_test_id=test.id, user_id=member_one.id, approved=True, amount_owed=12.5),
+                Participation(group_test_id=test.id, user_id=member_two.id, approved=True, amount_owed=15.0),
+            ])
+            db.session.commit()
+            test_id = test.id
+            template_id = template.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin", "password": "secret"},
+            follow_redirects=True,
+        )
+
+        with patch("app.routes.send_group_test_notification") as mock_send:
+            response = self.client.post(
+                f"/test/{test_id}",
+                data={"template_id": template_id},
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_send.call_count, 2)
+        self.assertEqual(mock_send.call_args_list[0].kwargs["amount_owed"], 12.5)
+        self.assertEqual(mock_send.call_args_list[1].kwargs["amount_owed"], 15.0)
+
+    def test_admin_can_edit_public_result_and_tags(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin-public", email="admin-public@example.com", is_admin=True)
+            admin.set_password("secret")
+            result = PublicResult(
+                title="Original Title",
+                summary="Original summary",
+                results_link="https://example.test/original",
+                created_by=1,
+            )
+            db.session.add_all([admin, result])
+            db.session.commit()
+            result_id = result.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin-public", "password": "secret"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            f"/admin/public-results/{result_id}/edit",
+            data={
+                "title": "Updated Title",
+                "summary": "Updated summary",
+                "results_link": "https://example.test/updated",
+                "tag_names": "tirz, Shed GB#3",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            refreshed = PublicResult.query.get(result_id)
+            self.assertEqual(refreshed.title, "Updated Title")
+            self.assertEqual(refreshed.summary, "Updated summary")
+            self.assertEqual(refreshed.results_link, "https://example.test/updated")
+            self.assertEqual([tag.name for tag in refreshed.tags], ["Shed GB#3", "tirz"])
 
 
 if __name__ == "__main__":

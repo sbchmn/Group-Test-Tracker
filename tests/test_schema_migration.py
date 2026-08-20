@@ -41,6 +41,9 @@ class SchemaMigrationTests(unittest.TestCase):
 
         migration_text = "\n".join(path.read_text(encoding="utf-8") for path in migration_files)
         self.assertIn("lab_name", migration_text)
+        self.assertIn("public_results", migration_text)
+        self.assertIn("dashboard_hidden_group_tests", migration_text)
+        self.assertIn("results_posted_at", migration_text)
 
 
 if __name__ == "__main__":

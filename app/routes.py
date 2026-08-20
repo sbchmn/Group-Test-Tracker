@@ -628,6 +628,7 @@ def test_detail(test_id):
 @main_bp.route('/my-results')
 @login_required
 def my_results():
+    group_by = request.args.get('group_by', 'none')
     sort_by = request.args.get('sort_by', 'posted_at')
     sort_dir = request.args.get('sort_dir', 'desc')
     query = (request.args.get('q') or '').strip().lower()
@@ -692,9 +693,43 @@ def my_results():
     else:
         group_results.sort(key=lambda item: item['posted_at'] or datetime.min, reverse=reverse)
 
+    grouped_results = []
+    if group_by == 'none':
+        grouped_results.append({
+            'label': 'All Results',
+            'results': group_results,
+        })
+    else:
+        grouped = {}
+        for item in group_results:
+            if group_by == 'tags':
+                tags = item['tags'] or ['Untagged']
+                for tag in tags:
+                    grouped.setdefault(tag, []).append(item)
+            elif group_by == 'date':
+                label = item['posted_at'].strftime('%Y-%m-%d') if item['posted_at'] else 'Unknown Date'
+                grouped.setdefault(label, []).append(item)
+            elif group_by == 'source':
+                grouped.setdefault(item['source_label'] or 'Other', []).append(item)
+            else:
+                grouped.setdefault((item['title'] or 'Untitled')[0].upper(), []).append(item)
+
+        if group_by == 'date':
+            group_names = sorted(grouped.keys(), reverse=reverse)
+        else:
+            group_names = sorted(grouped.keys(), key=str.lower)
+
+        for label in group_names:
+            grouped_results.append({
+                'label': label,
+                'results': grouped[label],
+            })
+
     return render_template(
         'my_results.html',
         results=group_results,
+        grouped_results=grouped_results,
+        group_by=group_by,
         sort_by=sort_by,
         sort_dir=sort_dir,
         query=query,

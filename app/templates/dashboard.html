@@ -25,14 +25,23 @@
     {% endif %}
 </div>
 
-<form method="GET" class="card mb-4 dashboard-controls">
-    <div class="card-body">
+<div class="card mb-4 dashboard-controls">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Dashboard Filters</span>
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardFilters" aria-expanded="true" aria-controls="dashboardFilters">
+            Toggle Filters
+        </button>
+    </div>
+    <div class="collapse show" id="dashboardFilters">
+        <div class="card-body">
+            <form method="GET">
         <div class="row g-3 align-items-end">
             <div class="col-md-3">
                 <label class="form-label">Group by</label>
                 <select name="group_by" class="form-select">
                     <option value="status" {% if group_by == 'status' %}selected{% endif %}>Status</option>
                     <option value="title" {% if group_by == 'title' %}selected{% endif %}>Name</option>
+                    <option value="compound" {% if group_by == 'compound' %}selected{% endif %}>Compound</option>
                     <option value="tags" {% if group_by == 'tags' %}selected{% endif %}>Tags</option>
                     <option value="none" {% if group_by == 'none' %}selected{% endif %}>No grouping</option>
                 </select>
@@ -42,6 +51,7 @@
                 <select name="sort_by" class="form-select">
                     <option value="updated_at" {% if sort_by == 'updated_at' %}selected{% endif %}>Newest</option>
                     <option value="title" {% if sort_by == 'title' %}selected{% endif %}>Name</option>
+                    <option value="compound" {% if sort_by == 'compound' %}selected{% endif %}>Compound</option>
                     <option value="tags" {% if sort_by == 'tags' %}selected{% endif %}>Tags</option>
                     <option value="status" {% if sort_by == 'status' %}selected{% endif %}>Status</option>
                 </select>
@@ -54,8 +64,10 @@
                 <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
             </div>
         </div>
+            </form>
+        </div>
     </div>
-</form>
+</div>
 
 {% if not grouped_tests %}
     <div class="alert alert-info">

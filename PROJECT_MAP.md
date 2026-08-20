@@ -32,6 +32,7 @@
 - Added edit support for admin-created public results with prefilled form values and tag updates.
 - Added admin group-test delete support from the edit page.
 - Fixed participant notification rendering to use each participant's own amount owed.
+- Expanded dashboard grouping to include compound and made filter panels collapsible on dashboard and My Results pages.
 
 ## Risks and Assumptions
 - Tags should be normalized to a shared tag table so they work across group tests and public results.

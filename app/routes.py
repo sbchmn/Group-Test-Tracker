@@ -494,6 +494,8 @@ def dashboard():
     def group_label(test):
         if group_by == 'title':
             return (test.title or 'Untitled').strip()[:1].upper() or '#'
+        if group_by == 'compound':
+            return (test.compound or 'Unspecified Compound').strip() or 'Unspecified Compound'
         if group_by == 'tags':
             return test.primary_tag() or 'Untagged'
         if group_by == 'none':
@@ -503,6 +505,8 @@ def dashboard():
     def group_sort_key(test):
         if sort_by == 'title':
             return (test.title or '').lower()
+        if sort_by == 'compound':
+            return (test.compound or '').lower()
         if sort_by == 'tags':
             return test.tag_names().lower()
         if sort_by == 'status':

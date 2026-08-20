@@ -25,8 +25,37 @@ function attachTagPicker(input) {
     });
 }
 
+function attachTagMenu(input, menu, button) {
+    if (!input || !menu || !button) return;
+
+    const addSelectedTag = () => {
+        const selectedTag = (menu.value || '').trim();
+        if (!selectedTag) return;
+
+        const tags = (input.value || '')
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean);
+
+        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
+            tags.push(selectedTag);
+            input.value = tags.join(', ');
+        }
+
+        menu.value = '';
+        input.focus();
+    };
+
+    button.addEventListener('click', addSelectedTag);
+    menu.addEventListener('change', addSelectedTag);
+}
+
 window.addEventListener('DOMContentLoaded', function() {
-    attachTagPicker(document.querySelector('[data-tag-picker="true"]'));
+    attachTagMenu(
+        document.querySelector('[data-tag-input="true"]'),
+        document.querySelector('[data-tag-menu="true"]'),
+        document.querySelector('[data-tag-add="true"]')
+    );
 });
 </script>
 {% endblock scripts %}
@@ -64,12 +93,16 @@ window.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="mb-3">
                         {{ form.tag_names.label(class="form-label") }}
-                        {{ form.tag_names(class="form-control", list="tagSuggestions", placeholder="tirz, Shed GB#3", **{'data-tag-picker': 'true'}) }}
-                        <datalist id="tagSuggestions">
-                            {% for tag_name in tag_suggestions %}
-                                <option value="{{ tag_name }}"></option>
-                            {% endfor %}
-                        </datalist>
+                        {{ form.tag_names(class="form-control mb-2", placeholder="tirz, Shed GB#3", **{'data-tag-input': 'true'}) }}
+                        <div class="input-group">
+                            <select class="form-select" data-tag-menu="true">
+                                <option value="">Choose an existing tag</option>
+                                {% for tag_name in tag_suggestions %}
+                                    <option value="{{ tag_name }}">{{ tag_name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
                     {% if editing_result %}

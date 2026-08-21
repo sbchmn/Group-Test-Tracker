@@ -89,6 +89,19 @@
                                         {% if result.summary %}
                                             <div class="small mb-2">{{ result.summary }}</div>
                                         {% endif %}
+                                        {% if result.lab_item_results %}
+                                            <div class="mb-2">
+                                                <div class="small fw-semibold mb-1">Lab Item Results</div>
+                                                <ul class="list-group list-group-flush">
+                                                    {% for item in result.lab_item_results %}
+                                                        <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-start">
+                                                            <span class="small fw-medium">{{ item.name }}</span>
+                                                            <span class="small text-muted ms-3 text-end">{{ item.result }}</span>
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </div>
+                                        {% endif %}
                                         <a href="{{ result.results_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Open Results</a>
                                     </div>
                                 </div>

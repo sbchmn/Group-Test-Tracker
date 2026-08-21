@@ -350,6 +350,9 @@ class Participation(db.Model):
     requested_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     approved = db.Column(db.Boolean, default=False, nullable=False, index=True)
     approved_at = db.Column(db.DateTime, nullable=True)
+    denied = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    denied_at = db.Column(db.DateTime, nullable=True)
+    denied_reason = db.Column(db.Text, nullable=True)
     
     def update_amount_owed(self, costs_dict):
         """Helper to sync individual owed based on role (donor vs non). Call after approve or recalc."""

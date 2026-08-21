@@ -503,7 +503,9 @@ def dashboard():
     annotated_tests = []
     for test in tests:
         test.my_participation = membership_map.get(test.id)
-        if test.my_participation and test.my_participation.approved:
+        if test.my_participation and test.my_participation.denied:
+            test.my_join_state = 'denied'
+        elif test.my_participation and test.my_participation.approved:
             test.my_join_state = 'approved'
         elif test.my_participation:
             test.my_join_state = 'pending'
@@ -521,6 +523,8 @@ def dashboard():
         if group_by == 'tags':
             return test.primary_tag() or 'Untagged'
         if group_by == 'join_state':
+            if test.my_join_state == 'denied':
+                return 'Denied'
             if test.my_join_state == 'approved':
                 return 'Approved'
             if test.my_join_state == 'pending':
@@ -541,7 +545,7 @@ def dashboard():
             status_order = {'recruiting': 0, 'testing': 1, 'closed': 2}
             return (status_order.get(test.status, 99), (test.title or '').lower())
         if sort_by == 'join_state':
-            join_order = {'approved': 0, 'pending': 1, 'not_joined': 2}
+            join_order = {'approved': 0, 'pending': 1, 'denied': 2, 'not_joined': 3}
             return (join_order.get(test.my_join_state, 99), (test.title or '').lower())
         return test.updated_at or datetime.min
 
@@ -561,7 +565,7 @@ def dashboard():
             group_order = {'Recruiting': 0, 'Testing': 1, 'Closed': 2}
             group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
         elif group_by == 'join_state':
-            group_order = {'Approved': 0, 'Pending': 1, 'Not Joined': 2}
+            group_order = {'Approved': 0, 'Pending': 1, 'Denied': 2, 'Not Joined': 3}
             group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
         else:
             group_names = sorted(grouped.keys(), key=str.lower)
@@ -594,7 +598,10 @@ def request_participation_quick(test_id):
 
     existing = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id).first()
     if existing:
-        if existing.approved:
+        if existing.denied:
+            reason_suffix = f" Reason: {existing.denied_reason}" if existing.denied_reason else ''
+            flash(f'Your request for this test was denied by an admin.{reason_suffix}', 'warning')
+        elif existing.approved:
             flash('You are already approved for this test.', 'info')
         else:
             flash('You have already submitted a request for this test.', 'info')
@@ -609,6 +616,9 @@ def request_participation_quick(test_id):
         state=None,
         vial_donor=False,
         notes='Requested from dashboard',
+        denied=False,
+        denied_at=None,
+        denied_reason=None,
         approved=False,
     )
     db.session.add(part)
@@ -668,11 +678,11 @@ def test_detail(test_id):
     
     # Current user's participation (if any)
     my_part = Participation.query.filter_by(
-        group_test_id=test_id, user_id=current_user.id, approved=True
+        group_test_id=test_id, user_id=current_user.id
     ).first()
     
     # Show full participant list (approved + pending) to admins + approved members
-    show_participant_list = current_user.is_admin or my_part is not None
+    show_participant_list = current_user.is_admin or (my_part is not None and my_part.approved)
     
     if show_participant_list:
         parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
@@ -877,7 +887,13 @@ def request_participation(test_id):
         group_test_id=test_id, user_id=current_user.id
     ).first()
     if existing:
-        flash('You have already submitted a request for this test.', 'info')
+        if existing.denied:
+            reason_suffix = f" Reason: {existing.denied_reason}" if existing.denied_reason else ''
+            flash(f'Your request for this test was denied by an admin.{reason_suffix}', 'warning')
+        elif existing.approved:
+            flash('You are already approved for this test.', 'info')
+        else:
+            flash('You have already submitted a request for this test.', 'info')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
     form = ParticipationRequestForm()
@@ -896,6 +912,9 @@ def request_participation(test_id):
             state=form.state.data,
             vial_donor=form.vial_donor.data,
             notes=form.notes.data,
+            denied=False,
+            denied_at=None,
+            denied_reason=None,
             approved=False  # Admin must approve
         )
         db.session.add(part)
@@ -917,6 +936,51 @@ def request_participation(test_id):
         return redirect(url_for('main.dashboard'))
     
     return render_template('request_participation.html', test=test, form=form)
+
+
+@main_bp.route('/test/<int:test_id>/reapply', methods=['POST'])
+@login_required
+def reapply_participation(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if test.status != 'recruiting':
+        flash('This test is not currently open for re-requests.', 'warning')
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    part = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id).first()
+    if not part:
+        flash('No prior request found. Submit a new participation request instead.', 'info')
+        return redirect(url_for('main.request_participation', test_id=test_id))
+
+    if part.approved:
+        flash('You are already approved for this test.', 'info')
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    if not part.denied:
+        flash('Your request is already pending admin review.', 'info')
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
+    part.approved = False
+    part.approved_at = None
+    part.requested_at = datetime.utcnow()
+    db.session.commit()
+
+    admin_users = User.query.filter_by(is_admin=True, is_active=True).all()
+    if admin_users:
+        subject = f"Reapply request for {test.title}"
+        body = (
+            f"{current_user.username} has re-applied for the test \"{test.title}\".\n"
+            f"Email: {current_user.email}\n"
+            f"Telegram: {current_user.tg_username or 'Not provided'}\n"
+            f"Review the request here: {request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}\n"
+        )
+        for admin_user in admin_users:
+            send_notification_message(admin_user, admin_user.notification_channel or 'email', subject, body)
+
+    flash('Your request has been re-submitted for admin review.', 'success')
+    return redirect(url_for('main.test_detail', test_id=test_id))
 
 
 # ==================== ADMIN ROUTES ====================
@@ -1092,7 +1156,7 @@ def _build_pending_queue_query(status_filter, search):
         Participation.query
         .join(GroupTest, Participation.group_test_id == GroupTest.id)
         .join(User, Participation.user_id == User.id)
-        .filter(Participation.approved == False)
+        .filter(Participation.approved == False, Participation.denied == False)
     )
 
     if status_filter != 'all':
@@ -1161,6 +1225,9 @@ def approve_from_queue(part_id):
 
     part.approved = True
     part.approved_at = datetime.utcnow()
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
     _recalculate_approved_amounts_for_test(part.group_test)
     db.session.commit()
     flash(f'Approved {part.name or part.user.username}.', 'success')
@@ -1184,7 +1251,7 @@ def approve_selected_from_queue():
 
     pending_parts = (
         Participation.query
-        .filter(Participation.id.in_(valid_ids), Participation.approved == False)
+        .filter(Participation.id.in_(valid_ids), Participation.approved == False, Participation.denied == False)
         .all()
     )
 
@@ -1196,6 +1263,9 @@ def approve_selected_from_queue():
     for part in pending_parts:
         part.approved = True
         part.approved_at = datetime.utcnow()
+        part.denied = False
+        part.denied_at = None
+        part.denied_reason = None
         affected_test_ids.add(part.group_test_id)
 
     for test_id in affected_test_ids:
@@ -1231,6 +1301,9 @@ def approve_filtered_from_queue():
     for part in pending_parts:
         part.approved = True
         part.approved_at = datetime.utcnow()
+        part.denied = False
+        part.denied_at = None
+        part.denied_reason = None
         affected_test_ids.add(part.group_test_id)
 
     for test_id in affected_test_ids:
@@ -1254,9 +1327,21 @@ def deny_from_queue(part_id):
     if part.approved:
         flash('Approved participants cannot be denied from this queue.', 'warning')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+    if part.denied:
+        flash('This request is already denied.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    deny_reason = (request.form.get('deny_reason') or '').strip()
+    if not deny_reason:
+        flash('A denial reason is required.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
     name = part.name or part.user.username
-    db.session.delete(part)
+    part.denied = True
+    part.denied_at = datetime.utcnow()
+    part.denied_reason = deny_reason
+    part.approved = False
+    part.approved_at = None
     db.session.commit()
     flash(f'Denied request for {name}.', 'success')
     return redirect(url_for('main.action_queue', **_queue_redirect_params()))
@@ -1276,14 +1361,27 @@ def deny_selected_from_queue():
         flash('No valid participants were selected.', 'warning')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
-    pending_parts = Participation.query.filter(Participation.id.in_(valid_ids), Participation.approved == False).all()
+    deny_reason = (request.form.get('deny_reason') or '').strip()
+    if not deny_reason:
+        flash('A denial reason is required.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = Participation.query.filter(
+        Participation.id.in_(valid_ids),
+        Participation.approved == False,
+        Participation.denied == False,
+    ).all()
     if not pending_parts:
         flash('Selected participants were already approved or unavailable.', 'info')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
     denied_count = len(pending_parts)
     for part in pending_parts:
-        db.session.delete(part)
+        part.denied = True
+        part.denied_at = datetime.utcnow()
+        part.denied_reason = deny_reason
+        part.approved = False
+        part.approved_at = None
 
     db.session.commit()
     flash(f'Denied {denied_count} pending participant request(s).', 'success')
@@ -1303,6 +1401,9 @@ def update_participant(part_id):
         if form.approved.data and not part.approved:
             part.approved = True
             part.approved_at = datetime.utcnow()
+            part.denied = False
+            part.denied_at = None
+            part.denied_reason = None
             # Auto-calculate owed on approval
             costs = test.calculate_costs()
             part.update_amount_owed(costs)
@@ -1326,6 +1427,9 @@ def approve_request(part_id):
     if not part.approved:
         part.approved = True
         part.approved_at = datetime.utcnow()
+        part.denied = False
+        part.denied_at = None
+        part.denied_reason = None
         costs = part.group_test.calculate_costs()
         part.update_amount_owed(costs)
         db.session.commit()
@@ -1375,8 +1479,12 @@ def add_participant_to_test(test_id):
     test = GroupTest.query.get_or_404(test_id)
     form = AddParticipantForm()
 
-    # Get users who are not already participants in this test
-    existing_participant_ids = [p.user_id for p in test.participations]
+    # Users with active (not denied) records are already represented in this test.
+    # Denied records remain eligible so admins can manually add/approve them later.
+    existing_participant_ids = [
+        p.user_id
+        for p in test.participations.filter(Participation.denied == False).all()
+    ]
     available_users = User.query.filter(User.id.notin_(existing_participant_ids)).all()
 
     form.user_id.choices = [(u.id, f"{u.username} ({u.email})") for u in available_users]
@@ -1387,21 +1495,34 @@ def add_participant_to_test(test_id):
             flash('User not found.', 'danger')
             return redirect(url_for('main.add_participant_to_test', test_id=test_id))
 
-        # Create participation with auto-approval
-        part = Participation(
-            group_test_id=test.id,
-            user_id=user.id,
-            name=user.username,
-            tg_username=user.tg_username,
-            approved=True,
-            approved_at=datetime.utcnow(),
-            active=True
-        )
+        part = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
+        if part:
+            # Reuse prior denied row to preserve request history while restoring access.
+            part.name = user.username
+            part.tg_username = user.tg_username
+            part.active = True
+            part.approved = True
+            part.approved_at = datetime.utcnow()
+            part.denied = False
+            part.denied_at = None
+            part.denied_reason = None
+        else:
+            # Create participation with auto-approval
+            part = Participation(
+                group_test_id=test.id,
+                user_id=user.id,
+                name=user.username,
+                tg_username=user.tg_username,
+                approved=True,
+                approved_at=datetime.utcnow(),
+                denied=False,
+                active=True
+            )
+            db.session.add(part)
+
         # Calculate initial owed amount
         costs = test.calculate_costs()
         part.update_amount_owed(costs)
-
-        db.session.add(part)
         db.session.commit()
         flash(f'Added {user.username} to the test (auto-approved).', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))

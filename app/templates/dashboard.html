@@ -125,7 +125,12 @@
                         {% if test.my_participation %}
                         <div class="mt-1 small">
                             <strong>Your status:</strong>
-                            {% if test.my_participation.approved %}
+                            {% if test.my_participation.denied %}
+                                <span class="badge bg-danger">Denied</span>
+                                {% if test.my_participation.denied_reason %}
+                                    <div class="text-danger-emphasis small mt-1">Reason: {{ test.my_participation.denied_reason }}</div>
+                                {% endif %}
+                            {% elif test.my_participation.approved %}
                                 {% if test.my_participation.vial_donor %}
                                     <span class="badge bg-info">Donor</span>
                                 {% else %}
@@ -155,10 +160,6 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn btn-sm btn-outline-success">Request Join</button>
                                 </form>
-                            {% elif test.my_join_state == 'pending' %}
-                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Join Request Pending</button>
-                            {% elif test.my_join_state == 'approved' %}
-                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Joined</button>
                             {% endif %}
                         {% endif %}
                         <form method="POST" action="{{ url_for('main.toggle_dashboard_hidden', test_id=test.id) }}" class="m-0">

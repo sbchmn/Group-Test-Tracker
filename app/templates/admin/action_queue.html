@@ -71,6 +71,7 @@
         <input type="hidden" name="status" value="{{ status_filter }}">
         <input type="hidden" name="q" value="{{ search }}">
         <input type="hidden" name="page" value="{{ page }}">
+        <input type="hidden" name="deny_reason" id="deny-selected-reason" value="">
         <div id="deny-selected-hidden"></div>
     </form>
 
@@ -80,7 +81,7 @@
                 <button type="submit" class="btn btn-success btn-sm" form="approve-selected-form" onclick="return confirm('Approve selected participants?')">
                     <i class="bi bi-check2-square"></i> Approve Selected
                 </button>
-                <button type="submit" class="btn btn-outline-danger btn-sm ms-1" form="deny-selected-form" onclick="return confirm('Deny selected requests? This removes their pending requests.')">
+                <button type="submit" class="btn btn-outline-danger btn-sm ms-1" form="deny-selected-form" onclick="return confirm('Deny selected requests?')">
                     <i class="bi bi-x-square"></i> Deny Selected
                 </button>
             </div>
@@ -127,11 +128,12 @@
                                     <input type="hidden" name="page" value="{{ page }}">
                                     <button type="submit" class="btn btn-success btn-sm">Approve</button>
                                 </form>
-                                <form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request? This removes the pending request.')">
+                                <form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request?')">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="status" value="{{ status_filter }}">
                                     <input type="hidden" name="q" value="{{ search }}">
                                     <input type="hidden" name="page" value="{{ page }}">
+                                    <input type="hidden" name="deny_reason" class="deny-row-reason" value="">
                                     <button type="submit" class="btn btn-outline-danger btn-sm">Deny</button>
                                 </form>
                             </td>
@@ -201,10 +203,35 @@
 
         const denySelectedForm = document.getElementById('deny-selected-form');
         if (denySelectedForm) {
-            denySelectedForm.addEventListener('submit', function () {
+            denySelectedForm.addEventListener('submit', function (event) {
+                const reason = window.prompt('Enter denial reason to share with the user:');
+                if (!reason || !reason.trim()) {
+                    event.preventDefault();
+                    alert('A denial reason is required.');
+                    return;
+                }
+                const reasonInput = document.getElementById('deny-selected-reason');
+                if (reasonInput) {
+                    reasonInput.value = reason.trim();
+                }
                 syncBulkFormIds('deny-selected-hidden');
             });
         }
+
+        document.querySelectorAll('form[action*="/admin/action-queue/deny/"]').forEach(function (form) {
+            form.addEventListener('submit', function (event) {
+                const reason = window.prompt('Enter denial reason to share with the user:');
+                if (!reason || !reason.trim()) {
+                    event.preventDefault();
+                    alert('A denial reason is required.');
+                    return;
+                }
+                const reasonInput = form.querySelector('.deny-row-reason');
+                if (reasonInput) {
+                    reasonInput.value = reason.trim();
+                }
+            });
+        });
 
         const approveFilteredForm = document.getElementById('approve-filtered-form');
         if (approveFilteredForm) {

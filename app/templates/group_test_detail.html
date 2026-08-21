@@ -232,10 +232,23 @@
             <!-- Regular user actions -->
             {% if test.status == 'recruiting' %}
                 {% if my_part %}
-                    <div class="alert alert-info">
-                        You have requested to join. Status: 
-                        <strong>{% if my_part.approved %}Approved{% else %}Pending Admin Review{% endif %}</strong>
-                    </div>
+                    {% if my_part.denied %}
+                        <div class="alert alert-danger">
+                            <strong>Your join request was denied.</strong>
+                            {% if my_part.denied_reason %}
+                                <div class="mt-1">Reason: {{ my_part.denied_reason }}</div>
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('main.reapply_participation', test_id=test.id) }}" class="mt-2">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Reapply</button>
+                            </form>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info">
+                            You have requested to join. Status:
+                            <strong>{% if my_part.approved %}Approved{% else %}Pending Admin Review{% endif %}</strong>
+                        </div>
+                    {% endif %}
                 {% else %}
                     <div class="card border-success">
                         <div class="card-body text-center">

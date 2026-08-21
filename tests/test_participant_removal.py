@@ -125,7 +125,7 @@ class ParticipantRemovalTests(unittest.TestCase):
             # Test Two has one approved member and a $60 lab total.
             self.assertAlmostEqual(refreshed_pending_two.amount_owed, 60.0, places=2)
 
-    def test_action_queue_deny_selected_removes_pending_requests(self):
+    def test_action_queue_deny_selected_marks_denied_with_reason(self):
         with self.app.app_context():
             db.create_all()
 
@@ -155,14 +155,23 @@ class ParticipantRemovalTests(unittest.TestCase):
 
         response = self.client.post(
             "/admin/action-queue/deny-selected",
-            data={"part_ids": [str(pending_one_id), str(pending_two_id)]},
+            data={
+                "part_ids": [str(pending_one_id), str(pending_two_id)],
+                "deny_reason": "Insufficient verification",
+            },
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
 
         with self.app.app_context():
-            self.assertIsNone(Participation.query.get(pending_one_id))
-            self.assertIsNone(Participation.query.get(pending_two_id))
+            denied_one = Participation.query.get(pending_one_id)
+            denied_two = Participation.query.get(pending_two_id)
+            self.assertIsNotNone(denied_one)
+            self.assertIsNotNone(denied_two)
+            self.assertTrue(denied_one.denied)
+            self.assertTrue(denied_two.denied)
+            self.assertEqual(denied_one.denied_reason, "Insufficient verification")
+            self.assertEqual(denied_two.denied_reason, "Insufficient verification")
 
     def test_action_queue_approve_filtered_requires_confirmation_text(self):
         with self.app.app_context():
@@ -284,6 +293,10 @@ class ParticipantRemovalTests(unittest.TestCase):
             self.assertEqual(len(requests), 1)
             self.assertFalse(requests[0].approved)
 
+        dashboard_after_request = self.client.get("/dashboard", follow_redirects=True)
+        self.assertEqual(dashboard_after_request.status_code, 200)
+        self.assertNotIn("Request Join", dashboard_after_request.get_data(as_text=True))
+
         second_response = self.client.post(
             f"/test/{test_id}/request-quick",
             follow_redirects=True,
@@ -335,7 +348,134 @@ class ParticipantRemovalTests(unittest.TestCase):
         self.assertIn("Approved", body)
         self.assertIn("Pending", body)
         self.assertIn("Not Joined", body)
-        self.assertIn("Join Request Pending", body)
+        self.assertNotIn("Join Request Pending", body)
+
+    def test_group_test_detail_shows_denied_status_and_reason(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test = GroupTest(title="Denied Detail Test", created_by=1, status="recruiting")
+            db.session.add_all([admin, member, test])
+            db.session.commit()
+
+            denied_part = Participation(
+                group_test_id=test.id,
+                user_id=member.id,
+                name=member.username,
+                approved=False,
+                denied=True,
+                denied_reason="Missing required identity verification",
+            )
+            db.session.add(denied_part)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post(
+            "/login",
+            data={"username": "member", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.get(f"/test/{test_id}", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Your join request was denied.", body)
+        self.assertIn("Missing required identity verification", body)
+
+    def test_denied_user_can_reapply_and_reset_denial_state(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test = GroupTest(title="Reapply Test", created_by=1, status="recruiting")
+            db.session.add_all([admin, member, test])
+            db.session.commit()
+
+            denied_part = Participation(
+                group_test_id=test.id,
+                user_id=member.id,
+                name=member.username,
+                approved=False,
+                denied=True,
+                denied_reason="Prior issue",
+            )
+            db.session.add(denied_part)
+            db.session.commit()
+            part_id = denied_part.id
+            test_id = test.id
+
+        self.client.post(
+            "/login",
+            data={"username": "member", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            f"/test/{test_id}/reapply",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            refreshed = Participation.query.get(part_id)
+            self.assertFalse(refreshed.denied)
+            self.assertIsNone(refreshed.denied_at)
+            self.assertIsNone(refreshed.denied_reason)
+            self.assertFalse(refreshed.approved)
+
+    def test_admin_add_participant_can_reactivate_denied_user(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test = GroupTest(title="Manual Add After Denial", created_by=1, status="recruiting", total_lab_cost=80.0)
+            db.session.add_all([admin, member, test])
+            db.session.commit()
+
+            denied_part = Participation(
+                group_test_id=test.id,
+                user_id=member.id,
+                name=member.username,
+                approved=False,
+                denied=True,
+                denied_reason="Docs missing",
+            )
+            db.session.add(denied_part)
+            db.session.commit()
+            test_id = test.id
+            member_id = member.id
+            part_id = denied_part.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin", "password": "password"},
+            follow_redirects=True,
+        )
+
+        add_response = self.client.post(
+            f"/admin/add-participant/{test_id}",
+            data={"user_id": member_id},
+            follow_redirects=True,
+        )
+        self.assertEqual(add_response.status_code, 200)
+
+        with self.app.app_context():
+            parts = Participation.query.filter_by(group_test_id=test_id, user_id=member_id).all()
+            self.assertEqual(len(parts), 1)
+            part = Participation.query.get(part_id)
+            self.assertTrue(part.approved)
+            self.assertFalse(part.denied)
+            self.assertIsNone(part.denied_reason)
 
 
 if __name__ == "__main__":

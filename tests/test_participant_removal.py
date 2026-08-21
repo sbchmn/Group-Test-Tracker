@@ -173,6 +173,94 @@ class ParticipantRemovalTests(unittest.TestCase):
             self.assertEqual(denied_one.denied_reason, "Insufficient verification")
             self.assertEqual(denied_two.denied_reason, "Insufficient verification")
 
+    def test_queue_denial_visible_on_manage_participants_page(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test = GroupTest(title="Visibility Test", created_by=1)
+            db.session.add_all([admin, member, test])
+            db.session.commit()
+
+            pending = Participation(group_test_id=test.id, user_id=member.id, name=member.username, approved=False)
+            db.session.add(pending)
+            db.session.commit()
+            pending_id = pending.id
+            test_id = test.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin", "password": "password"},
+            follow_redirects=True,
+        )
+
+        deny_response = self.client.post(
+            f"/admin/action-queue/deny/{pending_id}",
+            data={"deny_reason": "Missing profile details"},
+            follow_redirects=True,
+        )
+        self.assertEqual(deny_response.status_code, 200)
+
+        manage_response = self.client.get(
+            f"/admin/manage-participants/{test_id}",
+            follow_redirects=True,
+        )
+        self.assertEqual(manage_response.status_code, 200)
+        body = manage_response.get_data(as_text=True)
+        self.assertIn("Denied", body)
+        self.assertIn("Missing profile details", body)
+
+    def test_manage_participants_can_deny_and_reopen_request(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test = GroupTest(title="Manage Actions Test", created_by=1)
+            db.session.add_all([admin, member, test])
+            db.session.commit()
+
+            pending = Participation(group_test_id=test.id, user_id=member.id, name=member.username, approved=False)
+            db.session.add(pending)
+            db.session.commit()
+            pending_id = pending.id
+            test_id = test.id
+
+        self.client.post(
+            "/login",
+            data={"username": "admin", "password": "password"},
+            follow_redirects=True,
+        )
+
+        deny_response = self.client.post(
+            f"/admin/manage-participants/{test_id}/deny/{pending_id}",
+            data={"deny_reason": "Not enough information"},
+            follow_redirects=True,
+        )
+        self.assertEqual(deny_response.status_code, 200)
+
+        with self.app.app_context():
+            denied = Participation.query.get(pending_id)
+            self.assertTrue(denied.denied)
+            self.assertEqual(denied.denied_reason, "Not enough information")
+
+        reopen_response = self.client.post(
+            f"/admin/manage-participants/{test_id}/reopen/{pending_id}",
+            follow_redirects=True,
+        )
+        self.assertEqual(reopen_response.status_code, 200)
+
+        with self.app.app_context():
+            reopened = Participation.query.get(pending_id)
+            self.assertFalse(reopened.denied)
+            self.assertIsNone(reopened.denied_reason)
+            self.assertFalse(reopened.approved)
+
     def test_action_queue_approve_filtered_requires_confirmation_text(self):
         with self.app.app_context():
             db.create_all()

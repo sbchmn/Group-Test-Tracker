@@ -30,6 +30,7 @@
 - Persist denied request state with admin-provided reason and show that reason to end users.
 - Add a reapply workflow for denied users.
 - Ensure admins can still manually add/approve users after a denial.
+- Make denial state/reason visible on Manage Participants and align available admin actions across Action Queue and Manage Participants.
 
 ## Implemented Changes
 - Added shared Tag, PublicResult, and dashboard-hide models plus a `results_posted_at` field on group tests.
@@ -60,6 +61,9 @@
 - Added `POST /test/<id>/reapply` to reset denied requests back to pending review and notify admins.
 - Added Reapply action on group-test detail when a denied request is shown.
 - Updated admin add-participant flow to allow denied users to be selected and reactivated/approved instead of blocked by uniqueness.
+- Added shared participation transition helpers (approve, deny with reason, reopen) used by both action-queue and manage-participants admin flows.
+- Updated Manage Participants table to explicitly show Pending/Approved/Denied state and denial reason.
+- Added Manage Participants deny/reopen endpoints so admins can perform queue-equivalent request-state actions within the test page.
 
 ## Risks and Assumptions
 - Tags should be normalized to a shared tag table so they work across group tests and public results.
@@ -81,6 +85,7 @@
 - Add focused tests for dashboard quick-request flow and join-state grouping labels.
 - Update queue denial tests to assert stored denied state/reason, and add detail-page denied reason rendering test.
 - Add focused tests for denied-user reapply and admin add-participant reactivation after denial.
+- Add focused tests to confirm queue denial appears in Manage Participants and manage-page deny/reopen actions persist correctly.
 
 ## Validation Results
 - Focused test slice passed: `tests.test_notifications`, `tests.test_lab_costs`, and `tests.test_schema_migration`.
@@ -88,6 +93,7 @@
 - Re-ran queue suite after form-structure fix; all queue tests still passed.
 - Dashboard + queue participant suite passed: `python -m unittest tests.test_participant_removal` (7 tests, OK).
 - Reapply/admin-reactivation workflow validated in updated participant suite (`python -m unittest tests.test_participant_removal`, 10 tests, OK).
+- Cross-page action parity + denial visibility validated in updated participant suite (`python -m unittest tests.test_participant_removal`, 12 tests, OK).
 
 ## Documentation Updates
 - README updated to cover tags, public results, dashboard controls, and the current unittest-based validation command.

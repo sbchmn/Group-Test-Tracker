@@ -1139,6 +1139,31 @@ def _recalculate_approved_amounts_for_test(test):
         approved_part.update_amount_owed(costs)
 
 
+def _approve_participation_record(part):
+    part.approved = True
+    part.approved_at = datetime.utcnow()
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
+
+
+def _deny_participation_record(part, reason):
+    part.denied = True
+    part.denied_at = datetime.utcnow()
+    part.denied_reason = reason
+    part.approved = False
+    part.approved_at = None
+
+
+def _reopen_participation_record(part):
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
+    part.approved = False
+    part.approved_at = None
+    part.requested_at = datetime.utcnow()
+
+
 def _parse_participation_ids(raw_ids):
     valid_ids = []
     for raw_id in raw_ids:
@@ -1223,11 +1248,7 @@ def approve_from_queue(part_id):
         flash('Participant is already approved.', 'info')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
-    part.approved = True
-    part.approved_at = datetime.utcnow()
-    part.denied = False
-    part.denied_at = None
-    part.denied_reason = None
+    _approve_participation_record(part)
     _recalculate_approved_amounts_for_test(part.group_test)
     db.session.commit()
     flash(f'Approved {part.name or part.user.username}.', 'success')
@@ -1261,11 +1282,7 @@ def approve_selected_from_queue():
 
     affected_test_ids = set()
     for part in pending_parts:
-        part.approved = True
-        part.approved_at = datetime.utcnow()
-        part.denied = False
-        part.denied_at = None
-        part.denied_reason = None
+        _approve_participation_record(part)
         affected_test_ids.add(part.group_test_id)
 
     for test_id in affected_test_ids:
@@ -1299,11 +1316,7 @@ def approve_filtered_from_queue():
 
     affected_test_ids = set()
     for part in pending_parts:
-        part.approved = True
-        part.approved_at = datetime.utcnow()
-        part.denied = False
-        part.denied_at = None
-        part.denied_reason = None
+        _approve_participation_record(part)
         affected_test_ids.add(part.group_test_id)
 
     for test_id in affected_test_ids:
@@ -1337,11 +1350,7 @@ def deny_from_queue(part_id):
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
     name = part.name or part.user.username
-    part.denied = True
-    part.denied_at = datetime.utcnow()
-    part.denied_reason = deny_reason
-    part.approved = False
-    part.approved_at = None
+    _deny_participation_record(part, deny_reason)
     db.session.commit()
     flash(f'Denied request for {name}.', 'success')
     return redirect(url_for('main.action_queue', **_queue_redirect_params()))
@@ -1377,11 +1386,7 @@ def deny_selected_from_queue():
 
     denied_count = len(pending_parts)
     for part in pending_parts:
-        part.denied = True
-        part.denied_at = datetime.utcnow()
-        part.denied_reason = deny_reason
-        part.approved = False
-        part.approved_at = None
+        _deny_participation_record(part, deny_reason)
 
     db.session.commit()
     flash(f'Denied {denied_count} pending participant request(s).', 'success')
@@ -1399,11 +1404,7 @@ def update_participant(part_id):
     if form.validate_on_submit():
         form.populate_obj(part)
         if form.approved.data and not part.approved:
-            part.approved = True
-            part.approved_at = datetime.utcnow()
-            part.denied = False
-            part.denied_at = None
-            part.denied_reason = None
+            _approve_participation_record(part)
             # Auto-calculate owed on approval
             costs = test.calculate_costs()
             part.update_amount_owed(costs)
@@ -1425,16 +1426,56 @@ def approve_request(part_id):
     """Quick approve endpoint (can be called from manage page)."""
     part = Participation.query.get_or_404(part_id)
     if not part.approved:
-        part.approved = True
-        part.approved_at = datetime.utcnow()
-        part.denied = False
-        part.denied_at = None
-        part.denied_reason = None
+        _approve_participation_record(part)
         costs = part.group_test.calculate_costs()
         part.update_amount_owed(costs)
         db.session.commit()
         flash(f'Approved {part.name or part.user.username} for test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
+
+
+@main_bp.route('/admin/manage-participants/<int:test_id>/deny/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def deny_participant_from_manage(test_id, part_id):
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.get_or_404(part_id)
+    if part.group_test_id != test.id:
+        abort(404)
+    if part.approved:
+        flash('Approved participants cannot be denied directly. Unapprove first if needed.', 'warning')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+    if part.denied:
+        flash('This request is already denied.', 'info')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    deny_reason = (request.form.get('deny_reason') or '').strip()
+    if not deny_reason:
+        flash('A denial reason is required.', 'warning')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    _deny_participation_record(part, deny_reason)
+    db.session.commit()
+    flash(f'Denied request for {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
+
+
+@main_bp.route('/admin/manage-participants/<int:test_id>/reopen/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def reopen_participant_from_manage(test_id, part_id):
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.get_or_404(part_id)
+    if part.group_test_id != test.id:
+        abort(404)
+    if not part.denied:
+        flash('Only denied requests can be reopened.', 'info')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    _reopen_participation_record(part)
+    db.session.commit()
+    flash(f'Reopened request for {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
 
 
 @main_bp.route('/admin/remove-participant/<int:part_id>', methods=['POST'])

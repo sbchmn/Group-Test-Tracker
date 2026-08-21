@@ -656,7 +656,7 @@ def my_results():
             'summary': test.description or '',
             'results_link': test.results_link,
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,
-            'source_label': test.title,
+            'source_label': 'Group Test',
             'tags': [tag.name for tag in test.tags],
             'tag_text': test.tag_names(),
             'search_text': ' '.join([

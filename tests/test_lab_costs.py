@@ -65,6 +65,48 @@ class LabCostTests(unittest.TestCase):
                 {"name": "STERILITY", "price": 240.0, "vials_needed": 0},
             ])
 
+    def test_create_test_saves_lab_item_results_when_provided(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin-results", email="admin-results@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "admin-results", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            "/admin/create-test",
+            data={
+                "title": "Lab Result Test",
+                "status": "closed",
+                "results_link": "https://example.test/results",
+                "total_lab_cost": "600",
+                "shipping_cost": "25",
+                "refund_per_donor": "20",
+                "lab_name": "North Lab",
+                "lab_item_name": ["MASS", "STERILITY"],
+                "lab_item_price": ["360", "240"],
+                "lab_item_vials": ["1", "0"],
+                "lab_item_result": ["98.7% purity", "Pass"],
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            test = GroupTest.query.filter_by(title="Lab Result Test").first()
+            self.assertIsNotNone(test)
+            self.assertEqual(test.lab_test_details, [
+                {"name": "MASS", "price": 360.0, "vials_needed": 1, "result": "98.7% purity"},
+                {"name": "STERILITY", "price": 240.0, "vials_needed": 0, "result": "Pass"},
+            ])
+
     def test_create_test_saves_donor_shipping_reimbursement_selection(self):
         with self.app.app_context():
             db.create_all()

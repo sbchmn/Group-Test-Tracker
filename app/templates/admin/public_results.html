@@ -4,25 +4,24 @@
 
 {% block scripts %}
 <script>
-function attachTagPicker(input) {
-    if (!input) return;
-    const openPicker = () => {
-        if (typeof input.showPicker === 'function') {
-            try {
-                input.showPicker();
-            } catch (error) {
-                // Some browsers block picker display outside a trusted gesture.
-            }
-        }
-    };
-
-    input.addEventListener('focus', openPicker);
-    input.addEventListener('click', openPicker);
-    input.addEventListener('keydown', function(event) {
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            openPicker();
-        }
-    });
+function addResultItemRow(name = '', result = '') {
+    const container = document.getElementById('resultItemsContainer');
+    const row = document.createElement('div');
+    row.className = 'row g-2 mb-2 result-item-row align-items-end';
+    row.innerHTML = `
+        <div class="col-md-5">
+            <label class="form-label small">Item Name</label>
+            <input type="text" name="result_item_name" class="form-control form-control-sm" placeholder="MASS / STERILITY / etc." value="${name}">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small">Result</label>
+            <input type="text" name="result_item_value" class="form-control form-control-sm" placeholder="Pass / 98.7% / ND" value="${result}">
+        </div>
+        <div class="col-md-1">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.result-item-row').remove()">×</button>
+        </div>
+    `;
+    container.appendChild(row);
 }
 
 function attachTagMenu(input, menu, button) {
@@ -51,6 +50,11 @@ function attachTagMenu(input, menu, button) {
 }
 
 window.addEventListener('DOMContentLoaded', function() {
+    const container = document.getElementById('resultItemsContainer');
+    if (container && container.children.length === 0) {
+        addResultItemRow('', '');
+    }
+
     attachTagMenu(
         document.querySelector('[data-tag-input="true"]'),
         document.querySelector('[data-tag-menu="true"]'),
@@ -90,6 +94,29 @@ window.addEventListener('DOMContentLoaded', function() {
                     <div class="mb-3">
                         {{ form.results_link.label(class="form-label") }}
                         {{ form.results_link(class="form-control", placeholder="https://...") }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Itemized Results</label>
+                        <div id="resultItemsContainer" class="mb-2">
+                            {% if editing_result and editing_result.item_results %}
+                                {% for item in editing_result.item_results %}
+                                <div class="row g-2 mb-2 result-item-row align-items-end">
+                                    <div class="col-md-5">
+                                        <label class="form-label small">Item Name</label>
+                                        <input type="text" name="result_item_name" class="form-control form-control-sm" value="{{ item.name }}">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Result</label>
+                                        <input type="text" name="result_item_value" class="form-control form-control-sm" value="{{ item.result or '' }}">
+                                    </div>
+                                    <div class="col-md-1">
+                                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.result-item-row').remove()">×</button>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addResultItemRow('', '')">Add Result Item</button>
                     </div>
                     <div class="mb-3">
                         {{ form.tag_names.label(class="form-label") }}

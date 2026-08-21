@@ -111,16 +111,16 @@
 // Dynamic lab test rows (matches original multi-row lab test section)
 let labTestIndex = 0;
 
-function addLabTestRow(name = '', price = '', vials = '') {
+function addLabTestRow(name = '', price = '', vials = '', result = '') {
     const container = document.getElementById('labTestsContainer');
     const row = document.createElement('div');
     row.className = 'row g-2 mb-2 lab-test-row align-items-end';
     row.innerHTML = `
-        <div class="col-md-5">
+        <div class="col-md-4">
             <label class="form-label small">Item Name</label>
             <input type="text" name="lab_item_name" class="form-control form-control-sm" placeholder="Test name (e.g. MASS, PURITY + ID)" value="${name}">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label small">Price</label>
             <input type="number" step="0.01" name="lab_item_price" class="form-control form-control-sm lab-price" placeholder="Price $" value="${price}" onchange="updateTotalLabCost()">
         </div>
@@ -128,7 +128,11 @@ function addLabTestRow(name = '', price = '', vials = '') {
             <label class="form-label small">Vials</label>
             <input type="number" name="lab_item_vials" class="form-control form-control-sm" placeholder="Vials" value="${vials}">
         </div>
-        <div class="col-md-2">
+        <div class="col-md-3">
+            <label class="form-label small">Result</label>
+            <input type="text" name="lab_item_result" class="form-control form-control-sm" placeholder="Pass / 98.7% / ND" value="${result}">
+        </div>
+        <div class="col-md-1">
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.lab-test-row').remove(); updateTotalLabCost()">×</button>
         </div>
     `;
@@ -197,9 +201,9 @@ function attachTagMenu(input, menu, button) {
 window.onload = function() {
     const container = document.getElementById('labTestsContainer');
     if (container.children.length === 0) {
-        addLabTestRow('MASS, PURITY + ID', '360', '1');
-        addLabTestRow('STERILITY', '290', '0');
-        addLabTestRow('ENDOTOXIN ANALYSIS', '180', '0');
+        addLabTestRow('MASS, PURITY + ID', '360', '1', '');
+        addLabTestRow('STERILITY', '290', '0', '');
+        addLabTestRow('ENDOTOXIN ANALYSIS', '180', '0', '');
     }
 
     attachTagMenu(

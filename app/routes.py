@@ -19,6 +19,7 @@ from wtforms import (
 from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
 from functools import wraps
+from itertools import zip_longest
 
 from . import db
 import os
@@ -272,6 +273,20 @@ def apply_tags_to_record(record, tag_text):
 
 def get_all_tag_names():
     return [tag.name for tag in Tag.query.order_by(Tag.name).all()]
+
+
+def parse_item_results(names, results):
+    items = []
+    for item_name, result_text in zip_longest(names, results, fillvalue=''):
+        item_name = (item_name or '').strip()
+        result_text = (result_text or '').strip()
+        if not item_name:
+            continue
+        item = {'name': item_name}
+        if result_text:
+            item['result'] = result_text
+        items.append(item)
+    return items
 
 
 def get_group_test_sort_value(test, sort_by):
@@ -657,6 +672,14 @@ def my_results():
             'results_link': test.results_link,
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,
             'source_label': 'Group Test',
+            'lab_item_results': [
+                {
+                    'name': item.get('name') or '',
+                    'result': item.get('result') or '',
+                }
+                for item in (test.lab_test_details or [])
+                if item.get('result')
+            ],
             'tags': [tag.name for tag in test.tags],
             'tag_text': test.tag_names(),
             'search_text': ' '.join([
@@ -676,6 +699,14 @@ def my_results():
             'results_link': result.results_link,
             'posted_at': result.posted_at,
             'source_label': 'Public Result',
+            'lab_item_results': [
+                {
+                    'name': item.get('name') or '',
+                    'result': item.get('result') or '',
+                }
+                for item in (result.item_results or [])
+                if item.get('name')
+            ],
             'tags': [tag.name for tag in result.tags],
             'tag_text': result.tag_names(),
             'search_text': ' '.join([
@@ -838,7 +869,8 @@ def create_test():
         names = request.form.getlist('lab_item_name')
         prices = request.form.getlist('lab_item_price')
         vials = request.form.getlist('lab_item_vials')
-        for name, price, vial_count in zip(names, prices, vials):
+        results = request.form.getlist('lab_item_result')
+        for name, price, vial_count, result_text in zip_longest(names, prices, vials, results, fillvalue=''):
             name = (name or '').strip()
             if not name:
                 continue
@@ -850,11 +882,15 @@ def create_test():
                 vial_value = int(vial_count or 0)
             except ValueError:
                 vial_value = 0
-            lab_items.append({
+            item = {
                 'name': name,
                 'price': round(price_value, 2),
                 'vials_needed': vial_value,
-            })
+            }
+            result_text = (result_text or '').strip()
+            if result_text:
+                item['result'] = result_text
+            lab_items.append(item)
 
         test = GroupTest(
             title=form.title.data,
@@ -908,7 +944,8 @@ def edit_test(test_id):
         names = request.form.getlist('lab_item_name')
         prices = request.form.getlist('lab_item_price')
         vials = request.form.getlist('lab_item_vials')
-        for name, price, vial_count in zip(names, prices, vials):
+        results = request.form.getlist('lab_item_result')
+        for name, price, vial_count, result_text in zip_longest(names, prices, vials, results, fillvalue=''):
             name = (name or '').strip()
             if not name:
                 continue
@@ -920,11 +957,15 @@ def edit_test(test_id):
                 vial_value = int(vial_count or 0)
             except ValueError:
                 vial_value = 0
-            lab_items.append({
+            item = {
                 'name': name,
                 'price': round(price_value, 2),
                 'vials_needed': vial_value,
-            })
+            }
+            result_text = (result_text or '').strip()
+            if result_text:
+                item['result'] = result_text
+            lab_items.append(item)
         test.lab_name = form.lab_name.data or None
         test.lab_test_details = lab_items
         test.total_lab_cost = form.total_lab_cost.data or 0.0
@@ -1303,10 +1344,15 @@ def delete_test(test_id):
 def manage_public_results():
     form = PublicResultForm()
     if form.validate_on_submit():
+        item_results = parse_item_results(
+            request.form.getlist('result_item_name'),
+            request.form.getlist('result_item_value'),
+        )
         result = PublicResult(
             title=form.title.data,
             summary=form.summary.data,
             results_link=form.results_link.data.strip(),
+            item_results=item_results,
             created_by=current_user.id,
         )
         db.session.add(result)
@@ -1336,6 +1382,10 @@ def edit_public_result(result_id):
         form.tag_names.data = result.tag_names()
 
     if form.validate_on_submit():
+        result.item_results = parse_item_results(
+            request.form.getlist('result_item_name'),
+            request.form.getlist('result_item_value'),
+        )
         result.title = form.title.data
         result.summary = form.summary.data
         result.results_link = form.results_link.data.strip()

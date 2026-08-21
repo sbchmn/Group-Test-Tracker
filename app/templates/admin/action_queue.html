@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Action Queue{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="mb-1">Admin Action Queue</h3>
+        <p class="text-muted mb-0">Approve pending participation requests across all group tests from one page.</p>
+    </div>
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label for="status" class="form-label mb-1">Test Status</label>
+                <select id="status" name="status" class="form-select form-select-sm">
+                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                    <option value="recruiting" {% if status_filter == 'recruiting' %}selected{% endif %}>Recruiting</option>
+                    <option value="testing" {% if status_filter == 'testing' %}selected{% endif %}>Testing</option>
+                    <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>Closed</option>
+                </select>
+            </div>
+            <div class="col-md-5">
+                <label for="q" class="form-label mb-1">Search</label>
+                <input id="q" name="q" value="{{ search }}" class="form-control form-control-sm" placeholder="Test title, compound, participant, or email">
+            </div>
+            <div class="col-md-4 text-md-end">
+                <button class="btn btn-sm btn-primary" type="submit">Apply Filters</button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.action_queue') }}">Reset</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if not pending_parts %}
+    <div class="alert alert-success">No pending participation requests match your filters.</div>
+{% else %}
+    <div class="card border-warning mb-3">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('main.approve_filtered_from_queue') }}" id="approve-filtered-form" class="row g-2 align-items-end">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <input type="hidden" name="q" value="{{ search }}">
+                <input type="hidden" name="page" value="{{ page }}">
+                <div class="col-md-7">
+                    <label for="confirm_text" class="form-label mb-1">Approve all filtered requests</label>
+                    <input id="confirm_text" name="confirm_text" class="form-control form-control-sm" placeholder="Type APPROVE FILTERED to confirm" required>
+                </div>
+                <div class="col-md-5 text-md-end">
+                    <button type="submit" class="btn btn-sm btn-warning">
+                        <i class="bi bi-exclamation-triangle"></i> Approve All Filtered
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <form method="POST" action="{{ url_for('main.approve_selected_from_queue') }}" id="approve-selected-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="status" value="{{ status_filter }}">
+        <input type="hidden" name="q" value="{{ search }}">
+        <input type="hidden" name="page" value="{{ page }}">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="text-muted small">Showing {{ pending_parts|length }} request(s) on this page. Total filtered: {{ pending_parts_pagination.total }}</span>
+            <div>
+                <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('Approve selected participants?')">
+                    <i class="bi bi-check2-square"></i> Approve Selected
+                </button>
+                <button type="submit" class="btn btn-outline-danger btn-sm ms-1" formaction="{{ url_for('main.deny_selected_from_queue') }}" onclick="return confirm('Deny selected requests? This removes their pending requests.')">
+                    <i class="bi bi-x-square"></i> Deny Selected
+                </button>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 40px;"><input type="checkbox" id="select-all"></th>
+                        <th>Participant</th>
+                        <th>Group Test</th>
+                        <th>Status</th>
+                        <th>Requested</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for part in pending_parts %}
+                        <tr>
+                            <td>
+                                <input type="checkbox" name="part_ids" value="{{ part.id }}" class="part-checkbox">
+                            </td>
+                            <td>
+                                <strong>{{ part.name or part.user.username }}</strong>
+                                <div class="small text-muted">{{ part.user.email }}</div>
+                            </td>
+                            <td>
+                                <a href="{{ url_for('main.test_detail', test_id=part.group_test.id) }}">{{ part.group_test.title }}</a>
+                                {% if part.group_test.compound %}
+                                    <div class="small text-muted">{{ part.group_test.compound }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary text-uppercase">{{ part.group_test.status }}</span>
+                            </td>
+                            <td>{{ part.requested_at.strftime('%Y-%m-%d %H:%M') if part.requested_at else 'n/a' }}</td>
+                            <td class="text-end">
+                                <a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage Test</a>
+                                <form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="status" value="{{ status_filter }}">
+                                    <input type="hidden" name="q" value="{{ search }}">
+                                    <input type="hidden" name="page" value="{{ page }}">
+                                    <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                                </form>
+                                <form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request? This removes the pending request.')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="status" value="{{ status_filter }}">
+                                    <input type="hidden" name="q" value="{{ search }}">
+                                    <input type="hidden" name="page" value="{{ page }}">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm">Deny</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if pending_parts_pagination.pages > 1 %}
+            <nav aria-label="Queue pagination" class="mt-3">
+                <ul class="pagination pagination-sm">
+                    <li class="page-item {% if not pending_parts_pagination.has_prev %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pending_parts_pagination.prev_num if pending_parts_pagination.has_prev else 1) }}">Previous</a>
+                    </li>
+                    {% for pnum in pending_parts_pagination.iter_pages(left_edge=1, left_current=1, right_current=2, right_edge=1) %}
+                        {% if pnum %}
+                            <li class="page-item {% if pnum == pending_parts_pagination.page %}active{% endif %}">
+                                <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pnum) }}">{{ pnum }}</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        {% endif %}
+                    {% endfor %}
+                    <li class="page-item {% if not pending_parts_pagination.has_next %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pending_parts_pagination.next_num if pending_parts_pagination.has_next else pending_parts_pagination.pages) }}">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        {% endif %}
+    </form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const selectAll = document.getElementById('select-all');
+        if (!selectAll) return;
+        const checkboxes = Array.from(document.querySelectorAll('.part-checkbox'));
+        selectAll.addEventListener('change', function () {
+            checkboxes.forEach(function (cb) {
+                cb.checked = selectAll.checked;
+            });
+        });
+
+        const approveFilteredForm = document.getElementById('approve-filtered-form');
+        if (approveFilteredForm) {
+            approveFilteredForm.addEventListener('submit', function (event) {
+                const value = (document.getElementById('confirm_text') || {}).value || '';
+                if (value.trim() !== 'APPROVE FILTERED') {
+                    event.preventDefault();
+                    alert('Type APPROVE FILTERED exactly to confirm.');
+                }
+            });
+        }
+    })();
+</script>
+{% endblock %}

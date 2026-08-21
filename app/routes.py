@@ -20,6 +20,7 @@ from wtforms.validators import DataRequired, Email, Length, Optional, NumberRang
 from datetime import datetime, date
 from functools import wraps
 from itertools import zip_longest
+from sqlalchemy import or_
 
 from . import db
 import os
@@ -1001,6 +1002,228 @@ def manage_participants(test_id):
             p.current_fair_share = costs.get('non_donor_pays', 0)
 
     return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
+
+
+def _recalculate_approved_amounts_for_test(test):
+    """Keep approved participant balances consistent after approval changes."""
+    costs = test.calculate_costs()
+    for approved_part in test.participations.filter_by(approved=True).all():
+        approved_part.update_amount_owed(costs)
+
+
+def _parse_participation_ids(raw_ids):
+    valid_ids = []
+    for raw_id in raw_ids:
+        try:
+            value = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            valid_ids.append(value)
+    return valid_ids
+
+
+def _build_pending_queue_query(status_filter, search):
+    pending_query = (
+        Participation.query
+        .join(GroupTest, Participation.group_test_id == GroupTest.id)
+        .join(User, Participation.user_id == User.id)
+        .filter(Participation.approved == False)
+    )
+
+    if status_filter != 'all':
+        pending_query = pending_query.filter(GroupTest.status == status_filter)
+
+    if search:
+        like_term = f"%{search}%"
+        pending_query = pending_query.filter(
+            or_(
+                GroupTest.title.ilike(like_term),
+                GroupTest.compound.ilike(like_term),
+                Participation.name.ilike(like_term),
+                User.username.ilike(like_term),
+                User.email.ilike(like_term),
+            )
+        )
+
+    return pending_query
+
+
+def _queue_redirect_params():
+    return {
+        'status': (request.form.get('status') or request.args.get('status') or 'all').strip().lower(),
+        'q': (request.form.get('q') or request.args.get('q') or '').strip(),
+        'page': request.form.get('page') or request.args.get('page') or 1,
+    }
+
+
+@main_bp.route('/admin/action-queue')
+@login_required
+@admin_required
+def action_queue():
+    status_filter = (request.args.get('status') or 'all').strip().lower()
+    search = (request.args.get('q') or '').strip()
+    page = request.args.get('page', default=1, type=int) or 1
+    per_page = 25
+    if status_filter not in {'all', 'recruiting', 'testing', 'closed'}:
+        status_filter = 'all'
+    if page < 1:
+        page = 1
+
+    pending_query = _build_pending_queue_query(status_filter, search)
+    pending_parts_pagination = pending_query.order_by(Participation.requested_at.asc(), GroupTest.start_date.asc()).paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+    return render_template(
+        'admin/action_queue.html',
+        pending_parts=pending_parts_pagination.items,
+        pending_parts_pagination=pending_parts_pagination,
+        status_filter=status_filter,
+        search=search,
+        page=page,
+    )
+
+
+@main_bp.route('/admin/action-queue/approve/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def approve_from_queue(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if part.approved:
+        flash('Participant is already approved.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    part.approved = True
+    part.approved_at = datetime.utcnow()
+    _recalculate_approved_amounts_for_test(part.group_test)
+    db.session.commit()
+    flash(f'Approved {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/action-queue/approve-selected', methods=['POST'])
+@login_required
+@admin_required
+def approve_selected_from_queue():
+    part_ids = request.form.getlist('part_ids')
+    if not part_ids:
+        flash('Select at least one pending participant to approve.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    valid_ids = _parse_participation_ids(part_ids)
+
+    if not valid_ids:
+        flash('No valid participants were selected.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = (
+        Participation.query
+        .filter(Participation.id.in_(valid_ids), Participation.approved == False)
+        .all()
+    )
+
+    if not pending_parts:
+        flash('Selected participants were already approved or unavailable.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    affected_test_ids = set()
+    for part in pending_parts:
+        part.approved = True
+        part.approved_at = datetime.utcnow()
+        affected_test_ids.add(part.group_test_id)
+
+    for test_id in affected_test_ids:
+        test = GroupTest.query.get(test_id)
+        if test:
+            _recalculate_approved_amounts_for_test(test)
+
+    db.session.commit()
+    flash(f'Approved {len(pending_parts)} pending participant(s) across {len(affected_test_ids)} test(s).', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/action-queue/approve-filtered', methods=['POST'])
+@login_required
+@admin_required
+def approve_filtered_from_queue():
+    status_filter = (request.form.get('status') or 'all').strip().lower()
+    search = (request.form.get('q') or '').strip()
+    confirm_text = (request.form.get('confirm_text') or '').strip()
+    if status_filter not in {'all', 'recruiting', 'testing', 'closed'}:
+        status_filter = 'all'
+
+    if confirm_text != 'APPROVE FILTERED':
+        flash('Bulk approve canceled. Type APPROVE FILTERED to continue.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = _build_pending_queue_query(status_filter, search).all()
+    if not pending_parts:
+        flash('No pending requests matched your current filters.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    affected_test_ids = set()
+    for part in pending_parts:
+        part.approved = True
+        part.approved_at = datetime.utcnow()
+        affected_test_ids.add(part.group_test_id)
+
+    for test_id in affected_test_ids:
+        test = GroupTest.query.get(test_id)
+        if test:
+            _recalculate_approved_amounts_for_test(test)
+
+    db.session.commit()
+    flash(
+        f'Approved all filtered pending requests: {len(pending_parts)} participant(s) across {len(affected_test_ids)} test(s).',
+        'success',
+    )
+    return redirect(url_for('main.action_queue', status=status_filter, q=search, page=1))
+
+
+@main_bp.route('/admin/action-queue/deny/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def deny_from_queue(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if part.approved:
+        flash('Approved participants cannot be denied from this queue.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    name = part.name or part.user.username
+    db.session.delete(part)
+    db.session.commit()
+    flash(f'Denied request for {name}.', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/action-queue/deny-selected', methods=['POST'])
+@login_required
+@admin_required
+def deny_selected_from_queue():
+    part_ids = request.form.getlist('part_ids')
+    if not part_ids:
+        flash('Select at least one pending participant to deny.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    valid_ids = _parse_participation_ids(part_ids)
+    if not valid_ids:
+        flash('No valid participants were selected.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = Participation.query.filter(Participation.id.in_(valid_ids), Participation.approved == False).all()
+    if not pending_parts:
+        flash('Selected participants were already approved or unavailable.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    denied_count = len(pending_parts)
+    for part in pending_parts:
+        db.session.delete(part)
+
+    db.session.commit()
+    flash(f'Denied {denied_count} pending participant request(s).', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
 
 @main_bp.route('/admin/update-participant/<int:part_id>', methods=['GET', 'POST'])

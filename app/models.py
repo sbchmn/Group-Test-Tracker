@@ -98,6 +98,7 @@ class PublicResult(db.Model):
     title = db.Column(db.String(200), nullable=False)
     summary = db.Column(db.Text, nullable=True)
     results_link = db.Column(db.String(500), nullable=False)
+    item_results = db.Column(db.JSON, nullable=True)
     posted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

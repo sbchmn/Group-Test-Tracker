@@ -275,6 +275,20 @@ def get_all_tag_names():
     return [tag.name for tag in Tag.query.order_by(Tag.name).all()]
 
 
+def parse_item_results(names, results):
+    items = []
+    for item_name, result_text in zip_longest(names, results, fillvalue=''):
+        item_name = (item_name or '').strip()
+        result_text = (result_text or '').strip()
+        if not item_name:
+            continue
+        item = {'name': item_name}
+        if result_text:
+            item['result'] = result_text
+        items.append(item)
+    return items
+
+
 def get_group_test_sort_value(test, sort_by):
     if sort_by == 'title':
         return (test.title or '').lower()
@@ -685,7 +699,14 @@ def my_results():
             'results_link': result.results_link,
             'posted_at': result.posted_at,
             'source_label': 'Public Result',
-            'lab_item_results': [],
+            'lab_item_results': [
+                {
+                    'name': item.get('name') or '',
+                    'result': item.get('result') or '',
+                }
+                for item in (result.item_results or [])
+                if item.get('name')
+            ],
             'tags': [tag.name for tag in result.tags],
             'tag_text': result.tag_names(),
             'search_text': ' '.join([
@@ -1323,10 +1344,15 @@ def delete_test(test_id):
 def manage_public_results():
     form = PublicResultForm()
     if form.validate_on_submit():
+        item_results = parse_item_results(
+            request.form.getlist('result_item_name'),
+            request.form.getlist('result_item_value'),
+        )
         result = PublicResult(
             title=form.title.data,
             summary=form.summary.data,
             results_link=form.results_link.data.strip(),
+            item_results=item_results,
             created_by=current_user.id,
         )
         db.session.add(result)
@@ -1356,6 +1382,10 @@ def edit_public_result(result_id):
         form.tag_names.data = result.tag_names()
 
     if form.validate_on_submit():
+        result.item_results = parse_item_results(
+            request.form.getlist('result_item_name'),
+            request.form.getlist('result_item_value'),
+        )
         result.title = form.title.data
         result.summary = form.summary.data
         result.results_link = form.results_link.data.strip()

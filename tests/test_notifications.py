@@ -399,6 +399,42 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(refreshed.results_link, "https://example.test/updated")
             self.assertEqual([tag.name for tag in refreshed.tags], ["Shed GB#3", "tirz"])
 
+    def test_admin_can_store_itemized_public_result_rows(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin-public-items", email="admin-public-items@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "admin-public-items", "password": "secret"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            "/admin/public-results",
+            data={
+                "title": "Public Result With Items",
+                "summary": "Summary",
+                "results_link": "https://example.test/public-result",
+                "tag_names": "tirz",
+                "result_item_name": ["MASS", "STERILITY"],
+                "result_item_value": ["98.7% purity", "Pass"],
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            result = PublicResult.query.filter_by(title="Public Result With Items").first()
+            self.assertIsNotNone(result)
+            self.assertEqual(result.item_results, [
+                {"name": "MASS", "result": "98.7% purity"},
+                {"name": "STERILITY", "result": "Pass"},
+            ])
+
 
 if __name__ == "__main__":
     unittest.main()

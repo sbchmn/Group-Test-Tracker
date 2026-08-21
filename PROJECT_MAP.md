@@ -35,6 +35,7 @@
 - Expanded dashboard grouping to include compound and made filter panels collapsible on dashboard and My Results pages.
 - Filter panels on dashboard and My Results now default collapsed to avoid reopening automatically for users.
 - Added optional free-text results to each lab test item in `lab_test_details` and display them on group test detail and My Results views.
+- Added itemized public result rows with a new JSON column and admin create/edit UI, rendered on My Results alongside public result entries.
 
 ## Risks and Assumptions
 - Tags should be normalized to a shared tag table so they work across group tests and public results.

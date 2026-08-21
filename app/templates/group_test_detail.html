@@ -285,6 +285,7 @@
                             <tr>
                                 <th>Name / TG</th>
                                 <th>Role</th>
+                                <th>Request State</th>
                                 <th>Vendor Order</th>
                                 <th>Individual Fee</th>
                                 <th>Lab Fee Paid</th>
@@ -292,7 +293,7 @@
                         </thead>
                         <tbody>
                             {% for p in participations %}
-                            <tr class="{% if not p.approved %}table-warning{% endif %}">
+                            <tr class="{% if p.denied %}table-danger{% elif not p.approved %}table-warning{% endif %}">
                                 <td class="small">
                                     {{ p.name or p.user.username }}<br>
                                     <span class="text-muted">{{ p.tg_username or '' }}</span>
@@ -303,7 +304,23 @@
                                     </span>
                                 </td>
                                 <td>
-                                    <span class="badge bg-light text-dark">{{ p.order_status or 'pending' }}</span>
+                                    {% if p.approved %}
+                                        <span class="badge bg-success">Approved</span>
+                                    {% elif p.denied %}
+                                        <span class="badge bg-danger">Denied</span>
+                                        {% if p.denied_reason %}
+                                            <div class="small text-danger-emphasis mt-1">{{ p.denied_reason }}</div>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">Pending Review</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if p.denied %}
+                                        <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">Denied</span>
+                                    {% else %}
+                                        <span class="badge bg-light text-dark">{{ p.order_status or 'pending' }}</span>
+                                    {% endif %}
                                 </td>
                                 <td class="small text-success">
                                     ${{ '%.2f'|format( (p.amount_owed or 0) - (p.amount_paid or 0) if (p.amount_owed or 0) > (p.amount_paid or 0) else 0 ) }}

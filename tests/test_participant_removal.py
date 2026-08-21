@@ -473,6 +473,7 @@ class ParticipantRemovalTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("Your join request was denied.", body)
         self.assertIn("Missing required identity verification", body)
+        self.assertNotIn("Pending Admin Review", body)
 
     def test_denied_user_can_reapply_and_reset_denial_state(self):
         with self.app.app_context():

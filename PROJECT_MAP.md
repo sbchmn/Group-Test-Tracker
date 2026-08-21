@@ -64,6 +64,7 @@
 - Added shared participation transition helpers (approve, deny with reason, reopen) used by both action-queue and manage-participants admin flows.
 - Updated Manage Participants table to explicitly show Pending/Approved/Denied state and denial reason.
 - Added Manage Participants deny/reopen endpoints so admins can perform queue-equivalent request-state actions within the test page.
+- Updated test-detail participant table to show explicit request state (Approved/Pending/Denied) so denied users are never rendered as pending.
 
 ## Risks and Assumptions
 - Tags should be normalized to a shared tag table so they work across group tests and public results.
@@ -94,6 +95,7 @@
 - Dashboard + queue participant suite passed: `python -m unittest tests.test_participant_removal` (7 tests, OK).
 - Reapply/admin-reactivation workflow validated in updated participant suite (`python -m unittest tests.test_participant_removal`, 10 tests, OK).
 - Cross-page action parity + denial visibility validated in updated participant suite (`python -m unittest tests.test_participant_removal`, 12 tests, OK).
+- Reconfirmed denied-vs-pending detail-page rendering via updated participant suite assertions (`python -m unittest tests.test_participant_removal`, 12 tests, OK).
 
 ## Documentation Updates
 - README updated to cover tags, public results, dashboard controls, and the current unittest-based validation command.

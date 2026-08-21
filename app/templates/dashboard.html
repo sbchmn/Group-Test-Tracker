@@ -40,6 +40,7 @@
                 <label class="form-label">Group by</label>
                 <select name="group_by" class="form-select">
                     <option value="status" {% if group_by == 'status' %}selected{% endif %}>Status</option>
+                    <option value="join_state" {% if group_by == 'join_state' %}selected{% endif %}>Your Join Status</option>
                     <option value="title" {% if group_by == 'title' %}selected{% endif %}>Name</option>
                     <option value="compound" {% if group_by == 'compound' %}selected{% endif %}>Compound</option>
                     <option value="tags" {% if group_by == 'tags' %}selected{% endif %}>Tags</option>
@@ -54,6 +55,7 @@
                     <option value="compound" {% if sort_by == 'compound' %}selected{% endif %}>Compound</option>
                     <option value="tags" {% if sort_by == 'tags' %}selected{% endif %}>Tags</option>
                     <option value="status" {% if sort_by == 'status' %}selected{% endif %}>Status</option>
+                    <option value="join_state" {% if sort_by == 'join_state' %}selected{% endif %}>Your Join Status</option>
                 </select>
             </div>
             <div class="col-md-3 form-check mt-4 pt-2">
@@ -123,12 +125,16 @@
                         {% if test.my_participation %}
                         <div class="mt-1 small">
                             <strong>Your status:</strong>
-                            {% if test.my_participation.vial_donor %}
-                                <span class="badge bg-info">Donor</span>
+                            {% if test.my_participation.approved %}
+                                {% if test.my_participation.vial_donor %}
+                                    <span class="badge bg-info">Donor</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Non-Donor</span>
+                                {% endif %}
+                                <span class="badge bg-success ms-1">Approved</span>
                             {% else %}
-                                <span class="badge bg-secondary">Non-Donor</span>
+                                <span class="badge bg-warning text-dark">Pending Approval</span>
                             {% endif %}
-                            <span class="badge bg-success ms-1">Approved</span>
                         </div>
                         {% endif %}
 
@@ -141,8 +147,20 @@
                     </div>
                     <div class="card-footer bg-white d-flex gap-2">
                         <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-sm btn-primary flex-grow-1">
-                            View Details {% if test.status == 'recruiting' and not current_user.is_admin %}&amp; Request Join{% endif %}
+                            View Details
                         </a>
+                        {% if not current_user.is_admin %}
+                            {% if test.status == 'recruiting' and test.my_join_state == 'not_joined' %}
+                                <form method="POST" action="{{ url_for('main.request_participation_quick', test_id=test.id) }}" class="m-0">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Request Join</button>
+                                </form>
+                            {% elif test.my_join_state == 'pending' %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Join Request Pending</button>
+                            {% elif test.my_join_state == 'approved' %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Joined</button>
+                            {% endif %}
+                        {% endif %}
                         <form method="POST" action="{{ url_for('main.toggle_dashboard_hidden', test_id=test.id) }}" class="m-0">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="group_by" value="{{ group_by }}">

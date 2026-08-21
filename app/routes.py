@@ -493,7 +493,7 @@ def dashboard():
 
     membership_map = {
         part.group_test_id: part
-        for part in Participation.query.filter_by(user_id=current_user.id, approved=True).all()
+        for part in Participation.query.filter_by(user_id=current_user.id).all()
     }
     hidden_test_ids = {
         item.group_test_id
@@ -503,6 +503,12 @@ def dashboard():
     annotated_tests = []
     for test in tests:
         test.my_participation = membership_map.get(test.id)
+        if test.my_participation and test.my_participation.approved:
+            test.my_join_state = 'approved'
+        elif test.my_participation:
+            test.my_join_state = 'pending'
+        else:
+            test.my_join_state = 'not_joined'
         test.hidden_from_dashboard = test.id in hidden_test_ids
         if show_hidden or not test.hidden_from_dashboard:
             annotated_tests.append(test)
@@ -514,6 +520,12 @@ def dashboard():
             return (test.compound or 'Unspecified Compound').strip() or 'Unspecified Compound'
         if group_by == 'tags':
             return test.primary_tag() or 'Untagged'
+        if group_by == 'join_state':
+            if test.my_join_state == 'approved':
+                return 'Approved'
+            if test.my_join_state == 'pending':
+                return 'Pending'
+            return 'Not Joined'
         if group_by == 'none':
             return 'All Tests'
         return test.status.title()
@@ -528,6 +540,9 @@ def dashboard():
         if sort_by == 'status':
             status_order = {'recruiting': 0, 'testing': 1, 'closed': 2}
             return (status_order.get(test.status, 99), (test.title or '').lower())
+        if sort_by == 'join_state':
+            join_order = {'approved': 0, 'pending': 1, 'not_joined': 2}
+            return (join_order.get(test.my_join_state, 99), (test.title or '').lower())
         return test.updated_at or datetime.min
 
     grouped_tests = []
@@ -544,6 +559,9 @@ def dashboard():
 
         if group_by == 'status':
             group_order = {'Recruiting': 0, 'Testing': 1, 'Closed': 2}
+            group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
+        elif group_by == 'join_state':
+            group_order = {'Approved': 0, 'Pending': 1, 'Not Joined': 2}
             group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
         else:
             group_names = sorted(grouped.keys(), key=str.lower)
@@ -564,6 +582,52 @@ def dashboard():
         sort_by=sort_by,
         show_hidden=show_hidden,
     )
+
+
+@main_bp.route('/test/<int:test_id>/request-quick', methods=['POST'])
+@login_required
+def request_participation_quick(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if test.status != 'recruiting':
+        flash('This test is not currently open for new requests.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    existing = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id).first()
+    if existing:
+        if existing.approved:
+            flash('You are already approved for this test.', 'info')
+        else:
+            flash('You have already submitted a request for this test.', 'info')
+        return redirect(url_for('main.dashboard'))
+
+    part = Participation(
+        group_test_id=test_id,
+        user_id=current_user.id,
+        name=current_user.username,
+        tg_username=current_user.tg_username,
+        us_based=True,
+        state=None,
+        vial_donor=False,
+        notes='Requested from dashboard',
+        approved=False,
+    )
+    db.session.add(part)
+    db.session.commit()
+
+    admin_users = User.query.filter_by(is_admin=True, is_active=True).all()
+    if admin_users:
+        subject = f"New participation request for {test.title}"
+        body = (
+            f"A new participation request was submitted by {current_user.username} for the test \"{test.title}\".\n"
+            f"Email: {current_user.email}\n"
+            f"Telegram: {current_user.tg_username or 'Not provided'}\n"
+            f"Review the request here: {request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}\n"
+        )
+        for admin_user in admin_users:
+            send_notification_message(admin_user, admin_user.notification_channel or 'email', subject, body)
+
+    flash('Participation request submitted successfully. Admin will review shortly.', 'success')
+    return redirect(url_for('main.dashboard'))
 
 
 @main_bp.route('/dashboard/hide/<int:test_id>', methods=['POST'])

@@ -253,6 +253,90 @@ class ParticipantRemovalTests(unittest.TestCase):
         self.assertEqual(page_two.status_code, 200)
         self.assertIn(b"member29", page_two.data)
 
+    def test_dashboard_quick_request_creates_pending_and_blocks_duplicate(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test = GroupTest(title="Recruiting Test", created_by=1, status="recruiting")
+            db.session.add_all([admin, member, test])
+            db.session.commit()
+            test_id = test.id
+            member_id = member.id
+
+        self.client.post(
+            "/login",
+            data={"username": "member", "password": "password"},
+            follow_redirects=True,
+        )
+
+        first_response = self.client.post(
+            f"/test/{test_id}/request-quick",
+            follow_redirects=True,
+        )
+        self.assertEqual(first_response.status_code, 200)
+
+        with self.app.app_context():
+            requests = Participation.query.filter_by(group_test_id=test_id, user_id=member_id).all()
+            self.assertEqual(len(requests), 1)
+            self.assertFalse(requests[0].approved)
+
+        second_response = self.client.post(
+            f"/test/{test_id}/request-quick",
+            follow_redirects=True,
+        )
+        self.assertEqual(second_response.status_code, 200)
+
+        with self.app.app_context():
+            requests = Participation.query.filter_by(group_test_id=test_id, user_id=member_id).all()
+            self.assertEqual(len(requests), 1)
+
+    def test_dashboard_group_by_join_state_shows_pending_approved_not_joined(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            member = User(username="member", email="member@example.com", is_admin=False, is_active=True)
+            member.set_password("password")
+            test_pending = GroupTest(title="Pending Test", created_by=1, status="recruiting")
+            test_approved = GroupTest(title="Approved Test", created_by=1, status="recruiting")
+            test_not_joined = GroupTest(title="Not Joined Test", created_by=1, status="recruiting")
+            db.session.add_all([admin, member, test_pending, test_approved, test_not_joined])
+            db.session.commit()
+
+            pending_part = Participation(
+                group_test_id=test_pending.id,
+                user_id=member.id,
+                name=member.username,
+                approved=False,
+            )
+            approved_part = Participation(
+                group_test_id=test_approved.id,
+                user_id=member.id,
+                name=member.username,
+                approved=True,
+            )
+            db.session.add_all([pending_part, approved_part])
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "member", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.get("/dashboard?group_by=join_state&sort_by=title", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Approved", body)
+        self.assertIn("Pending", body)
+        self.assertIn("Not Joined", body)
+        self.assertIn("Join Request Pending", body)
+
 
 if __name__ == "__main__":
     unittest.main()

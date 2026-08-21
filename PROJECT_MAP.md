@@ -24,6 +24,8 @@
 - Add dashboard sorting/grouping controls defaulting to grouping by status.
 - Fix notification emails so each recipient receives the correct rendered variables.
 - Add an admin action queue to approve pending participants across multiple tests from one page.
+- Split dashboard actions so users can request join directly from dashboard cards.
+- Add dashboard grouping by personal participation state: Pending, Approved, Not Joined.
 
 ## Implemented Changes
 - Added shared Tag, PublicResult, and dashboard-hide models plus a `results_posted_at` field on group tests.
@@ -42,6 +44,10 @@
 - Added queue pagination (25 per page) for large pending-request backlogs.
 - Added deny actions (single + selected) to remove pending requests directly from queue.
 - Added an "Approve All Filtered" action with explicit confirmation text requirement.
+- Refactored action queue HTML form structure to avoid nested forms so row-level Approve/Deny buttons submit only their own row action.
+- Split dashboard card action into separate "View Details" and request-status controls.
+- Added dashboard quick-request POST route and card states: "Request Join", "Join Request Pending", and "Joined".
+- Added dashboard filter support for grouping/sorting by personal join state.
 
 ## Risks and Assumptions
 - Tags should be normalized to a shared tag table so they work across group tests and public results.
@@ -59,10 +65,13 @@
 - Check migrations or schema-related tests to confirm the new revision is additive only.
 - Add/extend admin route tests to verify action queue approvals and recalculated costs.
 - Extend queue tests for deny/remove workflow, pagination behavior, and approve-all-filtered confirmation safety.
+- Add focused tests for dashboard quick-request flow and join-state grouping labels.
 
 ## Validation Results
 - Focused test slice passed: `tests.test_notifications`, `tests.test_lab_costs`, and `tests.test_schema_migration`.
 - New focused queue validation passed: `python -m unittest tests.test_participant_removal`.
+- Re-ran queue suite after form-structure fix; all queue tests still passed.
+- Dashboard + queue participant suite passed: `python -m unittest tests.test_participant_removal` (7 tests, OK).
 
 ## Documentation Updates
 - README updated to cover tags, public results, dashboard controls, and the current unittest-based validation command.

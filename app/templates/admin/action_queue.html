@@ -58,18 +58,29 @@
         </div>
     </div>
 
-    <form method="POST" action="{{ url_for('main.approve_selected_from_queue') }}" id="approve-selected-form">
+    <form method="POST" action="{{ url_for('main.approve_selected_from_queue') }}" id="approve-selected-form" class="d-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="status" value="{{ status_filter }}">
         <input type="hidden" name="q" value="{{ search }}">
         <input type="hidden" name="page" value="{{ page }}">
+        <div id="approve-selected-hidden"></div>
+    </form>
+
+    <form method="POST" action="{{ url_for('main.deny_selected_from_queue') }}" id="deny-selected-form" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="status" value="{{ status_filter }}">
+        <input type="hidden" name="q" value="{{ search }}">
+        <input type="hidden" name="page" value="{{ page }}">
+        <div id="deny-selected-hidden"></div>
+    </form>
+
         <div class="d-flex justify-content-between align-items-center mb-2">
             <span class="text-muted small">Showing {{ pending_parts|length }} request(s) on this page. Total filtered: {{ pending_parts_pagination.total }}</span>
             <div>
-                <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('Approve selected participants?')">
+                <button type="submit" class="btn btn-success btn-sm" form="approve-selected-form" onclick="return confirm('Approve selected participants?')">
                     <i class="bi bi-check2-square"></i> Approve Selected
                 </button>
-                <button type="submit" class="btn btn-outline-danger btn-sm ms-1" formaction="{{ url_for('main.deny_selected_from_queue') }}" onclick="return confirm('Deny selected requests? This removes their pending requests.')">
+                <button type="submit" class="btn btn-outline-danger btn-sm ms-1" form="deny-selected-form" onclick="return confirm('Deny selected requests? This removes their pending requests.')">
                     <i class="bi bi-x-square"></i> Deny Selected
                 </button>
             </div>
@@ -91,7 +102,7 @@
                     {% for part in pending_parts %}
                         <tr>
                             <td>
-                                <input type="checkbox" name="part_ids" value="{{ part.id }}" class="part-checkbox">
+                                <input type="checkbox" value="{{ part.id }}" class="part-checkbox">
                             </td>
                             <td>
                                 <strong>{{ part.name or part.user.username }}</strong>
@@ -151,7 +162,6 @@
                 </ul>
             </nav>
         {% endif %}
-    </form>
 {% endif %}
 {% endblock %}
 
@@ -166,6 +176,35 @@
                 cb.checked = selectAll.checked;
             });
         });
+
+        function syncBulkFormIds(containerId) {
+            const target = document.getElementById(containerId);
+            if (!target) return;
+            target.innerHTML = '';
+            checkboxes
+                .filter(function (cb) { return cb.checked; })
+                .forEach(function (cb) {
+                    const hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = 'part_ids';
+                    hidden.value = cb.value;
+                    target.appendChild(hidden);
+                });
+        }
+
+        const approveSelectedForm = document.getElementById('approve-selected-form');
+        if (approveSelectedForm) {
+            approveSelectedForm.addEventListener('submit', function () {
+                syncBulkFormIds('approve-selected-hidden');
+            });
+        }
+
+        const denySelectedForm = document.getElementById('deny-selected-form');
+        if (denySelectedForm) {
+            denySelectedForm.addEventListener('submit', function () {
+                syncBulkFormIds('deny-selected-hidden');
+            });
+        }
 
         const approveFilteredForm = document.getElementById('approve-filtered-form');
         if (approveFilteredForm) {

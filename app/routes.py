@@ -685,7 +685,12 @@ def test_detail(test_id):
     show_participant_list = current_user.is_admin or (my_part is not None and my_part.approved)
     
     if show_participant_list:
-        parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
+        parts = (
+            test.participations
+            .filter(Participation.denied == False)
+            .order_by(Participation.approved.desc(), Participation.requested_at)
+            .all()
+        )
     else:
         parts = []
 

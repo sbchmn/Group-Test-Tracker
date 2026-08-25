@@ -98,6 +98,7 @@ class PublicResult(db.Model):
     title = db.Column(db.String(200), nullable=False)
     summary = db.Column(db.Text, nullable=True)
     results_link = db.Column(db.String(500), nullable=False)
+    results_image_key = db.Column(db.String(500), nullable=True)
     item_results = db.Column(db.JSON, nullable=True)
     posted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
@@ -179,6 +180,7 @@ class GroupTest(db.Model):
     
     # Results - only shown to approved participants when status == 'closed'
     results_link = db.Column(db.String(500), nullable=True)
+    results_image_key = db.Column(db.String(500), nullable=True)
     results_posted_at = db.Column(db.DateTime, nullable=True)
     
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)

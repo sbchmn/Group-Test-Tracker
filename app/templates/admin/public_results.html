@@ -60,6 +60,17 @@ window.addEventListener('DOMContentLoaded', function() {
         document.querySelector('[data-tag-menu="true"]'),
         document.querySelector('[data-tag-add="true"]')
     );
+
+    document.querySelectorAll('[data-result-image-trigger="true"]').forEach(function(button) {
+        button.addEventListener('click', function() {
+            const src = button.getAttribute('data-image-src') || '';
+            const title = button.getAttribute('data-image-title') || 'Result Image';
+            const modalImage = document.getElementById('resultImageModalSrc');
+            const modalTitle = document.getElementById('resultImageModalTitle');
+            if (modalImage) modalImage.src = src;
+            if (modalTitle) modalTitle.textContent = title;
+        });
+    });
 });
 </script>
 {% endblock scripts %}
@@ -78,7 +89,7 @@ window.addEventListener('DOMContentLoaded', function() {
         <div class="card">
             <div class="card-header">{{ 'Edit Public Result' if editing_result else 'New Public Result' }}</div>
             <div class="card-body">
-                <form method="POST" novalidate>
+                <form method="POST" novalidate enctype="multipart/form-data">
                     {{ form.hidden_tag() }}
                     {% if editing_result %}
                         <input type="hidden" name="editing_result_id" value="{{ editing_result.id }}">
@@ -94,6 +105,24 @@ window.addEventListener('DOMContentLoaded', function() {
                     <div class="mb-3">
                         {{ form.results_link.label(class="form-label") }}
                         {{ form.results_link(class="form-control", placeholder="https://...") }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Result Image (optional)</label>
+                        <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif">
+                        {% if editing_result_image_url %}
+                            <div class="mt-2 d-flex align-items-center gap-3">
+                                <img src="{{ editing_result_image_url }}" alt="Current result image" style="width: 88px; height: 88px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="clear_results_image" id="clearPublicResultImage">
+                                    <label class="form-check-label" for="clearPublicResultImage">Remove existing image</label>
+                                </div>
+                            </div>
+                        {% endif %}
+                        {% if storage_settings.enabled %}
+                            <small class="text-muted">Image uploads are enabled and will appear beside result links.</small>
+                        {% else %}
+                            <small class="text-warning">Image uploads are disabled. Enable storage in Admin -> Storage Config.</small>
+                        {% endif %}
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Itemized Results</label>
@@ -160,6 +189,20 @@ window.addEventListener('DOMContentLoaded', function() {
                                             <div class="small text-muted mb-1">{{ result.summary }}</div>
                                         {% endif %}
                                         <div class="small text-muted">Posted {{ result.posted_at }}</div>
+                                        {% set result_image_url = result_image_url_builder(result.results_image_key) if result_image_url_builder else None %}
+                                        {% if result_image_url %}
+                                            <div class="mt-2 mb-2">
+                                                <button type="button"
+                                                        class="btn btn-link p-0 border-0"
+                                                        data-bs-toggle="modal"
+                                                        data-bs-target="#resultImageModal"
+                                                        data-result-image-trigger="true"
+                                                        data-image-src="{{ result_image_url }}"
+                                                        data-image-title="{{ result.title }}">
+                                                    <img src="{{ result_image_url }}" alt="{{ result.title }} image" style="width: 84px; height: 84px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                                                </button>
+                                            </div>
+                                        {% endif %}
                                         <a href="{{ result.results_link }}" target="_blank" class="small">Open result</a>
                                     </div>
                                     <div class="d-flex flex-column gap-2">
@@ -176,6 +219,20 @@ window.addEventListener('DOMContentLoaded', function() {
                 {% else %}
                     <div class="p-3 text-muted">No public results have been created yet.</div>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="resultImageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resultImageModalTitle">Result Image</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="resultImageModalSrc" src="" alt="Result image" class="img-fluid rounded">
             </div>
         </div>
     </div>

@@ -28,6 +28,14 @@ import os
 from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig, Tag, PublicResult, DashboardHiddenGroupTest
 from .export import generate_test_export
 from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template, send_notification_message
+from .storage import (
+    StorageConfigurationError,
+    StorageUploadError,
+    build_result_image_url,
+    delete_result_image,
+    get_storage_settings,
+    upload_result_image,
+)
 
 main_bp = Blueprint('main', __name__)
 
@@ -196,6 +204,23 @@ class NotificationConfigForm(FlaskForm):
     submit = SubmitField('Save Configuration')
 
 
+class StorageConfigForm(FlaskForm):
+    storage_enabled = BooleanField('Enable object storage image uploads')
+    storage_provider = SelectField('Provider', choices=[('aws', 'AWS S3'), ('do', 'DigitalOcean Spaces')], validators=[DataRequired()])
+    storage_bucket = StringField('Bucket / Space Name', validators=[Optional(), Length(max=120)])
+    storage_region = StringField('Region', validators=[Optional(), Length(max=80)])
+    storage_endpoint_url = StringField('Endpoint URL (optional)', validators=[Optional(), URL(require_tld=False)])
+    storage_access_key_id = StringField('Access Key ID', validators=[Optional(), Length(max=200)])
+    storage_secret_access_key = PasswordField('Secret Access Key', validators=[Optional(), Length(max=200)])
+    storage_path_prefix = StringField('Object Path Prefix', validators=[Optional(), Length(max=120)])
+    storage_public_base_url = StringField('Public Base URL (optional)', validators=[Optional(), URL(require_tld=False)])
+    storage_make_public = BooleanField('Upload with public-read ACL')
+    storage_force_path_style = BooleanField('Force path-style S3 addressing')
+    storage_max_upload_size_mb = FloatField('Max Upload Size (MB)', validators=[Optional(), NumberRange(min=1, max=50)])
+    storage_allowed_formats = StringField('Allowed Formats (comma-separated)', validators=[Optional(), Length(max=200)])
+    submit = SubmitField('Save Storage Configuration')
+
+
 class PasswordResetForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
     notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
@@ -236,6 +261,33 @@ def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
     if len(value) <= reveal_prefix + reveal_suffix:
         return value
     return f"{value[:reveal_prefix]}{'*' * (len(value) - reveal_prefix - reveal_suffix)}{value[-reveal_suffix:]}"
+
+
+_STORAGE_CONFIG_KEYS = {
+    'storage_enabled',
+    'storage_provider',
+    'storage_bucket',
+    'storage_region',
+    'storage_endpoint_url',
+    'storage_access_key_id',
+    'storage_secret_access_key',
+    'storage_path_prefix',
+    'storage_public_base_url',
+    'storage_make_public',
+    'storage_force_path_style',
+    'storage_max_upload_size_mb',
+    'storage_allowed_formats',
+}
+
+
+def _config_values_map():
+    return {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+
+
+def _save_config_value(key, value):
+    config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+    config.value = value
+    db.session.add(config)
 
 
 def parse_tag_names(tag_text):
@@ -714,6 +766,7 @@ def test_detail(test_id):
     return render_template(
         'group_test_detail.html',
         test=test,
+        test_results_image_url=build_result_image_url(test.results_image_key),
         costs=costs,
         participations=parts,
         my_part=my_part,
@@ -750,6 +803,7 @@ def my_results():
             'title': test.title,
             'summary': test.description or '',
             'results_link': test.results_link,
+            'results_image_url': build_result_image_url(test.results_image_key),
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,
             'source_label': 'Group Test',
             'lab_item_results': [
@@ -777,6 +831,7 @@ def my_results():
             'title': result.title,
             'summary': result.summary or '',
             'results_link': result.results_link,
+            'results_image_url': build_result_image_url(result.results_image_key),
             'posted_at': result.posted_at,
             'source_label': 'Public Result',
             'lab_item_results': [
@@ -1026,6 +1081,15 @@ def create_test():
                 item['result'] = result_text
             lab_items.append(item)
 
+        uploaded_image_key = None
+        upload_file = request.files.get('results_image')
+        if upload_file and upload_file.filename:
+            try:
+                uploaded_image_key = upload_result_image(upload_file, 'group-tests')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings())
+
         test = GroupTest(
             title=form.title.data,
             description=form.description.data,
@@ -1046,6 +1110,7 @@ def create_test():
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
             results_link=form.results_link.data if form.status.data == 'closed' else None,
+            results_image_key=uploaded_image_key,
             results_posted_at=datetime.utcnow() if form.status.data == 'closed' and form.results_link.data else None,
             created_by=current_user.id
         )
@@ -1055,7 +1120,7 @@ def create_test():
         db.session.commit()
         flash(f'Group test "{test.title}" created successfully.', 'success')
         return redirect(url_for('main.test_detail', test_id=test.id))
-    return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names())
+    return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings())
 
 
 @main_bp.route('/admin/edit-test/<int:test_id>', methods=['GET', 'POST'])
@@ -1106,9 +1171,39 @@ def edit_test(test_id):
         test.donor_shipping_cost = form.donor_shipping_cost.data or 0.0
         test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
         test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
+
+        clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
+        upload_file = request.files.get('results_image')
+        has_new_upload = bool(upload_file and upload_file.filename)
+        if has_new_upload:
+            try:
+                new_key = upload_result_image(upload_file, 'group-tests')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                return render_template(
+                    'admin/edit_test.html',
+                    form=form,
+                    test=test,
+                    tag_suggestions=get_all_tag_names(),
+                    storage_settings=get_storage_settings(),
+                    existing_results_image_url=build_result_image_url(test.results_image_key),
+                )
+
+            old_key = test.results_image_key
+            test.results_image_key = new_key
+            if old_key and old_key != new_key:
+                delete_result_image(old_key)
+        elif clear_existing_image and test.results_image_key:
+            old_key = test.results_image_key
+            test.results_image_key = None
+            delete_result_image(old_key)
+
         apply_tags_to_record(test, form.tag_names.data)
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
+            if test.results_image_key:
+                delete_result_image(test.results_image_key)
+            test.results_image_key = None
             test.results_posted_at = None
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
@@ -1116,7 +1211,7 @@ def edit_test(test_id):
         flash('Group test updated.', 'success')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
-    return render_template('admin/edit_test.html', form=form, test=test, tag_suggestions=get_all_tag_names())
+    return render_template('admin/edit_test.html', form=form, test=test, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings(), existing_results_image_url=build_result_image_url(test.results_image_key))
 
 
 @main_bp.route('/admin/manage-participants/<int:test_id>')
@@ -1663,6 +1758,92 @@ def notification_config():
     return render_template('admin/notification_config.html', form=form, log_contents=log_contents)
 
 
+@main_bp.route('/admin/storage-config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def storage_config():
+    form = StorageConfigForm()
+    configs = _config_values_map()
+
+    existing_secret = str(configs.get('storage_secret_access_key') or '').strip()
+
+    if form.validate_on_submit():
+        enabled = bool(form.storage_enabled.data)
+        provider = (form.storage_provider.data or 'aws').strip().lower()
+        bucket = (form.storage_bucket.data or '').strip()
+        access_key_id = (form.storage_access_key_id.data or '').strip()
+        secret_access_key = (form.storage_secret_access_key.data or '').strip()
+        region = (form.storage_region.data or '').strip()
+
+        errors = []
+        if enabled:
+            if provider not in {'aws', 'do'}:
+                errors.append('Provider must be AWS S3 or DigitalOcean Spaces.')
+            if not bucket:
+                errors.append('Bucket / Space name is required when storage is enabled.')
+            if not region:
+                errors.append('Region is required when storage is enabled.')
+            if not access_key_id:
+                errors.append('Access Key ID is required when storage is enabled.')
+            if not secret_access_key and not existing_secret:
+                errors.append('Secret Access Key is required when storage is enabled.')
+
+        if errors:
+            for err in errors:
+                flash(err, 'danger')
+        else:
+            updates = {
+                'storage_enabled': 'true' if enabled else 'false',
+                'storage_provider': provider,
+                'storage_bucket': bucket or None,
+                'storage_region': region or None,
+                'storage_endpoint_url': (form.storage_endpoint_url.data or '').strip() or None,
+                'storage_access_key_id': access_key_id or None,
+                'storage_path_prefix': (form.storage_path_prefix.data or 'result-images').strip() or 'result-images',
+                'storage_public_base_url': (form.storage_public_base_url.data or '').strip() or None,
+                'storage_make_public': 'true' if form.storage_make_public.data else 'false',
+                'storage_force_path_style': 'true' if form.storage_force_path_style.data else 'false',
+                'storage_max_upload_size_mb': str(form.storage_max_upload_size_mb.data or 8),
+                'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF').strip(),
+            }
+            for key, value in updates.items():
+                _save_config_value(key, value)
+
+            if secret_access_key:
+                _save_config_value('storage_secret_access_key', secret_access_key)
+
+            db.session.commit()
+            flash('Storage configuration saved.', 'success')
+            return redirect(url_for('main.storage_config'))
+
+    if not form.is_submitted():
+        form.storage_enabled.data = str(configs.get('storage_enabled', 'false')).lower() == 'true'
+        form.storage_provider.data = (configs.get('storage_provider') or 'aws').lower()
+        form.storage_bucket.data = configs.get('storage_bucket')
+        form.storage_region.data = configs.get('storage_region')
+        form.storage_endpoint_url.data = configs.get('storage_endpoint_url')
+        form.storage_access_key_id.data = configs.get('storage_access_key_id')
+        form.storage_secret_access_key.data = ''
+        form.storage_path_prefix.data = configs.get('storage_path_prefix') or 'result-images'
+        form.storage_public_base_url.data = configs.get('storage_public_base_url')
+        form.storage_make_public.data = str(configs.get('storage_make_public', 'true')).lower() == 'true'
+        form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() == 'true'
+        try:
+            form.storage_max_upload_size_mb.data = float(configs.get('storage_max_upload_size_mb') or 8)
+        except (TypeError, ValueError):
+            form.storage_max_upload_size_mb.data = 8
+        form.storage_allowed_formats.data = configs.get('storage_allowed_formats') or 'JPEG,PNG,WEBP,GIF'
+
+    secret_mask = mask_secret(existing_secret)
+    effective_settings = get_storage_settings()
+    return render_template(
+        'admin/storage_config.html',
+        form=form,
+        secret_mask=secret_mask,
+        storage_enabled=effective_settings.get('enabled', False),
+    )
+
+
 @main_bp.route('/admin/users')
 @login_required
 @admin_required
@@ -1802,10 +1983,28 @@ def manage_public_results():
             request.form.getlist('result_item_name'),
             request.form.getlist('result_item_value'),
         )
+        uploaded_image_key = None
+        upload_file = request.files.get('results_image')
+        if upload_file and upload_file.filename:
+            try:
+                uploaded_image_key = upload_result_image(upload_file, 'public-results')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+                return render_template(
+                    'admin/public_results.html',
+                    form=form,
+                    public_results=public_results,
+                    tag_suggestions=get_all_tag_names(),
+                    storage_settings=get_storage_settings(),
+                    result_image_url_builder=build_result_image_url,
+                )
+
         result = PublicResult(
             title=form.title.data,
             summary=form.summary.data,
             results_link=form.results_link.data.strip(),
+            results_image_key=uploaded_image_key,
             item_results=item_results,
             created_by=current_user.id,
         )
@@ -1822,6 +2021,8 @@ def manage_public_results():
         form=form,
         public_results=public_results,
         tag_suggestions=get_all_tag_names(),
+        storage_settings=get_storage_settings(),
+        result_image_url_builder=build_result_image_url,
     )
 
 
@@ -1843,6 +2044,36 @@ def edit_public_result(result_id):
         result.title = form.title.data
         result.summary = form.summary.data
         result.results_link = form.results_link.data.strip()
+
+        clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
+        upload_file = request.files.get('results_image')
+        has_new_upload = bool(upload_file and upload_file.filename)
+        if has_new_upload:
+            try:
+                new_key = upload_result_image(upload_file, 'public-results')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+                return render_template(
+                    'admin/public_results.html',
+                    form=form,
+                    public_results=public_results,
+                    editing_result=result,
+                    tag_suggestions=get_all_tag_names(),
+                    storage_settings=get_storage_settings(),
+                    editing_result_image_url=build_result_image_url(result.results_image_key),
+                    result_image_url_builder=build_result_image_url,
+                )
+
+            old_key = result.results_image_key
+            result.results_image_key = new_key
+            if old_key and old_key != new_key:
+                delete_result_image(old_key)
+        elif clear_existing_image and result.results_image_key:
+            old_key = result.results_image_key
+            result.results_image_key = None
+            delete_result_image(old_key)
+
         apply_tags_to_record(result, form.tag_names.data)
         db.session.commit()
         flash('Public result updated.', 'success')
@@ -1855,6 +2086,9 @@ def edit_public_result(result_id):
         public_results=public_results,
         editing_result=result,
         tag_suggestions=get_all_tag_names(),
+        storage_settings=get_storage_settings(),
+        editing_result_image_url=build_result_image_url(result.results_image_key),
+        result_image_url_builder=build_result_image_url,
     )
 
 
@@ -1864,6 +2098,8 @@ def edit_public_result(result_id):
 def delete_public_result(result_id):
     result = PublicResult.query.get_or_404(result_id)
     title = result.title
+    if result.results_image_key:
+        delete_result_image(result.results_image_key)
     db.session.delete(result)
     db.session.commit()
     flash(f'Public result "{title}" was deleted.', 'warning')

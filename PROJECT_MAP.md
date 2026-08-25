@@ -3,19 +3,26 @@
 ## Target Files and Modules
 - app/models.py
 - app/routes.py
+- app/storage.py
 - app/notifications.py
 - app/templates/dashboard.html
 - app/templates/group_test_detail.html
 - app/templates/admin/edit_test.html
 - app/templates/admin/create_test.html
+- app/templates/admin/storage_config.html
 - app/templates/base.html
 - likely new templates for my results and public result admin pages
 - migrations/versions/<new_revision>.py
 - tests/test_notifications.py
 - tests/test_schema_migration.py
+- tests/test_security.py
 - likely new tests for tags, results, dashboard visibility, and public results
 
 ## Intended Behavior Changes
+- Add production-ready result image uploads backed by S3-compatible object storage (AWS S3 and DigitalOcean Spaces).
+- Add admin storage settings page to enable/disable uploads and configure provider credentials/bucket/endpoint behavior.
+- Add optional image attachment for both group test results and public results.
+- Render a thumbnail next to result links and open full-size image in a modal on click.
 - Add reusable tags for group tests and public results.
 - Add per-user hidden dashboard state for group tests.
 - Add a My Results page that combines member group-test results and admin-created public results.
@@ -33,6 +40,12 @@
 - Make denial state/reason visible on Manage Participants and align available admin actions across Action Queue and Manage Participants.
 
 ## Implemented Changes
+- Added production-oriented object storage module (`app/storage.py`) for S3-compatible uploads with image validation, size limits, and provider-aware URL generation.
+- Added storage-backed result image fields (`results_image_key`) to both group tests and public results models, plus additive migration `c3d9e1f4a7b2_add_result_image_keys.py`.
+- Added admin storage configuration page and route (`/admin/storage-config`) with provider selection (AWS/DO), bucket credentials, endpoint controls, and upload constraints.
+- Added image upload handling to create/edit flows for group tests and public results, including replace/remove behavior and best-effort remote cleanup.
+- Added thumbnail rendering and Bootstrap modal full-size viewing in group test detail, My Results, and Public Results admin listing.
+- Added navigation entry for Storage Config in admin menu.
 - Added shared Tag, PublicResult, and dashboard-hide models plus a `results_posted_at` field on group tests.
 - Wired group-test and public-result tag entry through comma-separated inputs with datalist suggestions.
 - Added dashboard grouping/sorting controls, hide/unhide toggles, and tag badges.
@@ -68,6 +81,9 @@
 - Filtered denied participants out of group-test detail participant list entirely.
 
 ## Risks and Assumptions
+- Object storage credentials and bucket policy are admin-managed; upload feature should fail closed when disabled/misconfigured.
+- Uploaded files must be strictly validated as images and bounded by max size.
+- Stored object references should remain provider-agnostic and safe to render without exposing secrets.
 - Tags should be normalized to a shared tag table so they work across group tests and public results.
 - Hidden dashboard state should be per-user and should not alter test visibility rules.
 - Existing Alembic revisions must remain untouched; all schema additions go in one new revision.
@@ -78,6 +94,8 @@
 - Denied requests are now retained for auditability and user feedback; re-request policy remains blocked unless admin clears/changes status.
 
 ## Validation Plan
+- Add focused tests for storage config enforcement and upload validation failure paths.
+- Run core unit tests including schema/security slices after upload + config changes.
 - Run targeted unit tests for notification rendering and new schema behavior.
 - Add or update tests for tag persistence, my-results aggregation, and dashboard hide toggles.
 - Run a narrow test command before broader verification.
@@ -90,6 +108,7 @@
 - Add focused tests to confirm queue denial appears in Manage Participants and manage-page deny/reopen actions persist correctly.
 
 ## Validation Results
+- Focused post-change validation passed: `python -m unittest tests.test_schema_migration tests.test_security`.
 - Focused test slice passed: `tests.test_notifications`, `tests.test_lab_costs`, and `tests.test_schema_migration`.
 - New focused queue validation passed: `python -m unittest tests.test_participant_removal`.
 - Re-ran queue suite after form-structure fix; all queue tests still passed.

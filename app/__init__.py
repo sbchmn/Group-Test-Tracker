@@ -77,6 +77,7 @@ def create_app(config_overrides=None):
     # WTF/CSRF settings
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour forms
+    app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH_MB', '12')) * 1024 * 1024
 
     # Ensure csrf_token() is always available in Jinja2 templates
     @app.context_processor

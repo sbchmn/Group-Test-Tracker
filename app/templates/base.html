@@ -45,11 +45,13 @@
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
                                 <li><a class="dropdown-item" href="{{ url_for('main.create_test') }}">Create Test</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('main.action_queue') }}">Action Queue</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.manage_public_results') }}">Public Results</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.manage_users') }}">Manage Users</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.notification_templates') }}">Manage Templates</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.notification_config') }}">Notification Config</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('main.storage_config') }}">Storage Config</a></li>
                             </ul>
                         </li>
                         {% endif %}

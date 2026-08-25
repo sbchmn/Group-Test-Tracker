@@ -20,6 +20,7 @@ from wtforms.validators import DataRequired, Email, Length, Optional, NumberRang
 from datetime import datetime, date
 from functools import wraps
 from itertools import zip_longest
+from sqlalchemy import or_
 
 from . import db
 import os
@@ -27,6 +28,14 @@ import os
 from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig, Tag, PublicResult, DashboardHiddenGroupTest
 from .export import generate_test_export
 from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template, send_notification_message
+from .storage import (
+    StorageConfigurationError,
+    StorageUploadError,
+    build_result_image_url,
+    delete_result_image,
+    get_storage_settings,
+    upload_result_image,
+)
 
 main_bp = Blueprint('main', __name__)
 
@@ -195,6 +204,23 @@ class NotificationConfigForm(FlaskForm):
     submit = SubmitField('Save Configuration')
 
 
+class StorageConfigForm(FlaskForm):
+    storage_enabled = BooleanField('Enable object storage image uploads')
+    storage_provider = SelectField('Provider', choices=[('aws', 'AWS S3'), ('do', 'DigitalOcean Spaces')], validators=[DataRequired()])
+    storage_bucket = StringField('Bucket / Space Name', validators=[Optional(), Length(max=120)])
+    storage_region = StringField('Region', validators=[Optional(), Length(max=80)])
+    storage_endpoint_url = StringField('Endpoint URL (optional)', validators=[Optional(), URL(require_tld=False)])
+    storage_access_key_id = StringField('Access Key ID', validators=[Optional(), Length(max=200)])
+    storage_secret_access_key = PasswordField('Secret Access Key', validators=[Optional(), Length(max=200)])
+    storage_path_prefix = StringField('Object Path Prefix', validators=[Optional(), Length(max=120)])
+    storage_public_base_url = StringField('Public Base URL (optional)', validators=[Optional(), URL(require_tld=False)])
+    storage_make_public = BooleanField('Upload with public-read ACL')
+    storage_force_path_style = BooleanField('Force path-style S3 addressing')
+    storage_max_upload_size_mb = FloatField('Max Upload Size (MB)', validators=[Optional(), NumberRange(min=1, max=50)])
+    storage_allowed_formats = StringField('Allowed Formats (comma-separated)', validators=[Optional(), Length(max=200)])
+    submit = SubmitField('Save Storage Configuration')
+
+
 class PasswordResetForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
     notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
@@ -235,6 +261,33 @@ def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
     if len(value) <= reveal_prefix + reveal_suffix:
         return value
     return f"{value[:reveal_prefix]}{'*' * (len(value) - reveal_prefix - reveal_suffix)}{value[-reveal_suffix:]}"
+
+
+_STORAGE_CONFIG_KEYS = {
+    'storage_enabled',
+    'storage_provider',
+    'storage_bucket',
+    'storage_region',
+    'storage_endpoint_url',
+    'storage_access_key_id',
+    'storage_secret_access_key',
+    'storage_path_prefix',
+    'storage_public_base_url',
+    'storage_make_public',
+    'storage_force_path_style',
+    'storage_max_upload_size_mb',
+    'storage_allowed_formats',
+}
+
+
+def _config_values_map():
+    return {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+
+
+def _save_config_value(key, value):
+    config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+    config.value = value
+    db.session.add(config)
 
 
 def parse_tag_names(tag_text):
@@ -492,7 +545,7 @@ def dashboard():
 
     membership_map = {
         part.group_test_id: part
-        for part in Participation.query.filter_by(user_id=current_user.id, approved=True).all()
+        for part in Participation.query.filter_by(user_id=current_user.id).all()
     }
     hidden_test_ids = {
         item.group_test_id
@@ -502,6 +555,14 @@ def dashboard():
     annotated_tests = []
     for test in tests:
         test.my_participation = membership_map.get(test.id)
+        if test.my_participation and test.my_participation.denied:
+            test.my_join_state = 'denied'
+        elif test.my_participation and test.my_participation.approved:
+            test.my_join_state = 'approved'
+        elif test.my_participation:
+            test.my_join_state = 'pending'
+        else:
+            test.my_join_state = 'not_joined'
         test.hidden_from_dashboard = test.id in hidden_test_ids
         if show_hidden or not test.hidden_from_dashboard:
             annotated_tests.append(test)
@@ -513,6 +574,14 @@ def dashboard():
             return (test.compound or 'Unspecified Compound').strip() or 'Unspecified Compound'
         if group_by == 'tags':
             return test.primary_tag() or 'Untagged'
+        if group_by == 'join_state':
+            if test.my_join_state == 'denied':
+                return 'Denied'
+            if test.my_join_state == 'approved':
+                return 'Approved'
+            if test.my_join_state == 'pending':
+                return 'Pending'
+            return 'Not Joined'
         if group_by == 'none':
             return 'All Tests'
         return test.status.title()
@@ -527,6 +596,9 @@ def dashboard():
         if sort_by == 'status':
             status_order = {'recruiting': 0, 'testing': 1, 'closed': 2}
             return (status_order.get(test.status, 99), (test.title or '').lower())
+        if sort_by == 'join_state':
+            join_order = {'approved': 0, 'pending': 1, 'denied': 2, 'not_joined': 3}
+            return (join_order.get(test.my_join_state, 99), (test.title or '').lower())
         return test.updated_at or datetime.min
 
     grouped_tests = []
@@ -543,6 +615,9 @@ def dashboard():
 
         if group_by == 'status':
             group_order = {'Recruiting': 0, 'Testing': 1, 'Closed': 2}
+            group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
+        elif group_by == 'join_state':
+            group_order = {'Approved': 0, 'Pending': 1, 'Denied': 2, 'Not Joined': 3}
             group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
         else:
             group_names = sorted(grouped.keys(), key=str.lower)
@@ -563,6 +638,58 @@ def dashboard():
         sort_by=sort_by,
         show_hidden=show_hidden,
     )
+
+
+@main_bp.route('/test/<int:test_id>/request-quick', methods=['POST'])
+@login_required
+def request_participation_quick(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if test.status != 'recruiting':
+        flash('This test is not currently open for new requests.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    existing = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id).first()
+    if existing:
+        if existing.denied:
+            reason_suffix = f" Reason: {existing.denied_reason}" if existing.denied_reason else ''
+            flash(f'Your request for this test was denied by an admin.{reason_suffix}', 'warning')
+        elif existing.approved:
+            flash('You are already approved for this test.', 'info')
+        else:
+            flash('You have already submitted a request for this test.', 'info')
+        return redirect(url_for('main.dashboard'))
+
+    part = Participation(
+        group_test_id=test_id,
+        user_id=current_user.id,
+        name=current_user.username,
+        tg_username=current_user.tg_username,
+        us_based=True,
+        state=None,
+        vial_donor=False,
+        notes='Requested from dashboard',
+        denied=False,
+        denied_at=None,
+        denied_reason=None,
+        approved=False,
+    )
+    db.session.add(part)
+    db.session.commit()
+
+    admin_users = User.query.filter_by(is_admin=True, is_active=True).all()
+    if admin_users:
+        subject = f"New participation request for {test.title}"
+        body = (
+            f"A new participation request was submitted by {current_user.username} for the test \"{test.title}\".\n"
+            f"Email: {current_user.email}\n"
+            f"Telegram: {current_user.tg_username or 'Not provided'}\n"
+            f"Review the request here: {request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}\n"
+        )
+        for admin_user in admin_users:
+            send_notification_message(admin_user, admin_user.notification_channel or 'email', subject, body)
+
+    flash('Participation request submitted successfully. Admin will review shortly.', 'success')
+    return redirect(url_for('main.dashboard'))
 
 
 @main_bp.route('/dashboard/hide/<int:test_id>', methods=['POST'])
@@ -603,14 +730,19 @@ def test_detail(test_id):
     
     # Current user's participation (if any)
     my_part = Participation.query.filter_by(
-        group_test_id=test_id, user_id=current_user.id, approved=True
+        group_test_id=test_id, user_id=current_user.id
     ).first()
     
     # Show full participant list (approved + pending) to admins + approved members
-    show_participant_list = current_user.is_admin or my_part is not None
+    show_participant_list = current_user.is_admin or (my_part is not None and my_part.approved)
     
     if show_participant_list:
-        parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
+        parts = (
+            test.participations
+            .filter(Participation.denied == False)
+            .order_by(Participation.approved.desc(), Participation.requested_at)
+            .all()
+        )
     else:
         parts = []
 
@@ -634,6 +766,7 @@ def test_detail(test_id):
     return render_template(
         'group_test_detail.html',
         test=test,
+        test_results_image_url=build_result_image_url(test.results_image_key),
         costs=costs,
         participations=parts,
         my_part=my_part,
@@ -670,6 +803,7 @@ def my_results():
             'title': test.title,
             'summary': test.description or '',
             'results_link': test.results_link,
+            'results_image_url': build_result_image_url(test.results_image_key),
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,
             'source_label': 'Group Test',
             'lab_item_results': [
@@ -697,6 +831,7 @@ def my_results():
             'title': result.title,
             'summary': result.summary or '',
             'results_link': result.results_link,
+            'results_image_url': build_result_image_url(result.results_image_key),
             'posted_at': result.posted_at,
             'source_label': 'Public Result',
             'lab_item_results': [
@@ -812,7 +947,13 @@ def request_participation(test_id):
         group_test_id=test_id, user_id=current_user.id
     ).first()
     if existing:
-        flash('You have already submitted a request for this test.', 'info')
+        if existing.denied:
+            reason_suffix = f" Reason: {existing.denied_reason}" if existing.denied_reason else ''
+            flash(f'Your request for this test was denied by an admin.{reason_suffix}', 'warning')
+        elif existing.approved:
+            flash('You are already approved for this test.', 'info')
+        else:
+            flash('You have already submitted a request for this test.', 'info')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
     form = ParticipationRequestForm()
@@ -831,6 +972,9 @@ def request_participation(test_id):
             state=form.state.data,
             vial_donor=form.vial_donor.data,
             notes=form.notes.data,
+            denied=False,
+            denied_at=None,
+            denied_reason=None,
             approved=False  # Admin must approve
         )
         db.session.add(part)
@@ -852,6 +996,51 @@ def request_participation(test_id):
         return redirect(url_for('main.dashboard'))
     
     return render_template('request_participation.html', test=test, form=form)
+
+
+@main_bp.route('/test/<int:test_id>/reapply', methods=['POST'])
+@login_required
+def reapply_participation(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if test.status != 'recruiting':
+        flash('This test is not currently open for re-requests.', 'warning')
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    part = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id).first()
+    if not part:
+        flash('No prior request found. Submit a new participation request instead.', 'info')
+        return redirect(url_for('main.request_participation', test_id=test_id))
+
+    if part.approved:
+        flash('You are already approved for this test.', 'info')
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    if not part.denied:
+        flash('Your request is already pending admin review.', 'info')
+        return redirect(url_for('main.test_detail', test_id=test_id))
+
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
+    part.approved = False
+    part.approved_at = None
+    part.requested_at = datetime.utcnow()
+    db.session.commit()
+
+    admin_users = User.query.filter_by(is_admin=True, is_active=True).all()
+    if admin_users:
+        subject = f"Reapply request for {test.title}"
+        body = (
+            f"{current_user.username} has re-applied for the test \"{test.title}\".\n"
+            f"Email: {current_user.email}\n"
+            f"Telegram: {current_user.tg_username or 'Not provided'}\n"
+            f"Review the request here: {request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}\n"
+        )
+        for admin_user in admin_users:
+            send_notification_message(admin_user, admin_user.notification_channel or 'email', subject, body)
+
+    flash('Your request has been re-submitted for admin review.', 'success')
+    return redirect(url_for('main.test_detail', test_id=test_id))
 
 
 # ==================== ADMIN ROUTES ====================
@@ -892,6 +1081,15 @@ def create_test():
                 item['result'] = result_text
             lab_items.append(item)
 
+        uploaded_image_key = None
+        upload_file = request.files.get('results_image')
+        if upload_file and upload_file.filename:
+            try:
+                uploaded_image_key = upload_result_image(upload_file, 'group-tests')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings())
+
         test = GroupTest(
             title=form.title.data,
             description=form.description.data,
@@ -912,6 +1110,7 @@ def create_test():
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
             results_link=form.results_link.data if form.status.data == 'closed' else None,
+            results_image_key=uploaded_image_key,
             results_posted_at=datetime.utcnow() if form.status.data == 'closed' and form.results_link.data else None,
             created_by=current_user.id
         )
@@ -921,7 +1120,7 @@ def create_test():
         db.session.commit()
         flash(f'Group test "{test.title}" created successfully.', 'success')
         return redirect(url_for('main.test_detail', test_id=test.id))
-    return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names())
+    return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings())
 
 
 @main_bp.route('/admin/edit-test/<int:test_id>', methods=['GET', 'POST'])
@@ -972,9 +1171,39 @@ def edit_test(test_id):
         test.donor_shipping_cost = form.donor_shipping_cost.data or 0.0
         test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
         test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
+
+        clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
+        upload_file = request.files.get('results_image')
+        has_new_upload = bool(upload_file and upload_file.filename)
+        if has_new_upload:
+            try:
+                new_key = upload_result_image(upload_file, 'group-tests')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                return render_template(
+                    'admin/edit_test.html',
+                    form=form,
+                    test=test,
+                    tag_suggestions=get_all_tag_names(),
+                    storage_settings=get_storage_settings(),
+                    existing_results_image_url=build_result_image_url(test.results_image_key),
+                )
+
+            old_key = test.results_image_key
+            test.results_image_key = new_key
+            if old_key and old_key != new_key:
+                delete_result_image(old_key)
+        elif clear_existing_image and test.results_image_key:
+            old_key = test.results_image_key
+            test.results_image_key = None
+            delete_result_image(old_key)
+
         apply_tags_to_record(test, form.tag_names.data)
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
+            if test.results_image_key:
+                delete_result_image(test.results_image_key)
+            test.results_image_key = None
             test.results_posted_at = None
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
@@ -982,7 +1211,7 @@ def edit_test(test_id):
         flash('Group test updated.', 'success')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
-    return render_template('admin/edit_test.html', form=form, test=test, tag_suggestions=get_all_tag_names())
+    return render_template('admin/edit_test.html', form=form, test=test, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings(), existing_results_image_url=build_result_image_url(test.results_image_key))
 
 
 @main_bp.route('/admin/manage-participants/<int:test_id>')
@@ -1003,6 +1232,267 @@ def manage_participants(test_id):
     return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
 
 
+def _recalculate_approved_amounts_for_test(test):
+    """Keep approved participant balances consistent after approval changes."""
+    costs = test.calculate_costs()
+    for approved_part in test.participations.filter_by(approved=True).all():
+        approved_part.update_amount_owed(costs)
+
+
+def _approve_participation_record(part):
+    part.approved = True
+    part.approved_at = datetime.utcnow()
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
+
+
+def _deny_participation_record(part, reason):
+    part.denied = True
+    part.denied_at = datetime.utcnow()
+    part.denied_reason = reason
+    part.approved = False
+    part.approved_at = None
+
+
+def _reopen_participation_record(part):
+    part.denied = False
+    part.denied_at = None
+    part.denied_reason = None
+    part.approved = False
+    part.approved_at = None
+    part.requested_at = datetime.utcnow()
+
+
+def _parse_participation_ids(raw_ids):
+    valid_ids = []
+    for raw_id in raw_ids:
+        try:
+            value = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            valid_ids.append(value)
+    return valid_ids
+
+
+def _build_pending_queue_query(status_filter, search):
+    pending_query = (
+        Participation.query
+        .join(GroupTest, Participation.group_test_id == GroupTest.id)
+        .join(User, Participation.user_id == User.id)
+        .filter(Participation.approved == False, Participation.denied == False)
+    )
+
+    if status_filter != 'all':
+        pending_query = pending_query.filter(GroupTest.status == status_filter)
+
+    if search:
+        like_term = f"%{search}%"
+        pending_query = pending_query.filter(
+            or_(
+                GroupTest.title.ilike(like_term),
+                GroupTest.compound.ilike(like_term),
+                Participation.name.ilike(like_term),
+                User.username.ilike(like_term),
+                User.email.ilike(like_term),
+            )
+        )
+
+    return pending_query
+
+
+def _queue_redirect_params():
+    return {
+        'status': (request.form.get('status') or request.args.get('status') or 'all').strip().lower(),
+        'q': (request.form.get('q') or request.args.get('q') or '').strip(),
+        'page': request.form.get('page') or request.args.get('page') or 1,
+    }
+
+
+@main_bp.route('/admin/action-queue')
+@login_required
+@admin_required
+def action_queue():
+    status_filter = (request.args.get('status') or 'all').strip().lower()
+    search = (request.args.get('q') or '').strip()
+    page = request.args.get('page', default=1, type=int) or 1
+    per_page = 25
+    if status_filter not in {'all', 'recruiting', 'testing', 'closed'}:
+        status_filter = 'all'
+    if page < 1:
+        page = 1
+
+    pending_query = _build_pending_queue_query(status_filter, search)
+    pending_parts_pagination = pending_query.order_by(Participation.requested_at.asc(), GroupTest.start_date.asc()).paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+    return render_template(
+        'admin/action_queue.html',
+        pending_parts=pending_parts_pagination.items,
+        pending_parts_pagination=pending_parts_pagination,
+        status_filter=status_filter,
+        search=search,
+        page=page,
+    )
+
+
+@main_bp.route('/admin/action-queue/approve/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def approve_from_queue(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if part.approved:
+        flash('Participant is already approved.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    _approve_participation_record(part)
+    _recalculate_approved_amounts_for_test(part.group_test)
+    db.session.commit()
+    flash(f'Approved {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/action-queue/approve-selected', methods=['POST'])
+@login_required
+@admin_required
+def approve_selected_from_queue():
+    part_ids = request.form.getlist('part_ids')
+    if not part_ids:
+        flash('Select at least one pending participant to approve.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    valid_ids = _parse_participation_ids(part_ids)
+
+    if not valid_ids:
+        flash('No valid participants were selected.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = (
+        Participation.query
+        .filter(Participation.id.in_(valid_ids), Participation.approved == False, Participation.denied == False)
+        .all()
+    )
+
+    if not pending_parts:
+        flash('Selected participants were already approved or unavailable.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    affected_test_ids = set()
+    for part in pending_parts:
+        _approve_participation_record(part)
+        affected_test_ids.add(part.group_test_id)
+
+    for test_id in affected_test_ids:
+        test = GroupTest.query.get(test_id)
+        if test:
+            _recalculate_approved_amounts_for_test(test)
+
+    db.session.commit()
+    flash(f'Approved {len(pending_parts)} pending participant(s) across {len(affected_test_ids)} test(s).', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/action-queue/approve-filtered', methods=['POST'])
+@login_required
+@admin_required
+def approve_filtered_from_queue():
+    status_filter = (request.form.get('status') or 'all').strip().lower()
+    search = (request.form.get('q') or '').strip()
+    confirm_text = (request.form.get('confirm_text') or '').strip()
+    if status_filter not in {'all', 'recruiting', 'testing', 'closed'}:
+        status_filter = 'all'
+
+    if confirm_text != 'APPROVE FILTERED':
+        flash('Bulk approve canceled. Type APPROVE FILTERED to continue.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = _build_pending_queue_query(status_filter, search).all()
+    if not pending_parts:
+        flash('No pending requests matched your current filters.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    affected_test_ids = set()
+    for part in pending_parts:
+        _approve_participation_record(part)
+        affected_test_ids.add(part.group_test_id)
+
+    for test_id in affected_test_ids:
+        test = GroupTest.query.get(test_id)
+        if test:
+            _recalculate_approved_amounts_for_test(test)
+
+    db.session.commit()
+    flash(
+        f'Approved all filtered pending requests: {len(pending_parts)} participant(s) across {len(affected_test_ids)} test(s).',
+        'success',
+    )
+    return redirect(url_for('main.action_queue', status=status_filter, q=search, page=1))
+
+
+@main_bp.route('/admin/action-queue/deny/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def deny_from_queue(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if part.approved:
+        flash('Approved participants cannot be denied from this queue.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+    if part.denied:
+        flash('This request is already denied.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    deny_reason = (request.form.get('deny_reason') or '').strip()
+    if not deny_reason:
+        flash('A denial reason is required.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    name = part.name or part.user.username
+    _deny_participation_record(part, deny_reason)
+    db.session.commit()
+    flash(f'Denied request for {name}.', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/action-queue/deny-selected', methods=['POST'])
+@login_required
+@admin_required
+def deny_selected_from_queue():
+    part_ids = request.form.getlist('part_ids')
+    if not part_ids:
+        flash('Select at least one pending participant to deny.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    valid_ids = _parse_participation_ids(part_ids)
+    if not valid_ids:
+        flash('No valid participants were selected.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    deny_reason = (request.form.get('deny_reason') or '').strip()
+    if not deny_reason:
+        flash('A denial reason is required.', 'warning')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    pending_parts = Participation.query.filter(
+        Participation.id.in_(valid_ids),
+        Participation.approved == False,
+        Participation.denied == False,
+    ).all()
+    if not pending_parts:
+        flash('Selected participants were already approved or unavailable.', 'info')
+        return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+    denied_count = len(pending_parts)
+    for part in pending_parts:
+        _deny_participation_record(part, deny_reason)
+
+    db.session.commit()
+    flash(f'Denied {denied_count} pending participant request(s).', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
 @main_bp.route('/admin/update-participant/<int:part_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -1014,8 +1504,7 @@ def update_participant(part_id):
     if form.validate_on_submit():
         form.populate_obj(part)
         if form.approved.data and not part.approved:
-            part.approved = True
-            part.approved_at = datetime.utcnow()
+            _approve_participation_record(part)
             # Auto-calculate owed on approval
             costs = test.calculate_costs()
             part.update_amount_owed(costs)
@@ -1037,13 +1526,56 @@ def approve_request(part_id):
     """Quick approve endpoint (can be called from manage page)."""
     part = Participation.query.get_or_404(part_id)
     if not part.approved:
-        part.approved = True
-        part.approved_at = datetime.utcnow()
+        _approve_participation_record(part)
         costs = part.group_test.calculate_costs()
         part.update_amount_owed(costs)
         db.session.commit()
         flash(f'Approved {part.name or part.user.username} for test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
+
+
+@main_bp.route('/admin/manage-participants/<int:test_id>/deny/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def deny_participant_from_manage(test_id, part_id):
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.get_or_404(part_id)
+    if part.group_test_id != test.id:
+        abort(404)
+    if part.approved:
+        flash('Approved participants cannot be denied directly. Unapprove first if needed.', 'warning')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+    if part.denied:
+        flash('This request is already denied.', 'info')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    deny_reason = (request.form.get('deny_reason') or '').strip()
+    if not deny_reason:
+        flash('A denial reason is required.', 'warning')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    _deny_participation_record(part, deny_reason)
+    db.session.commit()
+    flash(f'Denied request for {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
+
+
+@main_bp.route('/admin/manage-participants/<int:test_id>/reopen/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def reopen_participant_from_manage(test_id, part_id):
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.get_or_404(part_id)
+    if part.group_test_id != test.id:
+        abort(404)
+    if not part.denied:
+        flash('Only denied requests can be reopened.', 'info')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    _reopen_participation_record(part)
+    db.session.commit()
+    flash(f'Reopened request for {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
 
 
 @main_bp.route('/admin/remove-participant/<int:part_id>', methods=['POST'])
@@ -1088,8 +1620,12 @@ def add_participant_to_test(test_id):
     test = GroupTest.query.get_or_404(test_id)
     form = AddParticipantForm()
 
-    # Get users who are not already participants in this test
-    existing_participant_ids = [p.user_id for p in test.participations]
+    # Users with active (not denied) records are already represented in this test.
+    # Denied records remain eligible so admins can manually add/approve them later.
+    existing_participant_ids = [
+        p.user_id
+        for p in test.participations.filter(Participation.denied == False).all()
+    ]
     available_users = User.query.filter(User.id.notin_(existing_participant_ids)).all()
 
     form.user_id.choices = [(u.id, f"{u.username} ({u.email})") for u in available_users]
@@ -1100,21 +1636,34 @@ def add_participant_to_test(test_id):
             flash('User not found.', 'danger')
             return redirect(url_for('main.add_participant_to_test', test_id=test_id))
 
-        # Create participation with auto-approval
-        part = Participation(
-            group_test_id=test.id,
-            user_id=user.id,
-            name=user.username,
-            tg_username=user.tg_username,
-            approved=True,
-            approved_at=datetime.utcnow(),
-            active=True
-        )
+        part = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
+        if part:
+            # Reuse prior denied row to preserve request history while restoring access.
+            part.name = user.username
+            part.tg_username = user.tg_username
+            part.active = True
+            part.approved = True
+            part.approved_at = datetime.utcnow()
+            part.denied = False
+            part.denied_at = None
+            part.denied_reason = None
+        else:
+            # Create participation with auto-approval
+            part = Participation(
+                group_test_id=test.id,
+                user_id=user.id,
+                name=user.username,
+                tg_username=user.tg_username,
+                approved=True,
+                approved_at=datetime.utcnow(),
+                denied=False,
+                active=True
+            )
+            db.session.add(part)
+
         # Calculate initial owed amount
         costs = test.calculate_costs()
         part.update_amount_owed(costs)
-
-        db.session.add(part)
         db.session.commit()
         flash(f'Added {user.username} to the test (auto-approved).', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -1207,6 +1756,92 @@ def notification_config():
         form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
     log_contents = read_notification_log()
     return render_template('admin/notification_config.html', form=form, log_contents=log_contents)
+
+
+@main_bp.route('/admin/storage-config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def storage_config():
+    form = StorageConfigForm()
+    configs = _config_values_map()
+
+    existing_secret = str(configs.get('storage_secret_access_key') or '').strip()
+
+    if form.validate_on_submit():
+        enabled = bool(form.storage_enabled.data)
+        provider = (form.storage_provider.data or 'aws').strip().lower()
+        bucket = (form.storage_bucket.data or '').strip()
+        access_key_id = (form.storage_access_key_id.data or '').strip()
+        secret_access_key = (form.storage_secret_access_key.data or '').strip()
+        region = (form.storage_region.data or '').strip()
+
+        errors = []
+        if enabled:
+            if provider not in {'aws', 'do'}:
+                errors.append('Provider must be AWS S3 or DigitalOcean Spaces.')
+            if not bucket:
+                errors.append('Bucket / Space name is required when storage is enabled.')
+            if not region:
+                errors.append('Region is required when storage is enabled.')
+            if not access_key_id:
+                errors.append('Access Key ID is required when storage is enabled.')
+            if not secret_access_key and not existing_secret:
+                errors.append('Secret Access Key is required when storage is enabled.')
+
+        if errors:
+            for err in errors:
+                flash(err, 'danger')
+        else:
+            updates = {
+                'storage_enabled': 'true' if enabled else 'false',
+                'storage_provider': provider,
+                'storage_bucket': bucket or None,
+                'storage_region': region or None,
+                'storage_endpoint_url': (form.storage_endpoint_url.data or '').strip() or None,
+                'storage_access_key_id': access_key_id or None,
+                'storage_path_prefix': (form.storage_path_prefix.data or 'result-images').strip() or 'result-images',
+                'storage_public_base_url': (form.storage_public_base_url.data or '').strip() or None,
+                'storage_make_public': 'true' if form.storage_make_public.data else 'false',
+                'storage_force_path_style': 'true' if form.storage_force_path_style.data else 'false',
+                'storage_max_upload_size_mb': str(form.storage_max_upload_size_mb.data or 8),
+                'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF').strip(),
+            }
+            for key, value in updates.items():
+                _save_config_value(key, value)
+
+            if secret_access_key:
+                _save_config_value('storage_secret_access_key', secret_access_key)
+
+            db.session.commit()
+            flash('Storage configuration saved.', 'success')
+            return redirect(url_for('main.storage_config'))
+
+    if not form.is_submitted():
+        form.storage_enabled.data = str(configs.get('storage_enabled', 'false')).lower() == 'true'
+        form.storage_provider.data = (configs.get('storage_provider') or 'aws').lower()
+        form.storage_bucket.data = configs.get('storage_bucket')
+        form.storage_region.data = configs.get('storage_region')
+        form.storage_endpoint_url.data = configs.get('storage_endpoint_url')
+        form.storage_access_key_id.data = configs.get('storage_access_key_id')
+        form.storage_secret_access_key.data = ''
+        form.storage_path_prefix.data = configs.get('storage_path_prefix') or 'result-images'
+        form.storage_public_base_url.data = configs.get('storage_public_base_url')
+        form.storage_make_public.data = str(configs.get('storage_make_public', 'true')).lower() == 'true'
+        form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() == 'true'
+        try:
+            form.storage_max_upload_size_mb.data = float(configs.get('storage_max_upload_size_mb') or 8)
+        except (TypeError, ValueError):
+            form.storage_max_upload_size_mb.data = 8
+        form.storage_allowed_formats.data = configs.get('storage_allowed_formats') or 'JPEG,PNG,WEBP,GIF'
+
+    secret_mask = mask_secret(existing_secret)
+    effective_settings = get_storage_settings()
+    return render_template(
+        'admin/storage_config.html',
+        form=form,
+        secret_mask=secret_mask,
+        storage_enabled=effective_settings.get('enabled', False),
+    )
 
 
 @main_bp.route('/admin/users')
@@ -1348,10 +1983,28 @@ def manage_public_results():
             request.form.getlist('result_item_name'),
             request.form.getlist('result_item_value'),
         )
+        uploaded_image_key = None
+        upload_file = request.files.get('results_image')
+        if upload_file and upload_file.filename:
+            try:
+                uploaded_image_key = upload_result_image(upload_file, 'public-results')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+                return render_template(
+                    'admin/public_results.html',
+                    form=form,
+                    public_results=public_results,
+                    tag_suggestions=get_all_tag_names(),
+                    storage_settings=get_storage_settings(),
+                    result_image_url_builder=build_result_image_url,
+                )
+
         result = PublicResult(
             title=form.title.data,
             summary=form.summary.data,
             results_link=form.results_link.data.strip(),
+            results_image_key=uploaded_image_key,
             item_results=item_results,
             created_by=current_user.id,
         )
@@ -1368,6 +2021,8 @@ def manage_public_results():
         form=form,
         public_results=public_results,
         tag_suggestions=get_all_tag_names(),
+        storage_settings=get_storage_settings(),
+        result_image_url_builder=build_result_image_url,
     )
 
 
@@ -1389,6 +2044,36 @@ def edit_public_result(result_id):
         result.title = form.title.data
         result.summary = form.summary.data
         result.results_link = form.results_link.data.strip()
+
+        clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
+        upload_file = request.files.get('results_image')
+        has_new_upload = bool(upload_file and upload_file.filename)
+        if has_new_upload:
+            try:
+                new_key = upload_result_image(upload_file, 'public-results')
+            except (StorageConfigurationError, StorageUploadError) as exc:
+                flash(str(exc), 'danger')
+                public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+                return render_template(
+                    'admin/public_results.html',
+                    form=form,
+                    public_results=public_results,
+                    editing_result=result,
+                    tag_suggestions=get_all_tag_names(),
+                    storage_settings=get_storage_settings(),
+                    editing_result_image_url=build_result_image_url(result.results_image_key),
+                    result_image_url_builder=build_result_image_url,
+                )
+
+            old_key = result.results_image_key
+            result.results_image_key = new_key
+            if old_key and old_key != new_key:
+                delete_result_image(old_key)
+        elif clear_existing_image and result.results_image_key:
+            old_key = result.results_image_key
+            result.results_image_key = None
+            delete_result_image(old_key)
+
         apply_tags_to_record(result, form.tag_names.data)
         db.session.commit()
         flash('Public result updated.', 'success')
@@ -1401,6 +2086,9 @@ def edit_public_result(result_id):
         public_results=public_results,
         editing_result=result,
         tag_suggestions=get_all_tag_names(),
+        storage_settings=get_storage_settings(),
+        editing_result_image_url=build_result_image_url(result.results_image_key),
+        result_image_url_builder=build_result_image_url,
     )
 
 
@@ -1410,6 +2098,8 @@ def edit_public_result(result_id):
 def delete_public_result(result_id):
     result = PublicResult.query.get_or_404(result_id)
     title = result.title
+    if result.results_image_key:
+        delete_result_image(result.results_image_key)
     db.session.delete(result)
     db.session.commit()
     flash(f'Public result "{title}" was deleted.', 'warning')

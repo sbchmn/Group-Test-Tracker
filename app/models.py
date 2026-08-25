@@ -98,6 +98,7 @@ class PublicResult(db.Model):
     title = db.Column(db.String(200), nullable=False)
     summary = db.Column(db.Text, nullable=True)
     results_link = db.Column(db.String(500), nullable=False)
+    results_image_key = db.Column(db.String(500), nullable=True)
     item_results = db.Column(db.JSON, nullable=True)
     posted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
@@ -179,6 +180,7 @@ class GroupTest(db.Model):
     
     # Results - only shown to approved participants when status == 'closed'
     results_link = db.Column(db.String(500), nullable=True)
+    results_image_key = db.Column(db.String(500), nullable=True)
     results_posted_at = db.Column(db.DateTime, nullable=True)
     
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
@@ -350,6 +352,9 @@ class Participation(db.Model):
     requested_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     approved = db.Column(db.Boolean, default=False, nullable=False, index=True)
     approved_at = db.Column(db.DateTime, nullable=True)
+    denied = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    denied_at = db.Column(db.DateTime, nullable=True)
+    denied_reason = db.Column(db.Text, nullable=True)
     
     def update_amount_owed(self, costs_dict):
         """Helper to sync individual owed based on role (donor vs non). Call after approve or recalc."""

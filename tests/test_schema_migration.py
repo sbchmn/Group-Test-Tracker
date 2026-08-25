@@ -44,6 +44,7 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("public_results", migration_text)
         self.assertIn("dashboard_hidden_group_tests", migration_text)
         self.assertIn("results_posted_at", migration_text)
+        self.assertIn("denied_reason", migration_text)
 
 
 if __name__ == "__main__":

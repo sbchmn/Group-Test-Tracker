@@ -6,7 +6,7 @@
 <h3>Create New Group Test</h3>
 <p class="text-muted">All fields from original spreadsheet supported. Lab tests can be itemized below (JS powered).</p>
 
-<form method="POST" id="testForm" novalidate>
+<form method="POST" id="testForm" novalidate enctype="multipart/form-data">
     {{ form.hidden_tag() }}
     
     <div class="card mb-4">
@@ -98,6 +98,15 @@
             <div class="mb-3">
                 {{ form.results_link.label(class="form-label") }}
                 {{ form.results_link(class="form-control", placeholder="https://drive.google.com/... or DO Spaces URL (only shown when Closed + approved members)") }}
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Result Image (optional)</label>
+                <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif">
+                {% if storage_settings.enabled %}
+                    <small class="text-muted">Image uploads are enabled. Uploaded image will be shown as a thumbnail on results pages.</small>
+                {% else %}
+                    <small class="text-warning">Image uploads are disabled. Enable storage in Admin -> Storage Config.</small>
+                {% endif %}
             </div>
         </div>
     </div>

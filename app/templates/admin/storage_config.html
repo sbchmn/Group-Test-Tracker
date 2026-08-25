@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Storage Configuration{% endblock %}
+
+{% block content %}
+<h3>Storage Configuration</h3>
+<p class="text-muted">Configure S3-compatible object storage for result image uploads (AWS S3 or DigitalOcean Spaces).</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="form-check mb-3">
+                {{ form.storage_enabled(class="form-check-input") }}
+                {{ form.storage_enabled.label(class="form-check-label") }}
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    {{ form.storage_provider.label(class="form-label") }}
+                    {{ form.storage_provider(class="form-select") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.storage_bucket.label(class="form-label") }}
+                    {{ form.storage_bucket(class="form-control", placeholder="my-results-bucket") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.storage_region.label(class="form-label") }}
+                    {{ form.storage_region(class="form-control", placeholder="us-east-1 or nyc3") }}
+                </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-md-6">
+                    {{ form.storage_endpoint_url.label(class="form-label") }}
+                    {{ form.storage_endpoint_url(class="form-control", placeholder="https://nyc3.digitaloceanspaces.com") }}
+                    <div class="form-text">Optional for AWS. Recommended for DigitalOcean if using custom endpoint behavior.</div>
+                </div>
+                <div class="col-md-6">
+                    {{ form.storage_public_base_url.label(class="form-label") }}
+                    {{ form.storage_public_base_url(class="form-control", placeholder="https://my-bucket.nyc3.digitaloceanspaces.com") }}
+                    <div class="form-text">Optional override for image URLs shown to users.</div>
+                </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-md-6">
+                    {{ form.storage_access_key_id.label(class="form-label") }}
+                    {{ form.storage_access_key_id(class="form-control") }}
+                </div>
+                <div class="col-md-6">
+                    {{ form.storage_secret_access_key.label(class="form-label") }}
+                    {{ form.storage_secret_access_key(class="form-control", placeholder="Leave blank to keep existing") }}
+                    {% if secret_mask %}
+                        <div class="form-text">Stored secret: {{ secret_mask }}</div>
+                    {% else %}
+                        <div class="form-text">No secret stored yet.</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-md-4">
+                    {{ form.storage_path_prefix.label(class="form-label") }}
+                    {{ form.storage_path_prefix(class="form-control", placeholder="result-images") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.storage_max_upload_size_mb.label(class="form-label") }}
+                    {{ form.storage_max_upload_size_mb(class="form-control", step="1") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.storage_allowed_formats.label(class="form-label") }}
+                    {{ form.storage_allowed_formats(class="form-control", placeholder="JPEG,PNG,WEBP,GIF") }}
+                </div>
+            </div>
+
+            <div class="row g-3 mt-2">
+                <div class="col-md-6 form-check">
+                    {{ form.storage_make_public(class="form-check-input") }}
+                    {{ form.storage_make_public.label(class="form-check-label") }}
+                </div>
+                <div class="col-md-6 form-check">
+                    {{ form.storage_force_path_style(class="form-check-input") }}
+                    {{ form.storage_force_path_style.label(class="form-check-label") }}
+                </div>
+            </div>
+
+            <div class="mt-4 d-flex gap-2">
+                <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+                <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Back</a>
+                <span class="small text-muted align-self-center">Current status: {{ 'Enabled' if storage_enabled else 'Disabled' }}</span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="alert alert-info">
+    <strong>Production notes:</strong> use least-privilege credentials (put/get/delete only on this bucket/path), rotate keys regularly, and prefer bucket-level lifecycle policies for stale objects.
+</div>
+{% endblock %}

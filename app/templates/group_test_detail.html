@@ -2,6 +2,23 @@
 
 {% block title %}{{ test.title }}{% endblock %}
 
+{% block scripts %}
+<script>
+window.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('[data-result-image-trigger="true"]').forEach(function(button) {
+        button.addEventListener('click', function() {
+            const src = button.getAttribute('data-image-src') || '';
+            const title = button.getAttribute('data-image-title') || 'Result Image';
+            const modalImage = document.getElementById('resultImageModalSrc');
+            const modalTitle = document.getElementById('resultImageModalTitle');
+            if (modalImage) modalImage.src = src;
+            if (modalTitle) modalTitle.textContent = title;
+        });
+    });
+});
+</script>
+{% endblock scripts %}
+
 {% block content %}
 <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
@@ -189,6 +206,19 @@
                         </ul>
                     </div>
                 {% endif %}
+                {% if test_results_image_url %}
+                    <div class="mb-2">
+                        <button type="button"
+                                class="btn btn-link p-0 border-0"
+                                data-bs-toggle="modal"
+                                data-bs-target="#resultImageModal"
+                                data-result-image-trigger="true"
+                                data-image-src="{{ test_results_image_url }}"
+                                data-image-title="{{ test.title }}">
+                            <img src="{{ test_results_image_url }}" alt="{{ test.title }} image" style="width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                        </button>
+                    </div>
+                {% endif %}
                 <a href="{{ test.results_link }}" target="_blank" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
                 <small class="d-block mt-1 text-muted">This link is only visible to approved participants.</small>
                 {% if test.results_posted_at %}
@@ -232,10 +262,23 @@
             <!-- Regular user actions -->
             {% if test.status == 'recruiting' %}
                 {% if my_part %}
-                    <div class="alert alert-info">
-                        You have requested to join. Status: 
-                        <strong>{% if my_part.approved %}Approved{% else %}Pending Admin Review{% endif %}</strong>
-                    </div>
+                    {% if my_part.denied %}
+                        <div class="alert alert-danger">
+                            <strong>Your join request was denied.</strong>
+                            {% if my_part.denied_reason %}
+                                <div class="mt-1">Reason: {{ my_part.denied_reason }}</div>
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('main.reapply_participation', test_id=test.id) }}" class="mt-2">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Reapply</button>
+                            </form>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info">
+                            You have requested to join. Status:
+                            <strong>{% if my_part.approved %}Approved{% else %}Pending Admin Review{% endif %}</strong>
+                        </div>
+                    {% endif %}
                 {% else %}
                     <div class="card border-success">
                         <div class="card-body text-center">
@@ -272,6 +315,7 @@
                             <tr>
                                 <th>Name / TG</th>
                                 <th>Role</th>
+                                <th>Request State</th>
                                 <th>Vendor Order</th>
                                 <th>Individual Fee</th>
                                 <th>Lab Fee Paid</th>
@@ -288,6 +332,13 @@
                                     <span class="badge {% if p.vial_donor %}bg-info{% else %}bg-secondary{% endif %}">
                                         {{ 'Donor' if p.vial_donor else 'Non-Donor' }}
                                     </span>
+                                </td>
+                                <td>
+                                    {% if p.approved %}
+                                        <span class="badge bg-success">Approved</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">Pending Review</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <span class="badge bg-light text-dark">{{ p.order_status or 'pending' }}</span>
@@ -312,6 +363,20 @@
                 </div>
             </div>
         {% endif %}
+    </div>
+</div>
+
+<div class="modal fade" id="resultImageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resultImageModalTitle">Result Image</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="resultImageModalSrc" src="" alt="Result image" class="img-fluid rounded">
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

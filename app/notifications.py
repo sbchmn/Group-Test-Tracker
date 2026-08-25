@@ -54,10 +54,54 @@ def _get_user_attr(user, attr, default=None):
 
 
 def _notification_log_path():
+    configured_path = current_app.config.get("NOTIFICATION_LOG_PATH")
+    if configured_path:
+        configured_path = os.path.abspath(str(configured_path))
+        os.makedirs(os.path.dirname(configured_path), exist_ok=True)
+        return configured_path
+
     base_dir = os.path.join(current_app.root_path, os.pardir)
     log_dir = os.path.join(base_dir, "instance")
     os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, "notification.log")
+
+
+def _sanitize_notification_log_contents(contents):
+    if not contents:
+        return ""
+
+    if contents.startswith("["):
+        return contents
+
+    first_bracket = contents.find("[")
+    if first_bracket != -1:
+        return contents[first_bracket:]
+
+    # If no recognizable log marker exists, keep only the tail to avoid massive junk blocks.
+    return contents[-2000:]
+
+
+def _prune_notification_log_contents(contents, max_bytes):
+    cleaned = _sanitize_notification_log_contents(contents)
+    if not cleaned:
+        return cleaned
+
+    if len(cleaned.encode("utf-8", errors="ignore")) <= max_bytes:
+        return cleaned
+
+    keep_bytes = max(max_bytes // 2, 1024)
+    tail = cleaned[-keep_bytes:]
+
+    # Prefer starting at a full timestamped line.
+    marker_idx = tail.find("\n[")
+    if marker_idx != -1:
+        tail = tail[marker_idx + 1:]
+    elif not tail.startswith("["):
+        first_bracket = tail.find("[")
+        if first_bracket != -1:
+            tail = tail[first_bracket:]
+
+    return tail.lstrip("\n")
 
 
 def append_notification_log(message, debug=False):
@@ -74,9 +118,8 @@ def append_notification_log(message, debug=False):
     if os.path.getsize(path) > max_bytes:
         with open(path, "r", encoding="utf-8") as handle:
             contents = handle.read()
-        if len(contents) > max_bytes:
-            keep = max_bytes // 2
-            trimmed = contents[-keep:] if keep > 0 else ""
+        trimmed = _prune_notification_log_contents(contents, int(max_bytes))
+        if trimmed != contents:
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(trimmed)
     return path
@@ -87,7 +130,14 @@ def read_notification_log():
     if not os.path.exists(path):
         return ""
     with open(path, "r", encoding="utf-8") as handle:
-        return handle.read()
+        contents = handle.read()
+
+    cleaned = _sanitize_notification_log_contents(contents)
+    if cleaned != contents:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(cleaned)
+
+    return cleaned
 
 
 def render_notification_template(template_text, context):

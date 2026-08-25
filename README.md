@@ -1,126 +1,453 @@
 # Group Test Manager
 
-Group Test Manager is a Flask-based web app for coordinating group lab tests, participant requests, cost sharing, and notification-driven follow-up without relying on spreadsheets.
+Group Test Manager is a Flask-based web app for coordinating group lab tests, participant requests, cost sharing, result publishing, and notification-driven follow-up without spreadsheets.
 
-## Application map
+This README is a practical how-to guide for every major feature in the app.
 
-The app is organized around a single Flask app factory and a small set of domain modules:
+Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 
-- App factory and configuration: [app/__init__.py](app/__init__.py)
-  - Creates the Flask app, loads environment settings, wires SQLAlchemy/Flask-Login/CSRF, registers the main blueprint, and exposes CLI commands such as `create-admin` and `init-db`.
-- Data model: [app/models.py](app/models.py)
-  - Defines users, group tests, participations, reusable tags, public results, notification templates, and notification configuration.
-- Route layer and business logic: [app/routes.py](app/routes.py)
-  - Handles authentication, registration, password reset, profile editing, dashboard routing, My Results, group-test CRUD, public-results CRUD, participant requests/approvals, exports, and admin management screens.
-- Notification layer: [app/notifications.py](app/notifications.py)
-  - Sends Mailjet email and Telegram messages, renders template variables, appends notification logs, and handles fallback behavior.
-- Templates and UI: [app/templates](app/templates)
-  - Contains the Bootstrap-based interface for public pages, dashboard, test detail, and admin workflows.
-- Database migrations: [migrations/versions](migrations/versions)
-  - Tracks schema changes for the app over time.
+## Table of Contents
 
-## Feature inventory
+- [What This App Includes](#what-this-app-includes)
+- [Application Map](#application-map)
+- [Setup and Run](#setup-and-run)
+	- [1. Install](#1-install)
+	- [2. Configure Environment](#2-configure-environment)
+	- [3. Apply Migrations](#3-apply-migrations)
+	- [4. Create Initial Admin User](#4-create-initial-admin-user)
+	- [5. Run](#5-run)
+- [Feature How-To (By Role)](#feature-how-to-by-role)
+- [End User How-To](#end-user-how-to)
+	- [Register and Login](#register-and-login)
+	- [Reset Password](#reset-password)
+	- [Update Your Profile](#update-your-profile)
+	- [Use Dashboard](#use-dashboard)
+	- [Request Participation](#request-participation)
+	- [Update Your Participation Status](#update-your-participation-status)
+	- [View Results (My Results)](#view-results-my-results)
+- [Admin How-To](#admin-how-to)
+	- [Create Group Test](#create-group-test)
+	- [Edit Group Test](#edit-group-test)
+	- [Delete Group Test](#delete-group-test)
+	- [Manage Participants (Per Test)](#manage-participants-per-test)
+	- [Admin Action Queue (Cross-Test)](#admin-action-queue-cross-test)
+	- [Manually Add Participant](#manually-add-participant)
+	- [Set Results Link Quickly](#set-results-link-quickly)
+	- [Manage Public Results](#manage-public-results)
+	- [Manage Users](#manage-users)
+	- [Notification Templates](#notification-templates)
+	- [Notification Config](#notification-config)
+	- [Send Notifications to Test Participants](#send-notifications-to-test-participants)
+	- [Export Test Data](#export-test-data)
+- [Object Storage and Result Image Upload How-To](#object-storage-and-result-image-upload-how-to)
+	- [Configure Storage](#configure-storage)
+	- [AWS S3 Settings Example](#aws-s3-settings-example)
+	- [DigitalOcean Spaces Settings Example](#digitalocean-spaces-settings-example)
+	- [Upload and Display Behavior](#upload-and-display-behavior)
+	- [Bucket Policy and Security Recommendations](#bucket-policy-and-security-recommendations)
+- [Access and Visibility Rules](#access-and-visibility-rules)
+- [Notification Template Variables](#notification-template-variables)
+- [Testing and Validation](#testing-and-validation)
+- [Troubleshooting](#troubleshooting)
+	- [Storage Upload Says Disabled or Misconfigured](#storage-upload-says-disabled-or-misconfigured)
+	- [Images Upload But Do Not Render](#images-upload-but-do-not-render)
+	- [Notifications Not Delivering](#notifications-not-delivering)
+	- [Migration Errors](#migration-errors)
+- [Key Files](#key-files)
 
-### Public and authenticated user flows
-- User registration with username, email, password, and optional Telegram username.
-- Login and logout with Flask-Login session protection.
-- Password reset flow that can send a reset message through email or Telegram.
-- Self-service profile editing for the signed-in user, including username, email, Telegram username, notification settings, and password.
-- Dashboard that shows recruiting tests to all users and testing/closed tests only to approved participants.
+## What This App Includes
 
-### Group-test workflow
-- Admin can create and edit group tests with fields such as title, description, start date, vendor, batch number, compound, size, lab/provider, cost inputs, shipping, donor-reimbursement policy, results link, and reusable tags.
-- Users can request to join recruiting tests.
-- Admins can approve, remove, or manually add participants.
-- Each participant record tracks fields such as name, Telegram username, approval status, verified/active flags, order/payment state, donor status, state, and notes.
-- Cost calculations are computed from the group test inputs and displayed in the UI for both admins and approved participants.
-- Admins can delete group tests from the edit page.
+- Account registration, login, logout, profile management, and password reset.
+- Group test lifecycle management (recruiting, testing, closed).
+- Participant request, approve, deny, reopen, and status management.
+- Cost split automation with donor-credit logic.
+- Admin Action Queue for cross-test pending approvals.
+- Dashboard controls for search, grouping, sorting, and hide/unhide.
+- My Results page that combines closed group-test results and public results.
+- Public Results CRUD for admins, including itemized lab values.
+- Result image upload with S3-compatible object storage (AWS S3 or DigitalOcean Spaces).
+- Notification templates/configuration for email/Telegram.
+- Excel export for test backups/reporting.
 
-### Results and dashboard UX
-- The dashboard can be grouped and sorted by status, name, or tags, and users can hide tests from their own dashboard view.
-- The My Results page combines closed group-test results for approved members with admin-created public results.
-- Public results can be created and edited by admins, and both group tests and public results support searchable tags.
+## Application Map
 
-### Admin capabilities
-- Manage users, create/edit accounts, toggle active status, and trigger password resets.
-- Manage notification templates and notification configuration.
-- Send participant notifications for a test using a selected template.
-- Export test data to Excel-compatible output for backup or reporting.
-- View and manage participant approvals and status updates.
-- Manage admin-created public results.
+- App factory and config: [app/__init__.py](app/__init__.py)
+- Data models: [app/models.py](app/models.py)
+- Main routes/forms/business logic: [app/routes.py](app/routes.py)
+- Notification transport and templating: [app/notifications.py](app/notifications.py)
+- Object storage and image validation: [app/storage.py](app/storage.py)
+- Templates: [app/templates](app/templates)
+- Migrations: [migrations/versions](migrations/versions)
 
-### Notifications and templating
-- Supports Mailjet email delivery and Telegram delivery.
-- Telegram notification support is still a work in progress and may require additional validation or refinement depending on the deployment environment.
-- Uses a configurable service base URL to build fully qualified links into notifications.
-- Supports editable notification templates for:
-  - default password reset emails
-  - default registration welcome emails
-  - participant notification emails/Telegram messages
-- Debug logging can be enabled for notification request/response details.
-- Existing notification config values are displayed partially masked in the admin form for safety.
+## Setup and Run
 
-### Security and data handling
-- Password hashing uses Werkzeug’s strong password hashing.
-- Login and admin routes are protected by Flask-Login and route decorators.
-- CSRF protection is enabled for forms.
-- Unique constraints and access rules help prevent duplicate participation entries and unauthorized access.
+### 1. Install
 
-## Environment and deployment notes
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-The app expects these runtime settings:
+### 2. Configure Environment
 
-- `SECRET_KEY`: required in production and non-test environments.
-- `DATABASE_URL`: optional; if absent the app falls back to a local SQLite file for development.
-- `FLASK_ENV`: optional; useful for local development and deployment hints.
-- `NOTIFICATION_LOG_MAX_BYTES`: optional; controls notification log size trimming.
+Create a `.env` file in the project root.
 
-Recommended deployment target: DigitalOcean App Platform or a similar container or VM-based deployment with Gunicorn and a managed PostgreSQL or MySQL database.
+Minimum values:
 
-## Local development
+```env
+SECRET_KEY=replace-with-random-secret
+DATABASE_URL=sqlite:///group_tests.db
+```
 
-1. Create and activate a Python virtual environment.
-2. Install dependencies from `requirements.txt`.
-3. Create a local `.env` file and set at least `SECRET_KEY`.
-4. Run the app with `python run.py` or `flask --app app run`.
-5. Initialize the database and apply migrations if needed:
-   ```bash
-   flask --app app db upgrade head
-   ```
-6. Create the first admin user with the CLI helper:
-   ```bash
-   flask --app app create-admin --username admin --email admin@example.com --password changeme
-   ```
+Optional values:
 
-## Testing
+```env
+FLASK_ENV=development
+NOTIFICATION_LOG_MAX_BYTES=200000
+MAX_CONTENT_LENGTH_MB=12
+```
 
-Run the regression suite with:
+Notes:
+
+- `SECRET_KEY` is required outside test mode.
+- If `DATABASE_URL` is missing, the app falls back to local SQLite.
+- `MAX_CONTENT_LENGTH_MB` sets a global request-size ceiling.
+
+### 3. Apply Migrations
+
+```bash
+flask --app app db upgrade head
+```
+
+### 4. Create Initial Admin User
+
+```bash
+flask --app app create-admin --username admin --email admin@example.com --password change-me
+```
+
+### 5. Run
+
+```bash
+python run.py
+```
+
+## Feature How-To (By Role)
+
+## End User How-To
+
+### Register and Login
+
+1. Open Register.
+2. Enter username, email, password, and optional Telegram username.
+3. Submit and log in from the Login page.
+
+### Reset Password
+
+1. Open Password Reset.
+2. Enter your username.
+3. Choose delivery channel (email or Telegram).
+4. Submit to receive a temporary password.
+
+### Update Your Profile
+
+1. Open My Profile.
+2. Edit username, email, Telegram username, and notification preferences.
+3. Optionally set a new password.
+4. Save Profile.
+
+### Use Dashboard
+
+Dashboard shows tests based on visibility rules:
+
+- Recruiting tests are visible to all authenticated users.
+- Testing/Closed tests are visible to admins and approved participants.
+
+Steps:
+
+1. Use search to find tests by title/metadata.
+2. Use Group By and Sort controls.
+3. Click Request Join on recruiting tests.
+4. Click Hide to remove a test from your personal dashboard view.
+5. Use the show-hidden option to unhide as needed.
+
+### Request Participation
+
+Two paths are available:
+
+1. Quick request from Dashboard card.
+2. Detailed request from test detail page.
+
+State behavior:
+
+- Pending requests show as pending.
+- Denied requests show denial reason (if provided).
+- If denied and still recruiting, you can reapply.
+
+### Update Your Participation Status
+
+If approved:
+
+1. Open a test detail page.
+2. Click Update My Order and Payment Status.
+3. Update order progress, payment flags, amount paid, and notes.
+4. Save.
+
+### View Results (My Results)
+
+1. Open My Results.
+2. Use search/group/sort to filter combined results.
+3. Click Open Results for source link.
+4. If a thumbnail exists, click it to open full-size modal image.
+
+Note:
+
+- Group test result images are issued through authenticated signed URLs.
+- You must be an approved participant marked as paid (or admin) to open group test result images.
+
+## Admin How-To
+
+### Create Group Test
+
+1. Open Admin -> Create Test.
+2. Fill basic metadata (title, vendor, batch, compound, size, dates, description).
+3. Add optional tags (comma-separated).
+4. Add lab/provider and itemized lab rows.
+5. Fill cost fields (lab, shipping, donor-shipping, refund-per-donor).
+6. Set status.
+7. If status is closed, add results link and optional result image upload.
+8. Save.
+
+### Edit Group Test
+
+1. Open test -> Edit Test.
+2. Update fields, lab rows, tags, and status.
+3. Update or remove result image if needed.
+4. Save.
+
+Important behavior:
+
+- If status is changed away from closed, results link and result image are cleared.
+
+### Delete Group Test
+
+1. Open Edit Test.
+2. Use Delete Test in the danger area.
+3. Confirm.
+
+### Manage Participants (Per Test)
+
+1. Open Admin -> Manage Participants from a test.
+2. Approve pending requests.
+3. Deny with required reason.
+4. Reopen denied requests.
+5. Remove participant if needed.
+6. Recalculate costs after major membership changes.
+
+### Admin Action Queue (Cross-Test)
+
+Use for fast pending-request triage across all tests.
+
+1. Open Admin -> Action Queue.
+2. Filter by status and keyword.
+3. Approve or deny single requests.
+4. Select multiple rows for bulk approve/deny.
+5. Use Approve All Filtered for large backlogs.
+6. Enter confirmation text when prompted for filtered bulk approval.
+
+### Manually Add Participant
+
+1. Open Manage Participants for a test.
+2. Click Add Participant.
+3. Select user.
+4. Submit to auto-approve.
+
+If the user was previously denied for that test, the record is reactivated and approved.
+
+### Set Results Link Quickly
+
+1. Open a test detail page as admin.
+2. Use quick close/results form.
+3. Submit to set link and close test if needed.
+
+### Manage Public Results
+
+1. Open Admin -> Public Results.
+2. Create a result with title, summary, tags, link, and itemized lab rows.
+3. Optionally upload a result image.
+4. Save.
+5. Use Edit to update values/image.
+6. Use Delete to remove entries.
+
+### Manage Users
+
+1. Open Admin -> Manage Users.
+2. Create users or edit existing users.
+3. Toggle active state.
+4. Trigger password reset delivery for selected user.
+
+### Notification Templates
+
+1. Open Admin -> Manage Templates.
+2. Create or edit template fields:
+- email subject
+- email body
+- telegram body
+3. Mark defaults for password-reset and registration-welcome templates.
+4. Mark templates hidden from participant-notify picker if needed.
+
+### Notification Config
+
+1. Open Admin -> Notification Config.
+2. Configure Mailjet keys/sender email.
+3. Configure Telegram bot token.
+4. Set service base URL (used for fully qualified links in templates).
+5. Optionally enable debug logs.
+6. Save.
+
+### Send Notifications to Test Participants
+
+1. Open a test detail page as admin.
+2. Pick a notification template in Notify Test Participants.
+3. Send.
+
+The app renders participant-specific values (including amount owed) per recipient.
+
+### Export Test Data
+
+1. Open test detail page.
+2. Click Export to Excel.
+3. Download `.xlsx` backup/report.
+
+## Object Storage and Result Image Upload How-To
+
+Result images are optional and uploaded to S3-compatible storage.
+
+### Configure Storage
+
+1. Open Admin -> Storage Config.
+2. Enable object storage uploads.
+3. Select provider:
+- AWS S3
+- DigitalOcean Spaces
+4. Set bucket/space name.
+5. Set region.
+6. Set Access Key ID and Secret Access Key.
+7. Optionally set endpoint URL.
+8. Keep Upload with public-read ACL disabled for private-bucket mode.
+9. Set signed URL TTL (seconds). Recommended: 60.
+10. Set path prefix, max upload size, and allowed formats.
+11. Save.
+
+### AWS S3 Settings Example
+
+- Provider: AWS S3
+- Bucket: `my-group-test-results`
+- Region: `us-east-1` (or your region)
+- Endpoint URL: blank (usually)
+- Public Base URL: optional (blank usually fine)
+
+### DigitalOcean Spaces Settings Example
+
+- Provider: DigitalOcean Spaces
+- Bucket/Space: `my-results`
+- Region: `nyc3` (or your region)
+- Endpoint URL: `https://nyc3.digitaloceanspaces.com`
+- Public Base URL: `https://my-results.nyc3.digitaloceanspaces.com`
+
+### Upload and Display Behavior
+
+- Upload on Group Test create/edit when results are present.
+- Upload on Public Result create/edit.
+- Thumbnails and modal images are fetched through app-controlled authenticated routes.
+- The app generates short-lived signed object URLs on demand (default 60 seconds).
+- Group test result images require admin access or approved plus paid participation in that test.
+- Public result images require login.
+- Replacing image deletes old object best-effort.
+- Clearing image removes object key and attempts remote delete.
+
+### Bucket Policy and Security Recommendations
+
+1. Use least-privilege API keys scoped to target bucket/path.
+2. Rotate credentials regularly.
+3. Use lifecycle rules for stale object cleanup.
+4. Keep secrets in secure env/deployment secret stores.
+5. If using private buckets, implement signed URLs (not enabled by default).
+
+## Access and Visibility Rules
+
+- Admin-only routes are protected by login and admin checks.
+- CSRF is enabled for forms.
+- Group test visibility:
+- Recruiting: visible to authenticated users.
+- Testing/Closed: visible to admins and approved members.
+- Results links/images for group tests are shown only when closed and user is authorized.
+- Group test result images specifically require admin or approved+paid participant access before signed URL issuance.
+
+## Notification Template Variables
+
+Use double-curly placeholders, for example `{{ username }}`.
+
+Supported variables:
+
+- `username`
+- `new_password`
+- `amount_owed`
+- `test_title`
+- `test_link`
+- `test_id`
+- `login_url`
+
+## Testing and Validation
+
+Run full suite:
 
 ```bash
 python -m unittest
 ```
 
-## Notification template variables
+Useful focused runs:
 
-Template variables are rendered with double-curly placeholders such as `{{ username }}`.
+```bash
+python -m unittest tests.test_schema_migration tests.test_security
+python -m unittest tests.test_participant_removal
+python -m unittest tests.test_notifications
+```
 
-The following variables are currently available:
+## Troubleshooting
 
-- `username`: the recipient’s username.
-- `new_password`: the newly generated password used in password-reset notifications.
-- `amount_owed`: the participant balance owed, formatted as a two-decimal string for group-test notifications.
-- `test_title`: the title of the related group test.
-- `test_link`: the fully qualified web URL for the related group test.
-- `test_id`: the numeric ID of the related group test as a string.
-- `login_url`: the fully qualified login URL used in registration welcome emails.
+### Storage Upload Says Disabled or Misconfigured
 
-Use these names exactly in both email and Telegram templates.
+Check Admin -> Storage Config:
 
-## Key project files
+1. `storage_enabled` equivalent checkbox is on.
+2. Bucket, region, access key, and secret are populated.
+3. Endpoint/public URL values are valid for your provider.
 
-- [app/__init__.py](app/__init__.py): app factory, configuration, CLI registration, and extension initialization.
-- [app/models.py](app/models.py): SQLAlchemy models and relationships.
-- [app/routes.py](app/routes.py): route handlers, forms, feature logic, and permissions.
-- [app/notifications.py](app/notifications.py): notification rendering, delivery, and logging.
-- [app/templates](app/templates): UI templates for public, authenticated, and admin experiences.
-- [migrations/versions](migrations/versions): migration history.
+### Images Upload But Do Not Render
+
+1. Verify object is present in bucket/space.
+2. Verify public URL pattern or custom base URL.
+3. Verify object ACL/bucket policy allows read.
+
+### Notifications Not Delivering
+
+1. Verify Notification Config keys.
+2. Verify user has channel-compatible address/username.
+3. Enable debug logging and inspect notification log in Admin -> Notification Config.
+
+### Migration Errors
+
+1. Ensure virtual environment is active.
+2. Run `flask --app app db upgrade head`.
+3. Confirm DB URL credentials and network access.
+
+## Key Files
+
+- [app/__init__.py](app/__init__.py): app factory, extension wiring, config, CLI.
+- [app/models.py](app/models.py): SQLAlchemy models.
+- [app/routes.py](app/routes.py): forms, routes, business rules.
+- [app/storage.py](app/storage.py): S3-compatible image upload, validation, URL construction.
+- [app/notifications.py](app/notifications.py): notification rendering and transport.
+- [app/templates](app/templates): UI templates.
+- [migrations/versions](migrations/versions): schema migration history.

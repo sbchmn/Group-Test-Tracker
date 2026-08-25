@@ -31,8 +31,8 @@ from .notifications import append_notification_log, read_notification_log, send_
 from .storage import (
     StorageConfigurationError,
     StorageUploadError,
-    build_result_image_url,
     delete_result_image,
+    generate_result_image_presigned_url,
     get_storage_settings,
     upload_result_image,
 )
@@ -216,6 +216,7 @@ class StorageConfigForm(FlaskForm):
     storage_public_base_url = StringField('Public Base URL (optional)', validators=[Optional(), URL(require_tld=False)])
     storage_make_public = BooleanField('Upload with public-read ACL')
     storage_force_path_style = BooleanField('Force path-style S3 addressing')
+    storage_signed_url_ttl_seconds = FloatField('Signed URL TTL (seconds)', validators=[Optional(), NumberRange(min=15, max=900)], default=60)
     storage_max_upload_size_mb = FloatField('Max Upload Size (MB)', validators=[Optional(), NumberRange(min=1, max=50)])
     storage_allowed_formats = StringField('Allowed Formats (comma-separated)', validators=[Optional(), Length(max=200)])
     submit = SubmitField('Save Storage Configuration')
@@ -275,6 +276,7 @@ _STORAGE_CONFIG_KEYS = {
     'storage_public_base_url',
     'storage_make_public',
     'storage_force_path_style',
+    'storage_signed_url_ttl_seconds',
     'storage_max_upload_size_mb',
     'storage_allowed_formats',
 }
@@ -716,6 +718,58 @@ def toggle_dashboard_hidden(test_id):
     ))
 
 
+def _can_user_view_group_test_result_image(test, user):
+    if not user.is_authenticated:
+        return False
+    if user.is_admin:
+        return True
+    if test.status != 'closed':
+        return False
+
+    part = Participation.query.filter_by(
+        group_test_id=test.id,
+        user_id=user.id,
+        approved=True,
+        denied=False,
+    ).first()
+    return bool(part and part.paid_lab)
+
+
+def _can_user_view_group_test_results(test, user):
+    """Gate full group-test result visibility (link, item values, and image)."""
+    return _can_user_view_group_test_result_image(test, user)
+
+
+@main_bp.route('/result-image/group-test/<int:test_id>')
+@login_required
+def serve_group_test_result_image(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if not test.results_image_key:
+        abort(404)
+    if not _can_user_view_group_test_result_image(test, current_user):
+        abort(403)
+
+    try:
+        secure_url = generate_result_image_presigned_url(test.results_image_key)
+    except (StorageConfigurationError, StorageUploadError):
+        abort(503)
+    return redirect(secure_url)
+
+
+@main_bp.route('/result-image/public/<int:result_id>')
+@login_required
+def serve_public_result_image(result_id):
+    result = PublicResult.query.get_or_404(result_id)
+    if not result.results_image_key:
+        abort(404)
+
+    try:
+        secure_url = generate_result_image_presigned_url(result.results_image_key)
+    except (StorageConfigurationError, StorageUploadError):
+        abort(503)
+    return redirect(secure_url)
+
+
 @main_bp.route('/test/<int:test_id>', methods=['GET', 'POST'])
 @login_required
 def test_detail(test_id):
@@ -749,6 +803,7 @@ def test_detail(test_id):
     form = NotifyParticipantsForm()
     templates = NotificationTemplate.query.filter_by(is_active=True, hide_from_participant_notifications=False).order_by(NotificationTemplate.name).all()
     form.template_id.choices = [(template.id, template.name) for template in templates]
+    can_view_results = _can_user_view_group_test_results(test, current_user)
 
     if current_user.is_admin and form.validate_on_submit():
         template = NotificationTemplate.query.get_or_404(form.template_id.data)
@@ -766,7 +821,12 @@ def test_detail(test_id):
     return render_template(
         'group_test_detail.html',
         test=test,
-        test_results_image_url=build_result_image_url(test.results_image_key),
+        test_results_image_url=(
+            url_for('main.serve_group_test_result_image', test_id=test.id)
+            if test.results_image_key and _can_user_view_group_test_result_image(test, current_user)
+            else None
+        ),
+        can_view_results=can_view_results,
         costs=costs,
         participations=parts,
         my_part=my_part,
@@ -786,24 +846,43 @@ def my_results():
     query = (request.args.get('q') or '').strip().lower()
 
     group_results = []
-    member_tests = (
-        GroupTest.query
-        .join(Participation)
-        .filter(
-            Participation.user_id == current_user.id,
-            Participation.approved == True,
-            GroupTest.status == 'closed',
-            GroupTest.results_link.isnot(None),
+    if current_user.is_admin:
+        member_tests = (
+            GroupTest.query
+            .filter(
+                GroupTest.status == 'closed',
+                GroupTest.results_link.isnot(None),
+            )
+            .all()
         )
-        .all()
-    )
+    else:
+        member_tests = (
+            GroupTest.query
+            .join(Participation)
+            .filter(
+                Participation.user_id == current_user.id,
+                Participation.approved == True,
+                Participation.denied == False,
+                Participation.paid_lab == True,
+                GroupTest.status == 'closed',
+                GroupTest.results_link.isnot(None),
+            )
+            .all()
+        )
     for test in member_tests:
+        if not _can_user_view_group_test_results(test, current_user):
+            continue
+
         group_results.append({
             'kind': 'group_test',
             'title': test.title,
             'summary': test.description or '',
             'results_link': test.results_link,
-            'results_image_url': build_result_image_url(test.results_image_key),
+            'results_image_url': (
+                url_for('main.serve_group_test_result_image', test_id=test.id)
+                    if test.results_image_key and _can_user_view_group_test_result_image(test, current_user)
+                else None
+            ),
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,
             'source_label': 'Group Test',
             'lab_item_results': [
@@ -831,7 +910,7 @@ def my_results():
             'title': result.title,
             'summary': result.summary or '',
             'results_link': result.results_link,
-            'results_image_url': build_result_image_url(result.results_image_key),
+            'results_image_url': url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
             'posted_at': result.posted_at,
             'source_label': 'Public Result',
             'lab_item_results': [
@@ -1186,7 +1265,7 @@ def edit_test(test_id):
                     test=test,
                     tag_suggestions=get_all_tag_names(),
                     storage_settings=get_storage_settings(),
-                    existing_results_image_url=build_result_image_url(test.results_image_key),
+                    existing_results_image_url=url_for('main.serve_group_test_result_image', test_id=test.id) if test.results_image_key else None,
                 )
 
             old_key = test.results_image_key
@@ -1211,7 +1290,14 @@ def edit_test(test_id):
         flash('Group test updated.', 'success')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
-    return render_template('admin/edit_test.html', form=form, test=test, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings(), existing_results_image_url=build_result_image_url(test.results_image_key))
+    return render_template(
+        'admin/edit_test.html',
+        form=form,
+        test=test,
+        tag_suggestions=get_all_tag_names(),
+        storage_settings=get_storage_settings(),
+        existing_results_image_url=url_for('main.serve_group_test_result_image', test_id=test.id) if test.results_image_key else None,
+    )
 
 
 @main_bp.route('/admin/manage-participants/<int:test_id>')
@@ -1803,6 +1889,7 @@ def storage_config():
                 'storage_public_base_url': (form.storage_public_base_url.data or '').strip() or None,
                 'storage_make_public': 'true' if form.storage_make_public.data else 'false',
                 'storage_force_path_style': 'true' if form.storage_force_path_style.data else 'false',
+                'storage_signed_url_ttl_seconds': str(int(form.storage_signed_url_ttl_seconds.data or 60)),
                 'storage_max_upload_size_mb': str(form.storage_max_upload_size_mb.data or 8),
                 'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF').strip(),
             }
@@ -1826,8 +1913,12 @@ def storage_config():
         form.storage_secret_access_key.data = ''
         form.storage_path_prefix.data = configs.get('storage_path_prefix') or 'result-images'
         form.storage_public_base_url.data = configs.get('storage_public_base_url')
-        form.storage_make_public.data = str(configs.get('storage_make_public', 'true')).lower() == 'true'
+        form.storage_make_public.data = str(configs.get('storage_make_public', 'false')).lower() == 'true'
         form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() == 'true'
+        try:
+            form.storage_signed_url_ttl_seconds.data = float(configs.get('storage_signed_url_ttl_seconds') or 60)
+        except (TypeError, ValueError):
+            form.storage_signed_url_ttl_seconds.data = 60
         try:
             form.storage_max_upload_size_mb.data = float(configs.get('storage_max_upload_size_mb') or 8)
         except (TypeError, ValueError):
@@ -1997,7 +2088,6 @@ def manage_public_results():
                     public_results=public_results,
                     tag_suggestions=get_all_tag_names(),
                     storage_settings=get_storage_settings(),
-                    result_image_url_builder=build_result_image_url,
                 )
 
         result = PublicResult(
@@ -2022,7 +2112,6 @@ def manage_public_results():
         public_results=public_results,
         tag_suggestions=get_all_tag_names(),
         storage_settings=get_storage_settings(),
-        result_image_url_builder=build_result_image_url,
     )
 
 
@@ -2061,8 +2150,7 @@ def edit_public_result(result_id):
                     editing_result=result,
                     tag_suggestions=get_all_tag_names(),
                     storage_settings=get_storage_settings(),
-                    editing_result_image_url=build_result_image_url(result.results_image_key),
-                    result_image_url_builder=build_result_image_url,
+                    editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
                 )
 
             old_key = result.results_image_key
@@ -2087,8 +2175,7 @@ def edit_public_result(result_id):
         editing_result=result,
         tag_suggestions=get_all_tag_names(),
         storage_settings=get_storage_settings(),
-        editing_result_image_url=build_result_image_url(result.results_image_key),
-        result_image_url_builder=build_result_image_url,
+        editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
     )
 
 

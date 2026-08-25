@@ -40,7 +40,7 @@
                 <div class="col-md-6">
                     {{ form.storage_public_base_url.label(class="form-label") }}
                     {{ form.storage_public_base_url(class="form-control", placeholder="https://my-bucket.nyc3.digitaloceanspaces.com") }}
-                    <div class="form-text">Optional override for image URLs shown to users.</div>
+                    <div class="form-text">Optional legacy field. Not required when using private signed URL access.</div>
                 </div>
             </div>
 
@@ -66,10 +66,15 @@
                     {{ form.storage_path_prefix(class="form-control", placeholder="result-images") }}
                 </div>
                 <div class="col-md-4">
+                    {{ form.storage_signed_url_ttl_seconds.label(class="form-label") }}
+                    {{ form.storage_signed_url_ttl_seconds(class="form-control", step="1") }}
+                    <div class="form-text">Used for authenticated image access links. Recommended: 60 seconds.</div>
+                </div>
+                <div class="col-md-4">
                     {{ form.storage_max_upload_size_mb.label(class="form-label") }}
                     {{ form.storage_max_upload_size_mb(class="form-control", step="1") }}
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-12">
                     {{ form.storage_allowed_formats.label(class="form-label") }}
                     {{ form.storage_allowed_formats(class="form-control", placeholder="JPEG,PNG,WEBP,GIF") }}
                 </div>
@@ -96,6 +101,6 @@
 </div>
 
 <div class="alert alert-info">
-    <strong>Production notes:</strong> use least-privilege credentials (put/get/delete only on this bucket/path), rotate keys regularly, and prefer bucket-level lifecycle policies for stale objects.
+    <strong>Production notes:</strong> keep objects private (leave public-read disabled), use least-privilege credentials (put/get/delete only on this bucket/path), rotate keys regularly, and prefer bucket-level lifecycle policies for stale objects.
 </div>
 {% endblock %}

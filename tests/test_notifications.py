@@ -12,9 +12,11 @@ class NotificationTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "test.db"
+        self.log_path = Path(self.temp_dir.name) / "notification.log"
         self.app = create_app({
             "TESTING": True,
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{self.db_path}",
+            "NOTIFICATION_LOG_PATH": str(self.log_path),
         })
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
@@ -96,6 +98,19 @@ class NotificationTests(unittest.TestCase):
 
             self.assertIn("post-prune entry", contents)
             self.assertLess(len(contents), 400000)
+
+    def test_notification_log_sanitizes_leading_junk(self):
+        with self.app.app_context():
+            log_path = append_notification_log("clean entry")
+            with open(log_path, "w", encoding="utf-8") as handle:
+                handle.write("x" * 2000)
+                handle.write("\n[2026-01-01 00:00:00] restored entry\n")
+
+            contents = read_notification_log()
+
+            self.assertTrue(contents.startswith("["))
+            self.assertIn("restored entry", contents)
+            self.assertNotIn("x" * 100, contents)
 
     def test_edit_notification_template_updates_existing_template(self):
         with self.app.app_context():

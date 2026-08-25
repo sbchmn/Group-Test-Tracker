@@ -1,7 +1,6 @@
 import io
 import os
 from datetime import datetime
-from urllib.parse import quote
 from uuid import uuid4
 
 from flask import current_app
@@ -48,9 +47,16 @@ def get_storage_settings():
     secret_access_key = str(_get_config_value("storage_secret_access_key", "") or "").strip()
     path_prefix = str(_get_config_value("storage_path_prefix", "result-images") or "result-images").strip().strip("/")
     public_base_url = str(_get_config_value("storage_public_base_url", "") or "").strip().rstrip("/")
-    make_public = _as_bool(_get_config_value("storage_make_public", "true"), default=True)
+    make_public = _as_bool(_get_config_value("storage_make_public", "false"), default=False)
     force_path_style = _as_bool(_get_config_value("storage_force_path_style", "false"), default=False)
     enabled = _as_bool(_get_config_value("storage_enabled", "false"), default=False)
+
+    signed_ttl_raw = _get_config_value("storage_signed_url_ttl_seconds", "60")
+    try:
+        signed_ttl_seconds = int(signed_ttl_raw)
+    except (TypeError, ValueError):
+        signed_ttl_seconds = 60
+    signed_ttl_seconds = min(max(signed_ttl_seconds, 15), 900)
 
     max_upload_mb_raw = _get_config_value("storage_max_upload_size_mb", "8")
     try:
@@ -86,6 +92,7 @@ def get_storage_settings():
         "public_base_url": public_base_url,
         "make_public": make_public,
         "force_path_style": force_path_style,
+        "signed_ttl_seconds": signed_ttl_seconds,
         "max_upload_size_mb": max_upload_mb,
         "allowed_formats": allowed_formats,
     }
@@ -207,31 +214,26 @@ def upload_result_image(file_storage, category):
     return object_key
 
 
-def _guess_default_public_base_url(settings):
-    region = settings["region"] or "us-east-1"
-    bucket = settings["bucket"]
-
-    if settings["provider"] == "do":
-        return f"https://{bucket}.{region}.digitaloceanspaces.com"
-
-    if settings["endpoint_url"]:
-        endpoint = settings["endpoint_url"].rstrip("/")
-        endpoint = endpoint.replace("https://", "").replace("http://", "")
-        return f"https://{bucket}.{endpoint}"
-
-    if region == "us-east-1":
-        return f"https://{bucket}.s3.amazonaws.com"
-    return f"https://{bucket}.s3.{region}.amazonaws.com"
-
-
-def build_result_image_url(object_key):
+def generate_result_image_presigned_url(object_key, expires_in=None):
     if not object_key:
-        return None
+        raise StorageConfigurationError("No result image is available.")
 
     settings = get_storage_settings()
-    base_url = settings["public_base_url"] or _guess_default_public_base_url(settings)
-    encoded_key = quote(object_key.lstrip("/"), safe="/")
-    return f"{base_url}/{encoded_key}"
+    _assert_configured(settings)
+    client = _build_client(settings)
+
+    ttl_seconds = expires_in or settings.get("signed_ttl_seconds") or 60
+    ttl_seconds = min(max(int(ttl_seconds), 15), 900)
+
+    try:
+        return client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": settings["bucket"], "Key": object_key},
+            ExpiresIn=ttl_seconds,
+        )
+    except Exception as exc:
+        current_app.logger.exception("Failed generating presigned result image URL")
+        raise StorageUploadError("Unable to generate secure image URL.") from exc
 
 
 def delete_result_image(object_key):

@@ -120,3 +120,6 @@
 
 ## Documentation Updates
 - README updated to cover tags, public results, dashboard controls, and the current unittest-based validation command.
+- README expanded into a comprehensive feature-by-feature how-to guide covering end-user flows, admin workflows, action queue usage, notification setup, object storage setup for AWS/DO Spaces, result image behavior, testing commands, and troubleshooting.
+- Added a dedicated admin one-pager quick start guide in `ADMIN_QUICK_START.md` for onboarding and day-to-day operations.
+- README now includes a full Table of Contents and a prominent top-level link to `ADMIN_QUICK_START.md` for faster admin navigation.

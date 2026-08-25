@@ -189,7 +189,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                             <div class="small text-muted mb-1">{{ result.summary }}</div>
                                         {% endif %}
                                         <div class="small text-muted">Posted {{ result.posted_at }}</div>
-                                        {% set result_image_url = result_image_url_builder(result.results_image_key) if result_image_url_builder else None %}
+                                        {% set result_image_url = url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None %}
                                         {% if result_image_url %}
                                             <div class="mt-2 mb-2">
                                                 <button type="button"

@@ -200,6 +200,11 @@ If approved:
 3. Click Open Results for source link.
 4. If a thumbnail exists, click it to open full-size modal image.
 
+Note:
+
+- Group test result images are issued through authenticated signed URLs.
+- You must be an approved participant marked as paid (or admin) to open group test result images.
+
 ## Admin How-To
 
 ### Create Group Test
@@ -329,9 +334,10 @@ Result images are optional and uploaded to S3-compatible storage.
 5. Set region.
 6. Set Access Key ID and Secret Access Key.
 7. Optionally set endpoint URL.
-8. Optionally set public base URL override.
-9. Set path prefix, max upload size, and allowed formats.
-10. Save.
+8. Keep Upload with public-read ACL disabled for private-bucket mode.
+9. Set signed URL TTL (seconds). Recommended: 60.
+10. Set path prefix, max upload size, and allowed formats.
+11. Save.
 
 ### AWS S3 Settings Example
 
@@ -353,8 +359,10 @@ Result images are optional and uploaded to S3-compatible storage.
 
 - Upload on Group Test create/edit when results are present.
 - Upload on Public Result create/edit.
-- Thumbnail appears in results views.
-- Clicking thumbnail opens full-size modal.
+- Thumbnails and modal images are fetched through app-controlled authenticated routes.
+- The app generates short-lived signed object URLs on demand (default 60 seconds).
+- Group test result images require admin access or approved plus paid participation in that test.
+- Public result images require login.
 - Replacing image deletes old object best-effort.
 - Clearing image removes object key and attempts remote delete.
 
@@ -374,6 +382,7 @@ Result images are optional and uploaded to S3-compatible storage.
 - Recruiting: visible to authenticated users.
 - Testing/Closed: visible to admins and approved members.
 - Results links/images for group tests are shown only when closed and user is authorized.
+- Group test result images specifically require admin or approved+paid participant access before signed URL issuance.
 
 ## Notification Template Variables
 

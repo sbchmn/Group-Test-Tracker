@@ -49,8 +49,10 @@ DATABASE_URL=sqlite:///group_tests.db
 - AWS S3
 - DigitalOcean Spaces
 4. Fill bucket/space, region, access key, and secret key.
-5. Set endpoint/public URL if needed.
-6. Save.
+5. Set endpoint URL if needed.
+6. Keep public-read upload disabled for private-bucket mode.
+7. Set signed URL TTL to 60 seconds.
+8. Save.
 
 AWS S3 example:
 - Provider: AWS S3
@@ -63,7 +65,11 @@ DigitalOcean Spaces example:
 - Space: my-results
 - Region: nyc3
 - Endpoint URL: https://nyc3.digitaloceanspaces.com
-- Public Base URL: https://my-results.nyc3.digitaloceanspaces.com
+
+Secure access behavior:
+- Group test images are accessible only to admins or approved+paid participants.
+- Public result images are accessible only to logged-in users.
+- Image links are signed on demand and expire automatically.
 
 ## 4) Daily Operating Flow
 

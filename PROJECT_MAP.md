@@ -19,6 +19,9 @@
 - likely new tests for tags, results, dashboard visibility, and public results
 
 ## Intended Behavior Changes
+- Move result image delivery to private-bucket-compatible access using authenticated app endpoints and short-lived signed URLs.
+- Require login plus authorization checks before issuing image access; for group tests require admin or approved+paid participant.
+- Generate signed image URLs on demand (60s TTL) so stale page sessions can still open images later.
 - Add production-ready result image uploads backed by S3-compatible object storage (AWS S3 and DigitalOcean Spaces).
 - Add admin storage settings page to enable/disable uploads and configure provider credentials/bucket/endpoint behavior.
 - Add optional image attachment for both group test results and public results.
@@ -40,6 +43,15 @@
 - Make denial state/reason visible on Manage Participants and align available admin actions across Action Queue and Manage Participants.
 
 ## Implemented Changes
+- Hardened notification log handling to sanitize leading junk data and prune from complete timestamped entries.
+- Added support for configurable `NOTIFICATION_LOG_PATH` to isolate logs per environment/test context.
+- Updated notification tests to use isolated log paths and added regression coverage for junk-prefixed log cleanup.
+- Switched result image display from direct object URLs to authenticated app endpoints that issue short-lived presigned URLs on demand.
+- Added secure image delivery routes for group tests and public results, with login checks on all image requests.
+- Enforced group-test image authorization as admin or approved+paid participant for the specific closed test.
+- Added configurable signed URL TTL setting (default 60 seconds) in storage configuration.
+- Changed storage ACL default toward private uploads (`public-read` disabled by default).
+- Added regression tests for secure image authorization and redirect issuance in `tests/test_security.py`.
 - Added production-oriented object storage module (`app/storage.py`) for S3-compatible uploads with image validation, size limits, and provider-aware URL generation.
 - Added storage-backed result image fields (`results_image_key`) to both group tests and public results models, plus additive migration `c3d9e1f4a7b2_add_result_image_keys.py`.
 - Added admin storage configuration page and route (`/admin/storage-config`) with provider selection (AWS/DO), bucket credentials, endpoint controls, and upload constraints.
@@ -108,6 +120,8 @@
 - Add focused tests to confirm queue denial appears in Manage Participants and manage-page deny/reopen actions persist correctly.
 
 ## Validation Results
+- Focused log-fix validation passed: `python -m unittest tests.test_notifications tests.test_security`.
+- Focused secure-image validation passed: `python -m unittest tests.test_security tests.test_schema_migration tests.test_participant_removal`.
 - Focused post-change validation passed: `python -m unittest tests.test_schema_migration tests.test_security`.
 - Focused test slice passed: `tests.test_notifications`, `tests.test_lab_costs`, and `tests.test_schema_migration`.
 - New focused queue validation passed: `python -m unittest tests.test_participant_removal`.
@@ -123,3 +137,4 @@
 - README expanded into a comprehensive feature-by-feature how-to guide covering end-user flows, admin workflows, action queue usage, notification setup, object storage setup for AWS/DO Spaces, result image behavior, testing commands, and troubleshooting.
 - Added a dedicated admin one-pager quick start guide in `ADMIN_QUICK_START.md` for onboarding and day-to-day operations.
 - README now includes a full Table of Contents and a prominent top-level link to `ADMIN_QUICK_START.md` for faster admin navigation.
+- README and ADMIN_QUICK_START now document private-bucket signed URL access, 60-second TTL guidance, and paid-participant requirements for group-test image viewing.

@@ -735,6 +735,11 @@ def _can_user_view_group_test_result_image(test, user):
     return bool(part and part.paid_lab)
 
 
+def _can_user_view_group_test_results(test, user):
+    """Gate full group-test result visibility (link, item values, and image)."""
+    return _can_user_view_group_test_result_image(test, user)
+
+
 @main_bp.route('/result-image/group-test/<int:test_id>')
 @login_required
 def serve_group_test_result_image(test_id):
@@ -798,6 +803,7 @@ def test_detail(test_id):
     form = NotifyParticipantsForm()
     templates = NotificationTemplate.query.filter_by(is_active=True, hide_from_participant_notifications=False).order_by(NotificationTemplate.name).all()
     form.template_id.choices = [(template.id, template.name) for template in templates]
+    can_view_results = _can_user_view_group_test_results(test, current_user)
 
     if current_user.is_admin and form.validate_on_submit():
         template = NotificationTemplate.query.get_or_404(form.template_id.data)
@@ -820,6 +826,7 @@ def test_detail(test_id):
             if test.results_image_key and _can_user_view_group_test_result_image(test, current_user)
             else None
         ),
+        can_view_results=can_view_results,
         costs=costs,
         participations=parts,
         my_part=my_part,
@@ -839,24 +846,32 @@ def my_results():
     query = (request.args.get('q') or '').strip().lower()
 
     group_results = []
-    member_tests = (
-        GroupTest.query
-        .join(Participation)
-        .filter(
-            Participation.user_id == current_user.id,
-            Participation.approved == True,
-            GroupTest.status == 'closed',
-            GroupTest.results_link.isnot(None),
+    if current_user.is_admin:
+        member_tests = (
+            GroupTest.query
+            .filter(
+                GroupTest.status == 'closed',
+                GroupTest.results_link.isnot(None),
+            )
+            .all()
         )
-        .all()
-    )
+    else:
+        member_tests = (
+            GroupTest.query
+            .join(Participation)
+            .filter(
+                Participation.user_id == current_user.id,
+                Participation.approved == True,
+                Participation.denied == False,
+                Participation.paid_lab == True,
+                GroupTest.status == 'closed',
+                GroupTest.results_link.isnot(None),
+            )
+            .all()
+        )
     for test in member_tests:
-        my_approved_part = Participation.query.filter_by(
-            group_test_id=test.id,
-            user_id=current_user.id,
-            approved=True,
-            denied=False,
-        ).first()
+        if not _can_user_view_group_test_results(test, current_user):
+            continue
 
         group_results.append({
             'kind': 'group_test',
@@ -865,7 +880,7 @@ def my_results():
             'results_link': test.results_link,
             'results_image_url': (
                 url_for('main.serve_group_test_result_image', test_id=test.id)
-                if test.results_image_key and my_approved_part and my_approved_part.paid_lab
+                    if test.results_image_key and _can_user_view_group_test_result_image(test, current_user)
                 else None
             ),
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,

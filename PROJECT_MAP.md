@@ -43,6 +43,10 @@
 - Make denial state/reason visible on Manage Participants and align available admin actions across Action Queue and Manage Participants.
 
 ## Implemented Changes
+- Extended paid-gating from images-only to full group-test result visibility (result link, itemized values, and thumbnails) for non-admin users.
+- Added explicit admin bypass for group-test results visibility on My Results regardless of participation/payment state.
+- Added security regression tests for unpaid-member result hiding and admin My Results bypass visibility.
+- Fixed My Results group-test thumbnail rendering so admin users see all eligible result images consistently by reusing shared access helper logic.
 - Hardened notification log handling to sanitize leading junk data and prune from complete timestamped entries.
 - Added support for configurable `NOTIFICATION_LOG_PATH` to isolate logs per environment/test context.
 - Updated notification tests to use isolated log paths and added regression coverage for junk-prefixed log cleanup.
@@ -120,6 +124,8 @@
 - Add focused tests to confirm queue denial appears in Manage Participants and manage-page deny/reopen actions persist correctly.
 
 ## Validation Results
+- Focused paid-gating visibility validation passed: `python -m unittest tests.test_security tests.test_participant_removal`.
+- Focused My Results image-visibility regression passed: `python -m unittest tests.test_security tests.test_participant_removal`.
 - Focused log-fix validation passed: `python -m unittest tests.test_notifications tests.test_security`.
 - Focused secure-image validation passed: `python -m unittest tests.test_security tests.test_schema_migration tests.test_participant_removal`.
 - Focused post-change validation passed: `python -m unittest tests.test_schema_migration tests.test_security`.

@@ -142,3 +142,83 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(authed_response.status_code, 302)
         self.assertEqual(authed_response.headers.get("Location"), "https://signed.example.com/public-image")
+
+    def test_unpaid_member_cannot_see_group_test_results_until_paid(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            member = User(username="member", email="member@example.com", is_admin=False)
+            member.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.flush()
+
+            test = GroupTest(
+                title="Paid Gate Test",
+                status="closed",
+                results_link="https://example.com/result",
+                created_by=admin.id,
+            )
+            db.session.add(test)
+            db.session.flush()
+
+            part = Participation(
+                group_test_id=test.id,
+                user_id=member.id,
+                approved=True,
+                denied=False,
+                paid_lab=False,
+                name="Member",
+            )
+            db.session.add(part)
+            db.session.commit()
+
+            test_id = test.id
+            part_id = part.id
+
+        self.client.post("/login", data={"username": "member", "password": "secret"}, follow_redirects=True)
+
+        detail_before = self.client.get(f"/test/{test_id}")
+        self.assertEqual(detail_before.status_code, 200)
+        self.assertNotIn("Test Results Available", detail_before.get_data(as_text=True))
+
+        my_results_before = self.client.get("/my-results")
+        self.assertEqual(my_results_before.status_code, 200)
+        self.assertNotIn("Paid Gate Test", my_results_before.get_data(as_text=True))
+
+        with self.app.app_context():
+            part = Participation.query.get(part_id)
+            part.paid_lab = True
+            db.session.commit()
+
+        detail_after = self.client.get(f"/test/{test_id}")
+        self.assertIn("Test Results Available", detail_after.get_data(as_text=True))
+
+        my_results_after = self.client.get("/my-results")
+        self.assertIn("Paid Gate Test", my_results_after.get_data(as_text=True))
+
+    def test_admin_my_results_shows_closed_results_without_membership(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            owner = User(username="owner", email="owner@example.com", is_admin=False)
+            owner.set_password("secret")
+            db.session.add_all([admin, owner])
+            db.session.flush()
+
+            test = GroupTest(
+                title="Admin Bypass Results",
+                status="closed",
+                results_link="https://example.com/admin-bypass",
+                created_by=owner.id,
+            )
+            db.session.add(test)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        my_results = self.client.get("/my-results")
+        self.assertEqual(my_results.status_code, 200)
+        self.assertIn("Admin Bypass Results", my_results.get_data(as_text=True))

@@ -2,6 +2,51 @@
 
 {% block title %}My Results{% endblock %}
 
+{% block extra_head %}
+<style>
+    .result-thumb-image {
+        width: 90px;
+        height: 90px;
+        object-fit: cover;
+        border-radius: 8px;
+        border: 1px solid #ddd;
+    }
+
+    .result-value-col {
+        flex: 0 0 170px;
+        max-width: 170px;
+        min-width: 140px;
+        word-break: break-word;
+    }
+
+    @media (max-width: 767.98px) {
+        .result-main-row {
+            flex-direction: column;
+        }
+
+        .result-main-image {
+            align-self: flex-end;
+            margin-top: 0.5rem;
+        }
+
+        .result-items-row {
+            flex-direction: column;
+        }
+
+        .result-items-image {
+            align-self: flex-end;
+            margin-top: 0.5rem;
+        }
+
+        .result-value-col {
+            flex: 0 0 120px;
+            max-width: 120px;
+            min-width: 100px;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block scripts %}
 <script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -93,7 +138,7 @@ window.addEventListener('DOMContentLoaded', function() {
                     <div class="list-group list-group-flush">
                         {% for result in group.results %}
                             <div class="list-group-item">
-                                <div class="d-flex justify-content-between gap-3">
+                                <div class="d-flex justify-content-between gap-3 align-items-start result-main-row">
                                     <div class="flex-grow-1">
                                         <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
                                             <strong>{{ result.title }}</strong>
@@ -109,31 +154,46 @@ window.addEventListener('DOMContentLoaded', function() {
                                         {% if result.lab_item_results %}
                                             <div class="mb-2">
                                                 <div class="small fw-semibold mb-1">Lab Item Results</div>
-                                                <ul class="list-group list-group-flush">
-                                                    {% for item in result.lab_item_results %}
-                                                        <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-start">
-                                                            <span class="small fw-medium">{{ item.name }}</span>
-                                                            <span class="small text-muted ms-3 text-end">{{ item.result }}</span>
-                                                        </li>
-                                                    {% endfor %}
-                                                </ul>
-                                            </div>
-                                        {% endif %}
-                                        {% if result.results_image_url %}
-                                            <div class="mb-2">
-                                                <button type="button"
-                                                        class="btn btn-link p-0 border-0"
-                                                        data-bs-toggle="modal"
-                                                        data-bs-target="#resultImageModal"
-                                                        data-result-image-trigger="true"
-                                                        data-image-src="{{ result.results_image_url }}"
-                                                        data-image-title="{{ result.title }}">
-                                                    <img src="{{ result.results_image_url }}" alt="{{ result.title }} image" style="width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
-                                                </button>
+                                                <div class="d-flex justify-content-between align-items-start gap-3 result-items-row">
+                                                    <ul class="list-group list-group-flush flex-grow-1 mb-0">
+                                                        {% for item in result.lab_item_results %}
+                                                            <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-start">
+                                                                <span class="small fw-medium">{{ item.name }}</span>
+                                                                <span class="small text-muted ms-3 text-end result-value-col">{{ item.result }}</span>
+                                                            </li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                    {% if result.results_image_url %}
+                                                        <div class="flex-shrink-0 result-items-image">
+                                                            <button type="button"
+                                                                    class="btn btn-link p-0 border-0"
+                                                                    data-bs-toggle="modal"
+                                                                    data-bs-target="#resultImageModal"
+                                                                    data-result-image-trigger="true"
+                                                                    data-image-src="{{ result.results_image_url }}"
+                                                                    data-image-title="{{ result.title }}">
+                                                                <img src="{{ result.results_image_url }}" alt="{{ result.title }} image" class="result-thumb-image">
+                                                            </button>
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
                                             </div>
                                         {% endif %}
                                         <a href="{{ result.results_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Open Results</a>
                                     </div>
+                                    {% if result.results_image_url and not result.lab_item_results %}
+                                        <div class="flex-shrink-0 result-main-image">
+                                            <button type="button"
+                                                    class="btn btn-link p-0 border-0"
+                                                    data-bs-toggle="modal"
+                                                    data-bs-target="#resultImageModal"
+                                                    data-result-image-trigger="true"
+                                                    data-image-src="{{ result.results_image_url }}"
+                                                    data-image-title="{{ result.title }}">
+                                                <img src="{{ result.results_image_url }}" alt="{{ result.title }} image" class="result-thumb-image">
+                                            </button>
+                                        </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         {% endfor %}

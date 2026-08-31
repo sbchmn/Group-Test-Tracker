@@ -497,3 +497,50 @@
 
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_participant_removal tests.test_notifications tests.test_security` (63 tests, OK).
+
+## Payment Method Matrix + Branded Link/QR UX
+
+### Intended Behavior Changes
+- Generate method-specific payment metadata (destination, hyperlinkable payment link, QR payload) for app-based methods and crypto.
+- Improve payment presentation with provider branding/icons and clickable payment links.
+- Provide admin-facing matrix documentation and generated previews for payment options.
+
+### Implemented Changes
+- Added centralized payment profile generation in `PaymentOption` for Venmo, Cash App, PayPal, Crypto Wallet, and Other.
+- Added network-aware crypto scheme handling (for example `ethereum:`, `bitcoin:`, `solana:`) with fallback `crypto:` links.
+- Updated route payment context builder to include provider branding, destination label/value, generated payment link, and QR payload.
+- Added admin payment option input validation by method type unless QR payload override is provided.
+- Enhanced payment display on test detail and participant status pages with provider badges, destination value, hyperlinkable payment links, and QR previews.
+- Enhanced admin payment options and edit pages with a payment matrix table and generated preview panels.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_security tests.test_lab_costs tests.test_notifications`.
+- Additional targeted checks passed:
+	- `tests.test_security.SecurityTests.test_payment_profile_generates_venmo_link_destination_and_qr`
+	- `tests.test_security.SecurityTests.test_payment_profile_generates_crypto_link_destination_and_qr`
+
+## Telegram Status Template Customization
+
+### Intended Behavior Changes
+- Make Telegram status-related message text editable from Notification Configuration instead of hardcoded strings.
+- Support variable-based templates for status digests, new-test channel posts, and user `/status` responses.
+- Keep safe defaults so blank/missing template values continue to produce reliable messages.
+
+### Implemented Changes
+- Added Notification Config form fields and persistence keys for Telegram status template variants.
+- Added a shared Telegram status template renderer in routes and used it for:
+	- digest header, digest line items, and participants line,
+	- new-test created channel message,
+	- user `/status` response variants (no request, denied, approved, pending).
+- Extended Notification Configuration UI with editable textareas for each template and a variable reference list.
+- Added regression tests for custom template rendering in status digest, new-test channel message, and approved `/status` response.
+
+### Security / Reliability / Optimization Notes
+- Security: Template rendering uses existing placeholder substitution and static context values; no dynamic code execution introduced.
+- Reliability: Each render path supplies explicit default templates, preserving behavior when configs are empty/malformed.
+- Optimization: Reuses lightweight substitution helper and current config map lookup without adding new query-heavy paths.
+
+### Validation Results
+- Focused post-change validation passed: `python -m unittest tests.test_notifications tests.test_lab_costs tests.test_security -q` (65 tests, OK).
+	- `tests.test_security.SecurityTests.test_ready_for_payment_renders_venmo_link_and_qr`
+	- `tests.test_security.SecurityTests.test_payment_option_form_requires_handle_for_venmo_without_override`

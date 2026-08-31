@@ -246,6 +246,14 @@ class NotificationConfigForm(FlaskForm):
     telegram_status_chat_id = StringField('Telegram Status Chat / Channel ID', validators=[Optional(), Length(max=120)])
     telegram_digest_enabled = BooleanField('Enable Telegram Digest Mode')
     telegram_digest_window_minutes = FloatField('Telegram Digest Window (minutes)', validators=[Optional(), NumberRange(min=1, max=120)], default=10)
+    telegram_status_digest_header_template = TextAreaField('Telegram Status Digest Header Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_digest_line_template = TextAreaField('Telegram Status Digest Line Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_digest_participants_template = TextAreaField('Telegram Status Digest Participants Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_new_test_template = TextAreaField('Telegram New Test Message Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_no_request_template = TextAreaField('Telegram /status No Request Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_denied_template = TextAreaField('Telegram /status Denied Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_approved_template = TextAreaField('Telegram /status Approved Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_pending_template = TextAreaField('Telegram /status Pending Template', validators=[Optional(), Length(max=2000)])
     service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
     notification_debug_enabled = BooleanField('Enable debug-level notification logs')
     submit = SubmitField('Save Configuration')
@@ -367,19 +375,89 @@ def _build_payment_option_context(option):
     if option is None:
         return None
 
-    qr_payload = option.to_qr_payload()
+    profile = option.to_payment_profile()
     return {
         'id': option.id,
         'label': option.label,
         'title': option.display_title(),
         'method_type': option.method_type,
+        'is_active': bool(option.is_active),
+        'provider_name': profile.get('provider_name') or option.method_type,
+        'icon_class': profile.get('icon_class') or 'bi bi-credit-card-2-front',
+        'badge_class': profile.get('badge_class') or 'text-bg-secondary',
         'recipient_name': option.recipient_name,
         'account_handle': option.account_handle,
         'wallet_address': option.wallet_address,
         'network': option.network,
         'details': option.details,
-        'qr_payload': qr_payload,
+        'destination_label': profile.get('destination_label') or 'Destination',
+        'destination_value': profile.get('destination_value') or '',
+        'payment_link': profile.get('payment_link') or '',
+        'qr_payload': profile.get('qr_payload') or '',
     }
+
+
+def _payment_method_matrix_rows():
+    return [
+        {
+            'method_type': 'venmo',
+            'provider_name': 'Venmo',
+            'input_field': 'account_handle',
+            'input_example': '@sampleuser',
+            'destination_example': '@sampleuser',
+            'link_example': 'https://venmo.com/sampleuser',
+        },
+        {
+            'method_type': 'cashapp',
+            'provider_name': 'Cash App',
+            'input_field': 'account_handle',
+            'input_example': '$sampleuser',
+            'destination_example': '$sampleuser',
+            'link_example': 'https://cash.app/$sampleuser',
+        },
+        {
+            'method_type': 'paypal',
+            'provider_name': 'PayPal',
+            'input_field': 'account_handle',
+            'input_example': 'sampleuser',
+            'destination_example': 'sampleuser',
+            'link_example': 'https://paypal.me/sampleuser',
+        },
+        {
+            'method_type': 'crypto',
+            'provider_name': 'Crypto Wallet',
+            'input_field': 'wallet_address + network',
+            'input_example': '0xabc... + ETH',
+            'destination_example': 'wallet address',
+            'link_example': 'ethereum:0xabc...',
+        },
+        {
+            'method_type': 'other',
+            'provider_name': 'Other',
+            'input_field': 'account_handle or wallet_address',
+            'input_example': 'https://pay.example.com/u/demo',
+            'destination_example': 'destination value',
+            'link_example': 'uses direct URL when provided',
+        },
+    ]
+
+
+def _validate_payment_option_input(method_type, account_handle, wallet_address, qr_payload_override):
+    method = str(method_type or '').strip().lower()
+    handle = str(account_handle or '').strip()
+    wallet = str(wallet_address or '').strip()
+    override = str(qr_payload_override or '').strip()
+
+    if override:
+        return []
+
+    if method in {'venmo', 'cashapp', 'paypal'} and not handle:
+        return ['This method requires an app handle/username unless QR Payload Override is provided.']
+    if method == 'crypto' and not wallet:
+        return ['Crypto method requires a wallet address unless QR Payload Override is provided.']
+    if method == 'other' and not (handle or wallet):
+        return ['Other method requires a destination value unless QR Payload Override is provided.']
+    return []
 
 
 def _build_telegram_deep_link(token_value):
@@ -556,11 +634,39 @@ def _send_status_update_to_telegram(test, previous_status):
     else:
         pending_events = [event]
 
-    lines = ["Group test status digest", ""]
+    header_text = _render_telegram_status_template(
+        config_map,
+        'telegram_status_digest_header_template',
+        'Group test status updates',
+        {
+            'test_id': test.id,
+            'test_title': test.title,
+            'old_status': previous_status,
+            'old_status_label': _format_status_label(previous_status),
+            'new_status': test.status,
+            'new_status_label': _format_status_label(test.status),
+            'new_status_phrase': _format_status_phrase(test.status),
+        },
+    )
+    lines = [header_text, ""]
     mentioned_usernames = set()
     mentioned_user_ids = set()
     for item in pending_events:
-        lines.append(f"- {item.test_title} is now {_format_status_phrase(item.new_status)}")
+        line_text = _render_telegram_status_template(
+            config_map,
+            'telegram_status_digest_line_template',
+            '{{ test_title }} is now {{ new_status_phrase }}',
+            {
+                'test_id': item.test_id,
+                'test_title': item.test_title,
+                'old_status': item.old_status,
+                'old_status_label': _format_status_label(item.old_status),
+                'new_status': item.new_status,
+                'new_status_label': _format_status_label(item.new_status),
+                'new_status_phrase': _format_status_phrase(item.new_status),
+            },
+        )
+        lines.append(f"- {line_text}")
         for username in (item.mention_usernames or '').split(','):
             username = username.strip().lstrip('@')
             if username:
@@ -577,7 +683,13 @@ def _send_status_update_to_telegram(test, previous_status):
         mention_tokens.append(f"@{username}")
 
     if mention_tokens:
-        lines.extend(["", "Participants: " + ' '.join(mention_tokens)])
+        participants_line = _render_telegram_status_template(
+            config_map,
+            'telegram_status_digest_participants_template',
+            'Participants: {{ mentions }}',
+            {'mentions': ' '.join(mention_tokens)},
+        )
+        lines.extend(["", participants_line])
 
     digest_text = "\n".join(lines)
     sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML')
@@ -594,16 +706,21 @@ def _send_new_test_created_to_telegram(test, test_url=None):
     if not target_chat:
         return
 
-    lines = [
-        'New group test created',
-        '',
-        f'- #{test.id} {test.title}',
-        f"- Status: {_format_status_label(test.status or 'recruiting')}",
-    ]
-    if test_url:
-        lines.append(f'- Link: {test_url}')
+    message_text = _render_telegram_status_template(
+        config_map,
+        'telegram_status_new_test_template',
+        'New group test created\n\n- #{{ test_id }} {{ test_title }}\n- Status: {{ status_label }}\n- Link: {{ test_url }}',
+        {
+            'test_id': test.id,
+            'test_title': test.title,
+            'status': test.status or 'recruiting',
+            'status_label': _format_status_label(test.status or 'recruiting'),
+            'status_phrase': _format_status_phrase(test.status or 'recruiting'),
+            'test_url': test_url or '',
+        },
+    )
 
-    sent = send_telegram_status_channel_message('\n'.join(lines))
+    sent = send_telegram_status_channel_message(message_text)
     if not sent:
         append_notification_log(f'telegram: failed to send new test created message for test {test.id}')
 
@@ -629,6 +746,11 @@ def _format_status_phrase(status_value):
     if not status_text:
         return 'unknown'
     return status_text.replace('_', ' ').lower()
+
+
+def _render_telegram_status_template(config_map, key, default_text, context):
+    template_value = str(config_map.get(key) or '').strip()
+    return render_notification_template(template_value or default_text, context)
 
 
 def _clamp_int(value, default, low, high):
@@ -1201,19 +1323,48 @@ def _telegram_user_visible_tests(user):
 
 def _telegram_status_summary_for_user(user, test):
     part = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
+    config_map = _config_values_map()
+    base_context = {
+        'test_id': test.id,
+        'test_title': test.title,
+    }
     if part is None:
-        return f"You have no request for #{test.id} {test.title}."
-    if part.denied:
-        reason = f" Reason: {part.denied_reason}" if part.denied_reason else ""
-        return f"#{test.id} {test.title}: Denied.{reason}"
-    if part.approved:
-        return (
-            f"#{test.id} {test.title}: Approved. "
-            f"Order status: {part.order_status or 'pending'}. "
-            f"Amount owed: ${part.amount_owed or 0:.2f}. "
-            f"Paid: ${part.amount_paid or 0:.2f}."
+        return _render_telegram_status_template(
+            config_map,
+            'telegram_status_user_no_request_template',
+            'You have no request for #{{ test_id }} {{ test_title }}.',
+            base_context,
         )
-    return f"#{test.id} {test.title}: Pending admin review."
+    if part.denied:
+        denied_context = {
+            **base_context,
+            'denied_reason': part.denied_reason or '',
+        }
+        return _render_telegram_status_template(
+            config_map,
+            'telegram_status_user_denied_template',
+            '#{{ test_id }} {{ test_title }}: Denied. {{ denied_reason }}',
+            denied_context,
+        ).strip()
+    if part.approved:
+        approved_context = {
+            **base_context,
+            'order_status': part.order_status or 'pending',
+            'amount_owed': f"{(part.amount_owed or 0):.2f}",
+            'amount_paid': f"{(part.amount_paid or 0):.2f}",
+        }
+        return _render_telegram_status_template(
+            config_map,
+            'telegram_status_user_approved_template',
+            '#{{ test_id }} {{ test_title }}: Approved. Order status: {{ order_status }}. Amount owed: ${{ amount_owed }}. Paid: ${{ amount_paid }}.',
+            approved_context,
+        )
+    return _render_telegram_status_template(
+        config_map,
+        'telegram_status_user_pending_template',
+        '#{{ test_id }} {{ test_title }}: Pending admin review.',
+        base_context,
+    )
 
 
 def _telegram_join_test_for_user(user, test):
@@ -2548,6 +2699,14 @@ def notification_config():
             'telegram_status_chat_id': form.telegram_status_chat_id.data,
             'telegram_digest_enabled': 'true' if form.telegram_digest_enabled.data else 'false',
             'telegram_digest_window_minutes': str(int(form.telegram_digest_window_minutes.data or 10)),
+            'telegram_status_digest_header_template': form.telegram_status_digest_header_template.data,
+            'telegram_status_digest_line_template': form.telegram_status_digest_line_template.data,
+            'telegram_status_digest_participants_template': form.telegram_status_digest_participants_template.data,
+            'telegram_status_new_test_template': form.telegram_status_new_test_template.data,
+            'telegram_status_user_no_request_template': form.telegram_status_user_no_request_template.data,
+            'telegram_status_user_denied_template': form.telegram_status_user_denied_template.data,
+            'telegram_status_user_approved_template': form.telegram_status_user_approved_template.data,
+            'telegram_status_user_pending_template': form.telegram_status_user_pending_template.data,
             'service_base_url': form.service_base_url.data,
             'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
         }.items():
@@ -2584,6 +2743,14 @@ def notification_config():
             form.telegram_digest_window_minutes.data = float(configs.get('telegram_digest_window_minutes') or 10)
         except (TypeError, ValueError):
             form.telegram_digest_window_minutes.data = 10
+        form.telegram_status_digest_header_template.data = configs.get('telegram_status_digest_header_template')
+        form.telegram_status_digest_line_template.data = configs.get('telegram_status_digest_line_template')
+        form.telegram_status_digest_participants_template.data = configs.get('telegram_status_digest_participants_template')
+        form.telegram_status_new_test_template.data = configs.get('telegram_status_new_test_template')
+        form.telegram_status_user_no_request_template.data = configs.get('telegram_status_user_no_request_template')
+        form.telegram_status_user_denied_template.data = configs.get('telegram_status_user_denied_template')
+        form.telegram_status_user_approved_template.data = configs.get('telegram_status_user_approved_template')
+        form.telegram_status_user_pending_template.data = configs.get('telegram_status_user_pending_template')
         form.service_base_url.data = configs.get('service_base_url')
         form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
     log_contents = read_notification_log()
@@ -2653,6 +2820,19 @@ def unregister_telegram_webhook_action():
 def payment_options():
     form = PaymentOptionForm()
     if form.validate_on_submit():
+        input_errors = _validate_payment_option_input(
+            form.method_type.data,
+            form.account_handle.data,
+            form.wallet_address.data,
+            form.qr_payload_override.data,
+        )
+        if input_errors:
+            for err in input_errors:
+                flash(err, 'danger')
+            options = PaymentOption.query.order_by(PaymentOption.is_active.desc(), PaymentOption.label.asc(), PaymentOption.recipient_name.asc()).all()
+            option_contexts = [_build_payment_option_context(option) for option in options]
+            return render_template('admin/payment_options.html', form=form, options=options, option_contexts=option_contexts, matrix_rows=_payment_method_matrix_rows())
+
         option = PaymentOption(
             label=form.label.data,
             method_type=form.method_type.data,
@@ -2670,7 +2850,14 @@ def payment_options():
         return redirect(url_for('main.payment_options'))
 
     options = PaymentOption.query.order_by(PaymentOption.is_active.desc(), PaymentOption.label.asc(), PaymentOption.recipient_name.asc()).all()
-    return render_template('admin/payment_options.html', form=form, options=options)
+    option_contexts = [_build_payment_option_context(option) for option in options]
+    return render_template(
+        'admin/payment_options.html',
+        form=form,
+        options=options,
+        option_contexts=option_contexts,
+        matrix_rows=_payment_method_matrix_rows(),
+    )
 
 
 @main_bp.route('/admin/payment-options/<int:option_id>/edit', methods=['GET', 'POST'])
@@ -2682,6 +2869,17 @@ def edit_payment_option(option_id):
     form.submit.label.text = 'Save Changes'
 
     if form.validate_on_submit():
+        input_errors = _validate_payment_option_input(
+            form.method_type.data,
+            form.account_handle.data,
+            form.wallet_address.data,
+            form.qr_payload_override.data,
+        )
+        if input_errors:
+            for err in input_errors:
+                flash(err, 'danger')
+            return render_template('admin/edit_payment_option.html', form=form, option=option, matrix_rows=_payment_method_matrix_rows(), option_context=_build_payment_option_context(option))
+
         option.label = form.label.data
         option.method_type = form.method_type.data
         option.recipient_name = form.recipient_name.data or None
@@ -2695,7 +2893,13 @@ def edit_payment_option(option_id):
         flash('Payment option updated.', 'success')
         return redirect(url_for('main.payment_options'))
 
-    return render_template('admin/edit_payment_option.html', form=form, option=option)
+    return render_template(
+        'admin/edit_payment_option.html',
+        form=form,
+        option=option,
+        matrix_rows=_payment_method_matrix_rows(),
+        option_context=_build_payment_option_context(option),
+    )
 
 
 @main_bp.route('/admin/payment-options/<int:option_id>/delete', methods=['POST'])

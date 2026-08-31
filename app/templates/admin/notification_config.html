@@ -61,6 +61,44 @@
                     {{ form.telegram_digest_window_minutes(class="form-control", step="1") }}
                 </div>
             </div>
+            <div class="card mb-3">
+                <div class="card-header">Telegram Status Message Templates</div>
+                <div class="card-body">
+                    <p class="small text-muted mb-2">Editable placeholders include: {{ '{{ test_id }}' }}, {{ '{{ test_title }}' }}, {{ '{{ old_status }}' }}, {{ '{{ old_status_label }}' }}, {{ '{{ new_status }}' }}, {{ '{{ new_status_label }}' }}, {{ '{{ new_status_phrase }}' }}, {{ '{{ status }}' }}, {{ '{{ status_label }}' }}, {{ '{{ status_phrase }}' }}, {{ '{{ test_url }}' }}, {{ '{{ mentions }}' }}, {{ '{{ denied_reason }}' }}, {{ '{{ order_status }}' }}, {{ '{{ amount_owed }}' }}, {{ '{{ amount_paid }}' }}.</p>
+                    <div class="mb-3">
+                        {{ form.telegram_status_digest_header_template.label(class="form-label") }}
+                        {{ form.telegram_status_digest_header_template(class="form-control", rows="2", placeholder="Group test status updates") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_status_digest_line_template.label(class="form-label") }}
+                        {{ form.telegram_status_digest_line_template(class="form-control", rows="2", placeholder="{{ test_title }} is now {{ new_status_phrase }}") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_status_digest_participants_template.label(class="form-label") }}
+                        {{ form.telegram_status_digest_participants_template(class="form-control", rows="2", placeholder="Participants: {{ mentions }}") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_status_new_test_template.label(class="form-label") }}
+                        {{ form.telegram_status_new_test_template(class="form-control", rows="3", placeholder="New group test created\n\n- #{{ test_id }} {{ test_title }}\n- Status: {{ status_label }}\n- Link: {{ test_url }}") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_status_user_no_request_template.label(class="form-label") }}
+                        {{ form.telegram_status_user_no_request_template(class="form-control", rows="2", placeholder="You have no request for #{{ test_id }} {{ test_title }}.") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_status_user_denied_template.label(class="form-label") }}
+                        {{ form.telegram_status_user_denied_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Denied. {{ denied_reason }}") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_status_user_approved_template.label(class="form-label") }}
+                        {{ form.telegram_status_user_approved_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Approved. Order status: {{ order_status }}. Amount owed: ${{ amount_owed }}. Paid: ${{ amount_paid }}.") }}
+                    </div>
+                    <div class="mb-0">
+                        {{ form.telegram_status_user_pending_template.label(class="form-label") }}
+                        {{ form.telegram_status_user_pending_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Pending admin review.") }}
+                    </div>
+                </div>
+            </div>
             <div class="mb-3">
                 {{ form.service_base_url.label(class="form-label") }}
                 {{ form.service_base_url(class="form-control", placeholder="https://your-domain.example") }}

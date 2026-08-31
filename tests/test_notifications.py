@@ -482,6 +482,77 @@ class NotificationTests(unittest.TestCase):
             sent_body = mock_sender.call_args.args[0]
             self.assertIn("Ready Label Test is now ready for payment", sent_body)
 
+    def test_status_digest_uses_custom_config_templates(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-digest-custom", email="admin-digest-custom@example.com", is_admin=True)
+            admin.set_password("secret")
+            member = User(username="member-digest-custom", email="member-digest-custom@example.com", tg_username="custommember", telegram_user_id="321")
+            member.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.flush()
+
+            test = GroupTest(title="Custom Digest Test", status="ready_for_payment", created_by=admin.id)
+            db.session.add(test)
+            db.session.flush()
+            db.session.add(Participation(group_test_id=test.id, user_id=member.id, approved=True, denied=False, name="Member"))
+
+            db.session.add_all([
+                NotificationConfig(key="telegram_status_chat_id", value="-10012345"),
+                NotificationConfig(key="telegram_digest_enabled", value="false"),
+                NotificationConfig(key="telegram_status_digest_header_template", value="Digest Header: {{ new_status_label }}"),
+                NotificationConfig(key="telegram_status_digest_line_template", value="{{ test_title }} => {{ new_status }}"),
+                NotificationConfig(key="telegram_status_digest_participants_template", value="Mentions: {{ mentions }}"),
+            ])
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "testing")
+
+            self.assertTrue(mock_sender.called)
+            sent_body = mock_sender.call_args.args[0]
+            self.assertIn("Digest Header: Ready For Payment", sent_body)
+            self.assertIn("Custom Digest Test => ready_for_payment", sent_body)
+            self.assertIn("Mentions:", sent_body)
+
+    def test_telegram_status_summary_uses_custom_approved_template(self):
+        with self.app.app_context():
+            from app.routes import _telegram_status_summary_for_user
+
+            db.create_all()
+            user = User(username="member-status-template", email="member-status-template@example.com")
+            user.set_password("secret")
+            admin = User(username="admin-status-template", email="admin-status-template@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add_all([user, admin])
+            db.session.flush()
+
+            test = GroupTest(title="Template Status Test", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.flush()
+
+            db.session.add(Participation(
+                group_test_id=test.id,
+                user_id=user.id,
+                approved=True,
+                denied=False,
+                order_status="ordered_from_vendor",
+                amount_owed=45.5,
+                amount_paid=10.0,
+                name="Member",
+            ))
+            db.session.add(NotificationConfig(
+                key="telegram_status_user_approved_template",
+                value="Status {{ test_title }} | {{ order_status }} | owed={{ amount_owed }} | paid={{ amount_paid }}",
+            ))
+            db.session.commit()
+
+            text = _telegram_status_summary_for_user(user, test)
+
+        self.assertIn("Status Template Status Test | ordered_from_vendor | owed=45.50 | paid=10.00", text)
+
     def test_status_digest_duplicate_insert_race_is_ignored(self):
         with self.app.app_context():
             from app.routes import _send_status_update_to_telegram

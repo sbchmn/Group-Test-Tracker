@@ -24,4 +24,59 @@
         </form>
     </div>
 </div>
+
+<div class="row mt-4 g-3">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">Generated Preview</div>
+            <div class="card-body">
+                {% if option_context %}
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="badge {{ option_context.badge_class }}"><i class="{{ option_context.icon_class }}"></i> {{ option_context.provider_name }}</span>
+                        <span class="fw-semibold">{{ option_context.title }}</span>
+                    </div>
+                    {% if option_context.destination_value %}
+                        <div class="small">{{ option_context.destination_label }}: <strong>{{ option_context.destination_value }}</strong></div>
+                    {% endif %}
+                    {% if option_context.network %}
+                        <div class="small">Network: {{ option_context.network }}</div>
+                    {% endif %}
+                    {% if option_context.payment_link %}
+                        <div class="small mt-1"><a href="{{ option_context.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>
+                    {% endif %}
+                    {% if option_context.qr_payload %}
+                        <div class="mt-2">
+                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ option_context.qr_payload|urlencode }}" alt="Payment QR preview" class="border rounded payment-qr-thumb">
+                        </div>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header">Payment Matrix</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Method</th>
+                            <th>Input</th>
+                            <th>Link</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in matrix_rows %}
+                            <tr>
+                                <td><strong>{{ row.provider_name }}</strong></td>
+                                <td class="small">{{ row.input_field }}</td>
+                                <td class="small text-muted">{{ row.link_example }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

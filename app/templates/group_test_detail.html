@@ -270,15 +270,29 @@ window.addEventListener('DOMContentLoaded', function() {
             <div class="card mb-3">
                 <div class="card-header">Available Payment Methods</div>
                 <div class="card-body">
-                    <ul class="list-group list-group-flush">
+                    <ul class="list-group list-group-flush payment-option-list">
                         {% for option in payment_options %}
                             <li class="list-group-item px-0">
-                                <div class="fw-semibold">{{ option.title }}</div>
-                                <div class="small text-muted">
-                                    {% if option.account_handle %}Handle: {{ option.account_handle }}{% endif %}
-                                    {% if option.wallet_address %}<br>Wallet: {{ option.wallet_address }}{% endif %}
-                                    {% if option.network %}<br>Network: {{ option.network }}{% endif %}
-                                    {% if option.details %}<br>{{ option.details }}{% endif %}
+                                <div class="d-flex align-items-center justify-content-between gap-3">
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                            <span class="badge {{ option.badge_class }}"><i class="{{ option.icon_class }}"></i> {{ option.provider_name }}</span>
+                                            <span class="fw-semibold">{{ option.title }}</span>
+                                        </div>
+                                        <div class="small text-muted">
+                                            {% if option.destination_value %}
+                                                <div>{{ option.destination_label }}: <strong>{{ option.destination_value }}</strong></div>
+                                            {% endif %}
+                                            {% if option.network %}<div>Network: {{ option.network }}</div>{% endif %}
+                                            {% if option.details %}<div>{{ option.details }}</div>{% endif %}
+                                            {% if option.payment_link %}
+                                                <div class="mt-1"><a href="{{ option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% if option.qr_payload %}
+                                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ option.qr_payload|urlencode }}" alt="{{ option.provider_name }} QR" class="border rounded payment-qr-thumb">
+                                    {% endif %}
                                 </div>
                             </li>
                         {% endfor %}
@@ -345,11 +359,19 @@ window.addEventListener('DOMContentLoaded', function() {
 
                 {% if test.status in ['testing', 'ready_for_payment'] and selected_payment_option %}
                     <div class="alert alert-info small">
-                        <div class="fw-semibold mb-1">Your Selected Payment Method</div>
-                        <div>{{ selected_payment_option.title }}</div>
-                        {% if selected_payment_option.account_handle %}<div>Handle: {{ selected_payment_option.account_handle }}</div>{% endif %}
-                        {% if selected_payment_option.wallet_address %}<div>Wallet: {{ selected_payment_option.wallet_address }}</div>{% endif %}
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <span class="badge {{ selected_payment_option.badge_class }}"><i class="{{ selected_payment_option.icon_class }}"></i> {{ selected_payment_option.provider_name }}</span>
+                            <span class="fw-semibold">Your Selected Payment Method</span>
+                        </div>
+                        <div class="fw-semibold">{{ selected_payment_option.title }}</div>
+                        {% if selected_payment_option.destination_value %}<div>{{ selected_payment_option.destination_label }}: {{ selected_payment_option.destination_value }}</div>{% endif %}
                         {% if selected_payment_option.network %}<div>Network: {{ selected_payment_option.network }}</div>{% endif %}
+                        {% if selected_payment_option.payment_link %}<div><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>{% endif %}
+                        {% if selected_payment_option.qr_payload %}
+                            <div class="mt-2">
+                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Selected payment QR" class="border rounded payment-qr-thumb">
+                            </div>
+                        {% endif %}
                     </div>
                 {% endif %}
 

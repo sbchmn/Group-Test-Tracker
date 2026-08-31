@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
@@ -448,6 +449,33 @@ class SecurityTests(unittest.TestCase):
             self.assertIsNotNone(persisted)
             self.assertFalse(persisted.is_active)
 
+    def test_payment_option_form_requires_handle_for_venmo_without_override(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin-pay-validate", email="admin-pay-validate@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin-pay-validate", "password": "secret"}, follow_redirects=True)
+        response = self.client.post(
+            "/admin/payment-options",
+            data={
+                "label": "Venmo Missing Handle",
+                "method_type": "venmo",
+                "recipient_name": "Recipient",
+                "account_handle": "",
+                "wallet_address": "",
+                "network": "",
+                "details": "",
+                "qr_payload_override": "",
+                "is_active": "y",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("requires an app handle/username", response.get_data(as_text=True))
+
     def test_delete_payment_option_unused_removes_row(self):
         with self.app.app_context():
             db.create_all()
@@ -516,6 +544,65 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Available Payment Methods", body)
         self.assertIn("Cash App Main", body)
         self.assertLess(body.find("Available Payment Methods"), body.find("Quick Admin Actions"))
+
+    def test_payment_profile_generates_venmo_link_destination_and_qr(self):
+        option = PaymentOption(
+            label="Venmo Main",
+            method_type="venmo",
+            account_handle="@collector.user",
+            is_active=True,
+        )
+
+        profile = option.to_payment_profile()
+        expected_link = f"https://venmo.com/{quote('collector.user', safe='._-')}"
+
+        self.assertEqual(profile["provider_name"], "Venmo")
+        self.assertEqual(profile["destination_label"], "Venmo Handle")
+        self.assertEqual(profile["destination_value"], "@collector.user")
+        self.assertEqual(profile["payment_link"], expected_link)
+        self.assertEqual(profile["qr_payload"], expected_link)
+
+    def test_payment_profile_generates_crypto_link_destination_and_qr(self):
+        option = PaymentOption(
+            label="ETH Wallet",
+            method_type="crypto",
+            wallet_address="0xabc123",
+            network="ETH",
+            is_active=True,
+        )
+
+        profile = option.to_payment_profile()
+
+        self.assertEqual(profile["provider_name"], "Crypto Wallet")
+        self.assertEqual(profile["destination_label"], "Wallet Address")
+        self.assertEqual(profile["destination_value"], "0xabc123")
+        self.assertEqual(profile["payment_link"], "ethereum:0xabc123")
+        self.assertEqual(profile["qr_payload"], "ethereum:0xabc123")
+
+    def test_ready_for_payment_renders_venmo_link_and_qr(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin-preview", email="admin-preview@example.com", is_admin=True)
+            admin.set_password("secret")
+            option = PaymentOption(label="Venmo Main", method_type="venmo", account_handle="@collector", is_active=True)
+            db.session.add_all([admin, option])
+            db.session.flush()
+
+            test = GroupTest(title="Ready Render Test", status="ready_for_payment", created_by=admin.id)
+            test.payment_options = [option]
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "admin-preview", "password": "secret"}, follow_redirects=True)
+        response = self.client.get(f"/test/{test_id}")
+        self.assertEqual(response.status_code, 200)
+
+        body = response.get_data(as_text=True)
+        self.assertIn("Open Payment Link", body)
+        self.assertIn("https://venmo.com/collector", body)
+        self.assertIn("Venmo Handle", body)
+        self.assertIn("api.qrserver.com", body)
 
     def test_admin_can_register_telegram_webhook_from_config_page(self):
         with self.app.app_context():
@@ -616,6 +703,55 @@ class SecurityTests(unittest.TestCase):
             cfg = NotificationConfig.query.filter_by(key="telegram_bot_token").first()
             self.assertIsNotNone(cfg)
             self.assertEqual(cfg.value, "123456:REALTOKEN")
+
+    def test_notification_config_persists_telegram_status_templates(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+
+        response_post = self.client.post(
+            "/admin/notification-config",
+            data={
+                "mailjet_api_key": "",
+                "mailjet_secret_key": "",
+                "mailjet_sender_email": "",
+                "telegram_bot_token": "",
+                "telegram_bot_username": "",
+                "telegram_webhook_url": "",
+                "telegram_webhook_secret": "",
+                "telegram_webhook_allowed_ips": "",
+                "telegram_status_chat_id": "-10012345",
+                "telegram_digest_enabled": "y",
+                "telegram_digest_window_minutes": "15",
+                "telegram_status_digest_header_template": "Header {{ new_status_label }}",
+                "telegram_status_digest_line_template": "Line {{ test_title }}",
+                "telegram_status_digest_participants_template": "P {{ mentions }}",
+                "telegram_status_new_test_template": "New {{ test_id }} {{ test_url }}",
+                "telegram_status_user_no_request_template": "None {{ test_title }}",
+                "telegram_status_user_denied_template": "Denied {{ denied_reason }}",
+                "telegram_status_user_approved_template": "Approved {{ amount_owed }}",
+                "telegram_status_user_pending_template": "Pending {{ test_id }}",
+                "service_base_url": "",
+                "notification_debug_enabled": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response_post.status_code, 200)
+
+        with self.app.app_context():
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_digest_header_template").first().value, "Header {{ new_status_label }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_digest_line_template").first().value, "Line {{ test_title }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_digest_participants_template").first().value, "P {{ mentions }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_new_test_template").first().value, "New {{ test_id }} {{ test_url }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_no_request_template").first().value, "None {{ test_title }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_denied_template").first().value, "Denied {{ denied_reason }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_approved_template").first().value, "Approved {{ amount_owed }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_pending_template").first().value, "Pending {{ test_id }}")
 
     def test_profile_shows_generated_telegram_link_and_qr_when_bot_username_configured(self):
         with self.app.app_context():

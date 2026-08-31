@@ -521,6 +521,51 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Telegram webhook unregistered successfully.", body)
         self.assertTrue(mock_unregister.called)
 
+    def test_notification_config_preserves_telegram_token_when_masked_value_submitted(self):
+        from app.routes import mask_secret
+
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:REALTOKEN"))
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+
+        response_get = self.client.get("/admin/notification-config")
+        self.assertEqual(response_get.status_code, 200)
+        body = response_get.get_data(as_text=True)
+        self.assertIn("1234", body)
+        self.assertIn("REALTOKEN"[-6:], body)
+
+        response_post = self.client.post(
+            "/admin/notification-config",
+            data={
+                "mailjet_api_key": "",
+                "mailjet_secret_key": "",
+                "mailjet_sender_email": "",
+                "telegram_bot_token": mask_secret("123456:REALTOKEN"),
+                "telegram_bot_username": "",
+                "telegram_webhook_url": "",
+                "telegram_webhook_secret": "",
+                "telegram_webhook_allowed_ips": "",
+                "telegram_status_chat_id": "",
+                "telegram_digest_enabled": "",
+                "telegram_digest_window_minutes": "10",
+                "service_base_url": "",
+                "notification_debug_enabled": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response_post.status_code, 200)
+
+        with self.app.app_context():
+            cfg = NotificationConfig.query.filter_by(key="telegram_bot_token").first()
+            self.assertIsNotNone(cfg)
+            self.assertEqual(cfg.value, "123456:REALTOKEN")
+
     def test_profile_shows_generated_telegram_link_and_qr_when_bot_username_configured(self):
         with self.app.app_context():
             db.create_all()

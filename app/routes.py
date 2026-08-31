@@ -2472,14 +2472,30 @@ def notification_config():
     form = NotificationConfigForm()
     configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
     existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
+    existing_mailjet_api_key = str(configs.get('mailjet_api_key') or '').strip()
+    existing_mailjet_secret_key = str(configs.get('mailjet_secret_key') or '').strip()
+    existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
 
     if form.validate_on_submit():
         webhook_secret = (form.telegram_webhook_secret.data or '').strip()
+
+        submitted_mailjet_api_key = (form.mailjet_api_key.data or '').strip()
+        submitted_mailjet_secret_key = (form.mailjet_secret_key.data or '').strip()
+        submitted_telegram_bot_token = (form.telegram_bot_token.data or '').strip()
+
+        # Protect against masked placeholders being re-saved as real credentials.
+        if submitted_mailjet_api_key == mask_secret(existing_mailjet_api_key):
+            submitted_mailjet_api_key = existing_mailjet_api_key
+        if submitted_mailjet_secret_key == mask_secret(existing_mailjet_secret_key):
+            submitted_mailjet_secret_key = existing_mailjet_secret_key
+        if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
+            submitted_telegram_bot_token = existing_telegram_bot_token
+
         for key, value in {
-            'mailjet_api_key': form.mailjet_api_key.data,
-            'mailjet_secret_key': form.mailjet_secret_key.data,
+            'mailjet_api_key': submitted_mailjet_api_key,
+            'mailjet_secret_key': submitted_mailjet_secret_key,
             'mailjet_sender_email': form.mailjet_sender_email.data,
-            'telegram_bot_token': form.telegram_bot_token.data,
+            'telegram_bot_token': submitted_telegram_bot_token,
             'telegram_bot_username': form.telegram_bot_username.data,
             'telegram_webhook_url': form.telegram_webhook_url.data,
             'telegram_webhook_allowed_ips': form.telegram_webhook_allowed_ips.data,
@@ -2557,7 +2573,10 @@ def register_telegram_webhook_action():
         flash('Telegram webhook registered successfully.', 'success')
     else:
         append_notification_log(f'telegram: webhook registration failed url={webhook_url} detail={description}')
-        flash(f'Telegram webhook registration failed: {description or "Unknown error"}', 'danger')
+        if '404' in description and 'Not Found' in description:
+            flash('Telegram webhook registration failed: bot token appears invalid. Re-enter the full token from BotFather and save configuration, then retry.', 'danger')
+        else:
+            flash(f'Telegram webhook registration failed: {description or "Unknown error"}', 'danger')
     return redirect(url_for('main.notification_config'))
 
 

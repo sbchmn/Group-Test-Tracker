@@ -381,3 +381,17 @@
 
 ### Validation Results
 - Focused regression validation passed: `python -m unittest tests.test_security tests.test_notifications tests.test_schema_migration tests.test_storage` (47 tests, OK).
+
+## Telegram Webhook 404 Token-Safety Fix
+
+### Intended Behavior Changes
+- Prevent masked credential placeholders from being persisted as real credentials when saving Notification Configuration.
+- Improve webhook registration feedback for Telegram API 404 Not Found responses.
+
+### Implemented Changes
+- Updated Notification Config save flow to preserve existing Mailjet and Telegram tokens when submitted value matches masked placeholder.
+- Added explicit webhook-register failure hint for Telegram 404 Not Found to guide bot token re-entry.
+- Added regression test for preserving `telegram_bot_token` when masked value is submitted.
+
+### Validation Results
+- Focused token-safety validation passed: `python -m unittest tests.test_security.SecurityTests.test_admin_can_register_telegram_webhook_from_config_page tests.test_security.SecurityTests.test_register_telegram_webhook_requires_bot_token tests.test_security.SecurityTests.test_notification_config_preserves_telegram_token_when_masked_value_submitted` (3 tests, OK).

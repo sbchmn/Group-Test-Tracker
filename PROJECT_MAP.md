@@ -363,3 +363,21 @@
 
 ### Validation Results
 - Focused webhook-action route validation passed: `python -m unittest tests.test_security.SecurityTests.test_admin_can_register_telegram_webhook_from_config_page tests.test_security.SecurityTests.test_register_telegram_webhook_requires_bot_token tests.test_security.SecurityTests.test_admin_can_unregister_telegram_webhook_from_config_page` (3 tests, OK).
+
+## Telegram Profile Link UX Fix
+
+### Intended Behavior Changes
+- Ensure users can visibly access the generated Telegram link after clicking Generate Telegram Link.
+- Show a QR code for the generated Telegram deep link.
+- Provide a fallback display (start command + token) when bot username is not configured.
+- Eliminate invalid nested-form markup in profile view to avoid inconsistent browser behavior.
+
+### Implemented Changes
+- Updated profile route context to pass `telegram_link_token` and `telegram_start_command` alongside `telegram_link_url`.
+- Reworked profile Telegram action area to use a single valid form with `formaction` for Generate Telegram Link.
+- Added explicit generated-link display field and QR code render using existing external QR service.
+- Added fallback read-only start command/token display when deep link cannot be built.
+- Added security tests for both configured and missing bot-username scenarios.
+
+### Validation Results
+- Focused regression validation passed: `python -m unittest tests.test_security tests.test_notifications tests.test_schema_migration tests.test_storage` (47 tests, OK).

@@ -102,8 +102,8 @@ class GroupTestForm(FlaskForm):
     
     status = SelectField('Status', choices=[
         ('recruiting', 'Recruiting (Open for new requests)'),
-        ('testing', 'Testing (No new joins, visible to approved members)'),
         ('ready_for_payment', 'Ready for Payment (Collecting participant payments)'),
+        ('testing', 'Testing (No new joins, visible to approved members)'),
         ('closed', 'Closed (Results link visible to approved members)')
     ], validators=[DataRequired()])
     
@@ -560,7 +560,7 @@ def _send_status_update_to_telegram(test, previous_status):
     mentioned_usernames = set()
     mentioned_user_ids = set()
     for item in pending_events:
-        lines.append(f"- #{item.test_id} {item.test_title}: {_format_status_label(item.old_status)} -> {_format_status_label(item.new_status)}")
+        lines.append(f"- {item.test_title} is now {_format_status_phrase(item.new_status)}")
         for username in (item.mention_usernames or '').split(','):
             username = username.strip().lstrip('@')
             if username:
@@ -622,6 +622,13 @@ def _format_status_label(status_value):
     if not status_text:
         return 'Unknown'
     return status_text.replace('_', ' ').title()
+
+
+def _format_status_phrase(status_value):
+    status_text = str(status_value or '').strip()
+    if not status_text:
+        return 'unknown'
+    return status_text.replace('_', ' ').lower()
 
 
 def _clamp_int(value, default, low, high):
@@ -1012,7 +1019,7 @@ def dashboard():
         if sort_by == 'tags':
             return test.tag_names().lower()
         if sort_by == 'status':
-            status_order = {'recruiting': 0, 'testing': 1, 'ready_for_payment': 2, 'closed': 3}
+            status_order = {'recruiting': 0, 'ready_for_payment': 1, 'testing': 2, 'closed': 3}
             return (status_order.get(test.status, 99), (test.title or '').lower())
         if sort_by == 'join_state':
             join_order = {'approved': 0, 'pending': 1, 'denied': 2, 'not_joined': 3}
@@ -1032,7 +1039,7 @@ def dashboard():
             grouped.setdefault(group_label(test), []).append(test)
 
         if group_by == 'status':
-            group_order = {'Recruiting': 0, 'Testing': 1, 'Ready For Payment': 2, 'Closed': 3}
+            group_order = {'Recruiting': 0, 'Ready For Payment': 1, 'Testing': 2, 'Closed': 3}
             group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
         elif group_by == 'join_state':
             group_order = {'Approved': 0, 'Pending': 1, 'Denied': 2, 'Not Joined': 3}

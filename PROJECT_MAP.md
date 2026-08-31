@@ -469,3 +469,31 @@
 
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_storage tests.test_security` (27 tests, OK).
+
+## Telegram Status Message Format + Thread Target Support
+
+### Intended Behavior Changes
+- Status channel notifications should read as `TestName is now newstatus` instead of `OldStatus -> NewStatus`.
+- Telegram status channel configuration should support thread targets encoded as `<chat_id>_<message_thread_id>` and send `message_thread_id` in the Bot API payload.
+
+### Implemented Changes
+- Updated status digest line rendering in the status-channel path to sentence format using the new status only.
+- Added thread-aware channel target parsing in notifications so `-100..._2` maps to `chat_id=-100...` and `message_thread_id=2`.
+- Extended Telegram send helper to include `message_thread_id` when provided.
+- Added regression tests for both thread-suffix and non-thread channel target forms, plus updated status message wording assertion.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_notifications tests.test_security` (50 tests, OK).
+
+## Status Ordering Adjustment (Ready Before Testing)
+
+### Intended Behavior Changes
+- Place `ready_for_payment` above `testing` in status-based lists and sorts.
+
+### Implemented Changes
+- Updated admin status dropdown ordering to show `Ready for Payment` before `Testing`.
+- Updated dashboard status sort order and status-group order maps so ready-for-payment appears above testing.
+- Added dashboard regression coverage that asserts grouped status ordering places `Ready For Payment` before `Testing`.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_participant_removal tests.test_notifications tests.test_security` (63 tests, OK).

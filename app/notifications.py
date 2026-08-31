@@ -240,7 +240,7 @@ def send_mailjet_message(user, subject, body):
         return False
 
 
-def _send_telegram_bot_message(chat_id, body, parse_mode=None):
+def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id=None):
     bot_token = str(_get_config("telegram_bot_token") or "").strip()
     chat_id = str(chat_id or "").strip()
     if not bot_token or not chat_id:
@@ -249,6 +249,8 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None):
     payload = {"chat_id": chat_id, "text": body}
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if message_thread_id is not None:
+        payload["message_thread_id"] = int(message_thread_id)
     payload_json = json.dumps(payload, ensure_ascii=False)
     safe_token = quote(bot_token, safe="")
     url = f"https://api.telegram.org/bot{safe_token}/sendMessage"
@@ -316,12 +318,35 @@ def send_telegram_message(user, body):
     return _send_telegram_bot_message(chat_id, body)
 
 
-def send_telegram_status_channel_message(body, parse_mode=None):
-    target_chat = str(_get_config("telegram_status_chat_id") or "").strip()
+def _parse_telegram_channel_target(raw_target):
+    target_chat = str(raw_target or "").strip()
     if not target_chat:
+        return "", None
+
+    if "_" not in target_chat:
+        return target_chat, None
+
+    base_chat_id, suffix = target_chat.rsplit("_", 1)
+    base_chat_id = base_chat_id.strip()
+    suffix = suffix.strip()
+    if not base_chat_id or not suffix.isdigit():
+        return target_chat, None
+
+    return base_chat_id, int(suffix)
+
+
+def send_telegram_status_channel_message(body, parse_mode=None):
+    configured_target = str(_get_config("telegram_status_chat_id") or "").strip()
+    if not configured_target:
         return False
-    append_notification_log(f"telegram: queued status channel message to {target_chat}")
-    return _send_telegram_bot_message(target_chat, body, parse_mode=parse_mode)
+    target_chat, message_thread_id = _parse_telegram_channel_target(configured_target)
+    append_notification_log(f"telegram: queued status channel message to {configured_target}")
+    return _send_telegram_bot_message(
+        target_chat,
+        body,
+        parse_mode=parse_mode,
+        message_thread_id=message_thread_id,
+    )
 
 
 def send_telegram_chat_message(chat_id, body, parse_mode=None):

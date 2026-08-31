@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
 from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message, send_telegram_status_channel_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -333,6 +333,52 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("telegram: response", log_contents)
         self.assertIn("\"ok\": true", log_contents)
 
+    def test_send_telegram_status_channel_message_includes_message_thread_id_suffix(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="telegram_status_chat_id", value="-1003638912415_2 "),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_telegram_status_channel_message("Thread message")
+
+        self.assertTrue(result)
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn(b'"chat_id": "-1003638912415"', request.data)
+        self.assertIn(b'"message_thread_id": 2', request.data)
+
+    def test_send_telegram_status_channel_message_without_thread_suffix_uses_chat_only(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="telegram_status_chat_id", value="-1003638912415"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_telegram_status_channel_message("No thread")
+
+        self.assertTrue(result)
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn(b'"chat_id": "-1003638912415"', request.data)
+        self.assertNotIn(b'"message_thread_id"', request.data)
+
     def test_send_notification_message_falls_back_to_email_when_telegram_requires_start(self):
         with self.app.app_context():
             db.create_all()
@@ -434,7 +480,7 @@ class NotificationTests(unittest.TestCase):
 
             self.assertTrue(mock_sender.called)
             sent_body = mock_sender.call_args.args[0]
-            self.assertIn("Testing -> Ready For Payment", sent_body)
+            self.assertIn("Ready Label Test is now ready for payment", sent_body)
 
     def test_status_digest_duplicate_insert_race_is_ignored(self):
         with self.app.app_context():

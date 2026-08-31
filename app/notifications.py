@@ -349,8 +349,13 @@ def send_telegram_status_channel_message(body, parse_mode=None):
     )
 
 
-def send_telegram_chat_message(chat_id, body, parse_mode=None):
-    return _send_telegram_bot_message(chat_id, body, parse_mode=parse_mode)
+def send_telegram_chat_message(chat_id, body, parse_mode=None, message_thread_id=None):
+    return _send_telegram_bot_message(
+        chat_id,
+        body,
+        parse_mode=parse_mode,
+        message_thread_id=message_thread_id,
+    )
 
 
 def _telegram_api_post(method_name, payload):

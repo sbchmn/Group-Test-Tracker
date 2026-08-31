@@ -26,32 +26,75 @@
                 </form>
             </div>
         </div>
+
+        <div class="card mb-4">
+            <div class="card-header">Payment Matrix</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Method</th>
+                            <th>Input</th>
+                            <th>Generated Link</th>
+                            <th>Destination</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in matrix_rows %}
+                            <tr>
+                                <td><strong>{{ row.provider_name }}</strong></td>
+                                <td class="small">{{ row.input_field }}<br><span class="text-muted">e.g. {{ row.input_example }}</span></td>
+                                <td class="small"><span class="text-muted">{{ row.link_example }}</span></td>
+                                <td class="small"><span class="text-muted">{{ row.destination_example }}</span></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <div class="col-lg-7">
         <div class="card">
             <div class="card-header">Configured Options</div>
             <div class="card-body p-0">
-                {% if options %}
+                {% if option_contexts %}
                     <table class="table table-sm mb-0 align-middle">
                         <thead class="table-light">
                             <tr>
                                 <th>Method</th>
                                 <th>Recipient</th>
                                 <th>Details</th>
+                                <th>Preview</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for option in options %}
+                            {% for option in option_contexts %}
                                 <tr>
-                                    <td><strong>{{ option.label }}</strong><br><small class="text-muted">{{ option.method_type }}</small></td>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge {{ option.badge_class }}"><i class="{{ option.icon_class }}"></i> {{ option.provider_name }}</span>
+                                        </div>
+                                        <div class="fw-semibold mt-1">{{ option.label }}</div>
+                                        <small class="text-muted">{{ option.method_type }}</small>
+                                    </td>
                                     <td>{{ option.recipient_name or '—' }}</td>
                                     <td class="small">
-                                        {% if option.account_handle %}<div>Handle: {{ option.account_handle }}</div>{% endif %}
-                                        {% if option.wallet_address %}<div>Wallet: {{ option.wallet_address }}</div>{% endif %}
+                                        {% if option.destination_value %}<div>{{ option.destination_label }}: {{ option.destination_value }}</div>{% endif %}
                                         {% if option.network %}<div>Network: {{ option.network }}</div>{% endif %}
+                                        {% if option.details %}<div>{{ option.details }}</div>{% endif %}
+                                    </td>
+                                    <td class="small">
+                                        {% if option.payment_link %}
+                                            <div><a href="{{ option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>
+                                        {% else %}
+                                            <div class="text-muted">No direct link</div>
+                                        {% endif %}
+                                        {% if option.qr_payload %}
+                                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data={{ option.qr_payload|urlencode }}" alt="{{ option.provider_name }} QR" class="border rounded mt-1 payment-qr-thumb">
+                                        {% endif %}
                                     </td>
                                     <td>
                                         {% if option.is_active %}

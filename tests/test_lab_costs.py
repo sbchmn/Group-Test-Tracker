@@ -263,6 +263,44 @@ class LabCostTests(unittest.TestCase):
             self.assertIsNotNone(test)
             self.assertEqual(test.status, "ready_for_payment")
 
+    def test_create_test_status_channel_uses_custom_new_test_template(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="tg-admin-template", email="tg-admin-template@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_status_new_test_template", value="ALERT {{ test_title }} => {{ status_phrase }} | {{ test_url }}"))
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "tg-admin-template", "password": "password"},
+            follow_redirects=True,
+        )
+
+        with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_send:
+            response = self.client.post(
+                "/admin/create-test",
+                data={
+                    "title": "Template Notify Test",
+                    "status": "ready_for_payment",
+                    "total_lab_cost": "100",
+                    "shipping_cost": "20",
+                    "refund_per_donor": "0",
+                    "lab_item_name": ["MASS"],
+                    "lab_item_price": ["100"],
+                    "lab_item_vials": ["1"],
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_send.called)
+        sent_body = mock_send.call_args.args[0]
+        self.assertIn("ALERT Template Notify Test => ready for payment", sent_body)
+        self.assertIn("/test/", sent_body)
+
     def test_donor_share_becomes_negative_when_refund_exceeds_base_share(self):
         with self.app.app_context():
             db.create_all()

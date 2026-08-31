@@ -10,6 +10,7 @@ from datetime import datetime
 from flask_login import UserMixin
 from . import db
 import json
+from urllib.parse import quote
 
 
 group_test_tags = db.Table(
@@ -251,26 +252,144 @@ class PaymentOption(db.Model):
             return f"{self.label} ({self.recipient_name})"
         return self.label
 
-    def to_qr_payload(self):
-        if self.qr_payload_override:
-            return self.qr_payload_override.strip()
+    @staticmethod
+    def _brand_for_method(method):
+        method = (method or '').strip().lower()
+        brands = {
+            'venmo': {
+                'provider_name': 'Venmo',
+                'icon_class': 'bi bi-wallet2',
+                'badge_class': 'text-bg-primary',
+            },
+            'cashapp': {
+                'provider_name': 'Cash App',
+                'icon_class': 'bi bi-cash-coin',
+                'badge_class': 'text-bg-success',
+            },
+            'paypal': {
+                'provider_name': 'PayPal',
+                'icon_class': 'bi bi-paypal',
+                'badge_class': 'text-bg-info',
+            },
+            'crypto': {
+                'provider_name': 'Crypto Wallet',
+                'icon_class': 'bi bi-currency-bitcoin',
+                'badge_class': 'text-bg-warning',
+            },
+            'other': {
+                'provider_name': 'Other',
+                'icon_class': 'bi bi-credit-card-2-front',
+                'badge_class': 'text-bg-secondary',
+            },
+        }
+        return brands.get(method, brands['other'])
 
+    @staticmethod
+    def _crypto_scheme_for_network(network):
+        network_key = str(network or '').strip().lower().replace('-', '').replace('_', '').replace(' ', '')
+        mapping = {
+            'btc': 'bitcoin',
+            'bitcoin': 'bitcoin',
+            'ltc': 'litecoin',
+            'litecoin': 'litecoin',
+            'bch': 'bitcoincash',
+            'bitcoincash': 'bitcoincash',
+            'eth': 'ethereum',
+            'ethereum': 'ethereum',
+            'erc20': 'ethereum',
+            'arbitrum': 'ethereum',
+            'optimism': 'ethereum',
+            'base': 'ethereum',
+            'polygon': 'ethereum',
+            'matic': 'ethereum',
+            'sol': 'solana',
+            'solana': 'solana',
+            'trx': 'tron',
+            'tron': 'tron',
+            'bnb': 'binance',
+            'binance': 'binance',
+        }
+        return mapping.get(network_key, 'crypto')
+
+    def to_payment_profile(self):
         method = (self.method_type or '').strip().lower()
         handle = (self.account_handle or '').strip()
         wallet = (self.wallet_address or '').strip()
         network = (self.network or '').strip()
+        override = (self.qr_payload_override or '').strip()
 
-        if method == 'venmo' and handle:
-            return f"https://venmo.com/{handle.lstrip('@')}"
-        if method == 'cashapp' and handle:
-            return f"https://cash.app/${handle.lstrip('$')}"
-        if method == 'paypal' and handle:
-            return f"https://paypal.me/{handle}"
-        if method == 'crypto' and wallet:
-            return f"{wallet}|{network}" if network else wallet
-        if handle:
-            return handle
-        return wallet
+        brand = self._brand_for_method(method)
+        profile = {
+            'provider_name': brand['provider_name'],
+            'icon_class': brand['icon_class'],
+            'badge_class': brand['badge_class'],
+            'destination_label': 'Destination',
+            'destination_value': '',
+            'payment_link': '',
+            'qr_payload': '',
+        }
+
+        if method == 'venmo':
+            normalized = handle.lstrip('@').strip()
+            if normalized:
+                encoded = quote(normalized, safe='._-')
+                profile['destination_label'] = 'Venmo Handle'
+                profile['destination_value'] = f"@{normalized}"
+                profile['payment_link'] = f"https://venmo.com/{encoded}"
+                profile['qr_payload'] = profile['payment_link']
+
+        elif method == 'cashapp':
+            normalized = handle.lstrip('@$').strip()
+            if normalized:
+                encoded = quote(normalized, safe='._-')
+                profile['destination_label'] = 'Cash App Cashtag'
+                profile['destination_value'] = f"${normalized}"
+                profile['payment_link'] = f"https://cash.app/${encoded}"
+                profile['qr_payload'] = profile['payment_link']
+
+        elif method == 'paypal':
+            normalized = handle.strip('/').strip()
+            if normalized:
+                encoded = quote(normalized, safe='._-')
+                profile['destination_label'] = 'PayPal Username'
+                profile['destination_value'] = normalized
+                profile['payment_link'] = f"https://paypal.me/{encoded}"
+                profile['qr_payload'] = profile['payment_link']
+
+        elif method == 'crypto':
+            if wallet:
+                scheme = self._crypto_scheme_for_network(network)
+                profile['destination_label'] = 'Wallet Address'
+                profile['destination_value'] = wallet
+                if scheme == 'crypto':
+                    profile['payment_link'] = f"crypto:{wallet}"
+                else:
+                    profile['payment_link'] = f"{scheme}:{wallet}"
+                profile['qr_payload'] = profile['payment_link']
+
+        else:
+            candidate = handle or wallet
+            if candidate:
+                profile['destination_label'] = 'Destination'
+                profile['destination_value'] = candidate
+                if candidate.lower().startswith(('http://', 'https://')):
+                    profile['payment_link'] = candidate
+                    profile['qr_payload'] = candidate
+                else:
+                    profile['qr_payload'] = candidate
+
+        if override:
+            profile['qr_payload'] = override
+            if not profile['payment_link'] and override.lower().startswith(('http://', 'https://', 'bitcoin:', 'ethereum:', 'solana:', 'tron:', 'litecoin:', 'bitcoincash:', 'binance:', 'crypto:')):
+                profile['payment_link'] = override
+
+        if not profile['destination_value']:
+            profile['destination_value'] = handle or wallet
+
+        return profile
+
+    def to_qr_payload(self):
+        return self.to_payment_profile().get('qr_payload') or ''
 
     def __repr__(self):
         return f'<PaymentOption {self.id} {self.label}>'

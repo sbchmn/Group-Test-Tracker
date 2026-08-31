@@ -144,6 +144,8 @@
 - Added a dedicated admin one-pager quick start guide in `ADMIN_QUICK_START.md` for onboarding and day-to-day operations.
 - README now includes a full Table of Contents and a prominent top-level link to `ADMIN_QUICK_START.md` for faster admin navigation.
 - README and ADMIN_QUICK_START now document private-bucket signed URL access, 60-second TTL guidance, and paid-participant requirements for group-test image viewing.
+- README and ADMIN_QUICK_START refreshed for the latest release features: ready_for_payment lifecycle, payment option matrix workflows, Telegram webhook register/unregister actions, editable Telegram status templates with variables, status-channel digest behavior, Telegram account-linking reset guidance, and PDF result modal/download behavior.
+- Admin docs/UI now present Telegram status template configuration as a sub-item under Notification Templates via an "Open Telegram Status Template Config" button that deep-links to the anchored section on Notification Config.
 
 ## Telegram Bot Workstream
 
@@ -497,3 +499,143 @@
 
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_participant_removal tests.test_notifications tests.test_security` (63 tests, OK).
+
+## Payment Method Matrix + Branded Link/QR UX
+
+### Intended Behavior Changes
+- Generate method-specific payment metadata (destination, hyperlinkable payment link, QR payload) for app-based methods and crypto.
+- Improve payment presentation with provider branding/icons and clickable payment links.
+- Provide admin-facing matrix documentation and generated previews for payment options.
+
+### Implemented Changes
+- Added centralized payment profile generation in `PaymentOption` for Venmo, Cash App, PayPal, Crypto Wallet, and Other.
+- Added network-aware crypto scheme handling (for example `ethereum:`, `bitcoin:`, `solana:`) with fallback `crypto:` links.
+- Updated route payment context builder to include provider branding, destination label/value, generated payment link, and QR payload.
+- Added admin payment option input validation by method type unless QR payload override is provided.
+- Enhanced payment display on test detail and participant status pages with provider badges, destination value, hyperlinkable payment links, and QR previews.
+- Enhanced admin payment options and edit pages with a payment matrix table and generated preview panels.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_security tests.test_lab_costs tests.test_notifications`.
+- Additional targeted checks passed:
+	- `tests.test_security.SecurityTests.test_payment_profile_generates_venmo_link_destination_and_qr`
+	- `tests.test_security.SecurityTests.test_payment_profile_generates_crypto_link_destination_and_qr`
+
+## Telegram Status Template Customization
+
+### Intended Behavior Changes
+- Make Telegram status-related message text editable from Notification Configuration instead of hardcoded strings.
+- Support variable-based templates for status digests, new-test channel posts, and user `/status` responses.
+- Keep safe defaults so blank/missing template values continue to produce reliable messages.
+
+### Implemented Changes
+- Added Notification Config form fields and persistence keys for Telegram status template variants.
+- Added a shared Telegram status template renderer in routes and used it for:
+	- digest header, digest line items, and participants line,
+	- new-test created channel message,
+	- user `/status` response variants (no request, denied, approved, pending).
+- Extended Notification Configuration UI with editable textareas for each template and a variable reference list.
+- Added regression tests for custom template rendering in status digest, new-test channel message, and approved `/status` response.
+
+### Security / Reliability / Optimization Notes
+- Security: Template rendering uses existing placeholder substitution and static context values; no dynamic code execution introduced.
+- Reliability: Each render path supplies explicit default templates, preserving behavior when configs are empty/malformed.
+- Optimization: Reuses lightweight substitution helper and current config map lookup without adding new query-heavy paths.
+- Reliability: Telegram digest mentions are now resolved from current participation state at send time so denied users are excluded even if older queued events included them.
+- Reliability: Telegram digest mentions now prefer a single @tg_username mention per participant and only use linked-ID mention fallback when no Telegram username exists, preventing duplicate mentions for the same person.
+
+### Validation Results
+- Focused post-change validation passed: `python -m unittest tests.test_notifications tests.test_lab_costs tests.test_security -q` (65 tests, OK).
+- Follow-up mention-filter fix validation passed: `py -3 -m unittest tests.test_notifications tests.test_security` (58 tests, OK).
+- Mention dedupe preference validation passed: `py -3 -m unittest tests.test_notifications` (30 tests, OK).
+	- `tests.test_security.SecurityTests.test_ready_for_payment_renders_venmo_link_and_qr`
+	- `tests.test_security.SecurityTests.test_payment_option_form_requires_handle_for_venmo_without_override`
+
+## Telegram My Tests Command + Ordered Lists
+
+### Intended Behavior Changes
+- Add a `/mytests` bot command that lists only group tests the linked user is actively interacting with (pending, approved, or denied).
+- Ensure Telegram test list responses are ordered by group test number ascending.
+- Keep `/status <test_id>` usable for a user's own participation record even when that test is no longer broadly visible to them.
+
+### Implemented Changes
+- Added `/mytests` to Telegram help output and webhook command handling.
+- Added shared Telegram test-list formatting and ascending-by-test-id ordering helpers.
+- Updated `/tests` to use the shared ordered formatter.
+- Added participation-scoped `/mytests` output with Pending/Approved/Denied labels.
+- Added per-test clickable command hints under iterated Telegram test items, using `/status_<test_id>` and including `/join_<test_id>` only when the user can still join that recruiting test.
+- Relaxed Telegram `/status` visibility gating to allow a user's own participation record to resolve status output.
+- Updated README and ADMIN_QUICK_START with the new Telegram bot command guidance.
+
+### Security / Reliability / Optimization Notes
+- Security: `/status` now allows access only when the requesting linked user has a participation record for that test; it does not expose unrelated tests.
+- Reliability: Shared ordered formatter removes inconsistent list ordering across Telegram test list responses.
+- Optimization: Sorting is done on de-duplicated in-memory test sets capped to the existing list size, avoiding wider query churn.
+
+### Validation Results
+- Narrow webhook-command validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states tests.test_security.SecurityTests.test_telegram_status_command_allows_user_participation_even_if_test_not_visible` (3 tests, OK).
+- Broader Telegram/security regression slice passed: `py -3 -m unittest tests.test_security` (32 tests, OK).
+- Follow-up clickable-command list validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states` (2 tests, OK).
+- Clickable underscored-command validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states tests.test_security.SecurityTests.test_telegram_status_command_allows_user_participation_even_if_test_not_visible tests.test_security.SecurityTests.test_telegram_join_command_accepts_underscored_clickable_form` (4 tests, OK).
+
+## Telegram Closed-Test Results Status Reply
+
+### Intended Behavior Changes
+- When a linked user requests `/status <test_id>` for a closed test where they are approved and marked paid, return a message containing the test results URL.
+- Keep this message configurable within the existing Telegram status template system.
+
+### Implemented Changes
+- Added a completed+paid `/status` branch that returns the closed test's `results_link` when available.
+- Added a new notification-config key and admin field: `telegram_status_user_results_template`.
+- Exposed `results_url` as a supported Telegram status template variable.
+- Updated README and ADMIN_QUICK_START with the new bot behavior.
+
+### Security / Reliability / Optimization Notes
+- Security: The results URL is returned only for the linked user's own approved, paid participation on a closed test.
+- Reliability: The branch falls back to the standard approved reply when the test is not closed, the user is not paid, or no results URL exists.
+- Optimization: The change reuses the existing `/status` lookup path and template renderer with no new broad queries.
+
+### Validation Results
+- Narrow results-status validation passed: `py -3 -m unittest tests.test_notifications.NotificationTests.test_telegram_status_summary_returns_results_url_for_closed_paid_participant tests.test_notifications.NotificationTests.test_telegram_status_summary_uses_custom_results_template tests.test_security.SecurityTests.test_notification_config_persists_telegram_status_templates` (3 tests, OK).
+
+## Telegram Group Outbound-Only Guard
+
+### Intended Behavior Changes
+- Do not let the bot reply to commands in Telegram groups/topics used for status updates.
+- Prevent group messages from overwriting a user's linked private `telegram_chat_id`.
+
+### Implemented Changes
+- Added an early non-private chat guard in the Telegram webhook so `group`, `supergroup`, and other non-private chats are ignored for bot command handling.
+- Kept status-channel/topic posting unchanged because outbound status messages use the separate status sender path.
+- Updated README and ADMIN_QUICK_START to state that bot commands should be used in private DM only.
+
+### Security / Reliability / Optimization Notes
+- Security: Prevents accidental disclosure of per-user bot replies in shared group chats.
+- Reliability: Prevents a linked user's private chat binding from being replaced by a group chat ID.
+- Optimization: Early return reduces unnecessary user lookup and command processing for group traffic.
+
+### Validation Results
+- Narrow group-guard validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply tests.test_security.SecurityTests.test_telegram_webhook_group_message_does_not_overwrite_private_chat_link` (2 tests, OK).
+
+## Telegram /testing Public Reply Path
+
+### Intended Behavior Changes
+- Allow one public Telegram command path, `/testing`, in groups and channels.
+- Reply with the app base URL plus sign-up and login instructions so users can onboard without private bot interaction.
+- Keep all other non-private commands ignored.
+
+### Implemented Changes
+- Added `_resolve_service_base_url(...)` and `_telegram_testing_message(...)` helpers.
+- Extended webhook payload parsing to accept `channel_post` and `edited_channel_post` so `/testing` can work in channels as well as groups.
+- Added an early `/testing` branch before the non-private-chat guard, returning sign-up and login links built from `service_base_url` with host fallback.
+- Threaded `/testing` replies to the originating Telegram topic by forwarding `message_thread_id` through the direct chat send helper when present.
+- Added `/testing` to the bot help text and updated README/ADMIN_QUICK_START.
+
+### Security / Reliability / Optimization Notes
+- Security: The public reply contains only onboarding links and no user-specific state.
+- Reliability: The message uses configured `service_base_url` when available and falls back to the current host, matching existing link-building patterns.
+- Optimization: Early branching avoids unnecessary user-link lookups for this public onboarding path.
+
+### Validation Results
+- Narrow `/testing` validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_channel_post tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply tests.test_security.SecurityTests.test_telegram_webhook_group_message_does_not_overwrite_private_chat_link` (4 tests, OK).
+- Focused thread-routing validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_originating_message_thread tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_channel_post tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply` (4 tests, OK).

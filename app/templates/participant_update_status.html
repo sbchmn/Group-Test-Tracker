@@ -28,7 +28,7 @@
                 <div class="form-text">Enter the total amount you have paid toward this test.</div>
             </div>
 
-            {% if test.status == 'testing' and available_payment_options %}
+            {% if test.status in ['testing', 'ready_for_payment'] and available_payment_options %}
                 <div class="mb-3">
                     {{ form.preferred_payment_option_id.label(class="form-label") }}
                     {{ form.preferred_payment_option_id(class="form-select") }}

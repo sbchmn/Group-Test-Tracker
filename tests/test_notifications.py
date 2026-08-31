@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
+from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
 from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
@@ -411,6 +412,56 @@ class NotificationTests(unittest.TestCase):
 
             events = TelegramStatusDigestEvent.query.all()
             self.assertEqual(len(events), 1)
+
+    def test_status_digest_formats_ready_for_payment_label(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-ready", email="admin-ready@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+
+            test = GroupTest(title="Ready Label Test", status="ready_for_payment", created_by=admin.id)
+            db.session.add(test)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="false"))
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "testing")
+
+            self.assertTrue(mock_sender.called)
+            sent_body = mock_sender.call_args.args[0]
+            self.assertIn("Testing -> Ready For Payment", sent_body)
+
+    def test_status_digest_duplicate_insert_race_is_ignored(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-race", email="admin-race@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+
+            test = GroupTest(title="Digest Race Test", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="true"))
+            db.session.add(NotificationConfig(key="telegram_digest_window_minutes", value="10"))
+            db.session.commit()
+
+            with patch(
+                "app.routes.db.session.flush",
+                side_effect=IntegrityError("INSERT", {"event_key": "x"}, Exception("duplicate")),
+            ):
+                _send_status_update_to_telegram(test, "recruiting")
+
+            db.session.commit()
+            events = TelegramStatusDigestEvent.query.all()
+            self.assertEqual(len(events), 0)
 
     def test_send_due_user_digests_hourly_dispatches_and_marks_events_sent(self):
         with self.app.app_context():

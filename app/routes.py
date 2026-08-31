@@ -103,6 +103,7 @@ class GroupTestForm(FlaskForm):
     status = SelectField('Status', choices=[
         ('recruiting', 'Recruiting (Open for new requests)'),
         ('testing', 'Testing (No new joins, visible to approved members)'),
+        ('ready_for_payment', 'Ready for Payment (Collecting participant payments)'),
         ('closed', 'Closed (Results link visible to approved members)')
     ], validators=[DataRequired()])
     
@@ -529,8 +530,14 @@ def _send_status_update_to_telegram(test, previous_status):
         mention_usernames=','.join(sorted(set(mention_usernames))),
         mention_user_ids=','.join(sorted(set(mention_user_ids))),
     )
-    db.session.add(event)
-    db.session.flush()
+    try:
+        with db.session.begin_nested():
+            db.session.add(event)
+            db.session.flush()
+    except IntegrityError:
+        # Another request inserted the same digest event in this window.
+        append_notification_log(f"telegram: digest suppressed duplicate status update for test {test.id}")
+        return
 
     pending_events = (
         TelegramStatusDigestEvent.query
@@ -553,7 +560,7 @@ def _send_status_update_to_telegram(test, previous_status):
     mentioned_usernames = set()
     mentioned_user_ids = set()
     for item in pending_events:
-        lines.append(f"- #{item.test_id} {item.test_title}: {item.old_status.title()} -> {item.new_status.title()}")
+        lines.append(f"- #{item.test_id} {item.test_title}: {_format_status_label(item.old_status)} -> {_format_status_label(item.new_status)}")
         for username in (item.mention_usernames or '').split(','):
             username = username.strip().lstrip('@')
             if username:
@@ -581,6 +588,26 @@ def _send_status_update_to_telegram(test, previous_status):
         db.session.add_all(pending_events)
 
 
+def _send_new_test_created_to_telegram(test, test_url=None):
+    config_map = _config_values_map()
+    target_chat = str(config_map.get('telegram_status_chat_id') or '').strip()
+    if not target_chat:
+        return
+
+    lines = [
+        'New group test created',
+        '',
+        f'- #{test.id} {test.title}',
+        f"- Status: {_format_status_label(test.status or 'recruiting')}",
+    ]
+    if test_url:
+        lines.append(f'- Link: {test_url}')
+
+    sent = send_telegram_status_channel_message('\n'.join(lines))
+    if not sent:
+        append_notification_log(f'telegram: failed to send new test created message for test {test.id}')
+
+
 def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
     if not value:
         return ''
@@ -588,6 +615,13 @@ def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
     if len(value) <= reveal_prefix + reveal_suffix:
         return value
     return f"{value[:reveal_prefix]}{'*' * (len(value) - reveal_prefix - reveal_suffix)}{value[-reveal_suffix:]}"
+
+
+def _format_status_label(status_value):
+    status_text = str(status_value or '').strip()
+    if not status_text:
+        return 'Unknown'
+    return status_text.replace('_', ' ').title()
 
 
 def _clamp_int(value, default, low, high):
@@ -907,7 +941,7 @@ def dashboard():
     if current_user.is_admin:
         tests = GroupTest.query.order_by(GroupTest.updated_at.desc()).all()
     else:
-        # Efficient query: all recruiting OR (testing/closed AND user has approved part.)
+        # Efficient query: all recruiting OR (non-recruiting member-only statuses AND user has approved part.)
         recruiting = GroupTest.query.filter_by(status='recruiting').all()
         member_tests = (
             GroupTest.query
@@ -915,7 +949,7 @@ def dashboard():
             .filter(
                 Participation.user_id == current_user.id,
                 Participation.approved == True,
-                GroupTest.status.in_(['testing', 'closed'])
+                GroupTest.status.in_(['testing', 'ready_for_payment', 'closed'])
             )
             .all()
         )
@@ -968,7 +1002,7 @@ def dashboard():
             return 'Not Joined'
         if group_by == 'none':
             return 'All Tests'
-        return test.status.title()
+        return _format_status_label(test.status)
 
     def group_sort_key(test):
         if sort_by == 'title':
@@ -978,7 +1012,7 @@ def dashboard():
         if sort_by == 'tags':
             return test.tag_names().lower()
         if sort_by == 'status':
-            status_order = {'recruiting': 0, 'testing': 1, 'closed': 2}
+            status_order = {'recruiting': 0, 'testing': 1, 'ready_for_payment': 2, 'closed': 3}
             return (status_order.get(test.status, 99), (test.title or '').lower())
         if sort_by == 'join_state':
             join_order = {'approved': 0, 'pending': 1, 'denied': 2, 'not_joined': 3}
@@ -998,7 +1032,7 @@ def dashboard():
             grouped.setdefault(group_label(test), []).append(test)
 
         if group_by == 'status':
-            group_order = {'Recruiting': 0, 'Testing': 1, 'Closed': 2}
+            group_order = {'Recruiting': 0, 'Testing': 1, 'Ready For Payment': 2, 'Closed': 3}
             group_names = sorted(grouped.keys(), key=lambda label: (group_order.get(label, 99), label.lower()))
         elif group_by == 'join_state':
             group_order = {'Approved': 0, 'Pending': 1, 'Denied': 2, 'Not Joined': 3}
@@ -1144,7 +1178,7 @@ def _telegram_user_visible_tests(user):
             Participation.user_id == user.id,
             Participation.approved == True,
             Participation.denied == False,
-            GroupTest.status.in_(['testing', 'closed'])
+            GroupTest.status.in_(['testing', 'ready_for_payment', 'closed'])
         )
         .all()
     )
@@ -1627,7 +1661,7 @@ def update_my_participant_status(test_id):
         part.notes = form.notes.data or part.notes
 
         selected_id = int(form.preferred_payment_option_id.data or 0)
-        if test.status == 'testing' and selected_id > 0:
+        if test.status in ('testing', 'ready_for_payment') and selected_id > 0:
             selected_option = next((opt for opt in available_options if opt.id == selected_id), None)
             if selected_option:
                 part.preferred_payment_option_id = selected_option.id
@@ -1840,6 +1874,11 @@ def create_test():
         db.session.flush()
         apply_tags_to_record(test, form.tag_names.data)
         db.session.commit()
+        try:
+            test_url = f"{request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}"
+            _send_new_test_created_to_telegram(test, test_url=test_url)
+        except Exception as exc:
+            append_notification_log(f'telegram: exception sending new test created message for test {test.id}: {exc}')
         flash(f'Group test "{test.title}" created successfully.', 'success')
         return redirect(url_for('main.test_detail', test_id=test.id))
     return render_template('admin/create_test.html', form=form, tag_suggestions=get_all_tag_names(), storage_settings=get_storage_settings())

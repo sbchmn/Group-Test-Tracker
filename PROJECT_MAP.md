@@ -409,3 +409,51 @@
 ### Validation Results
 - Focused regression run passed: `python -m unittest tests.test_security tests.test_storage` (24 tests, OK).
 - Additional focused rendering check passed: `python -m unittest tests.test_security.SecurityTests.test_group_test_pdf_result_renders_pdf_modal_trigger_and_download_button tests.test_security.SecurityTests.test_admin_public_results_page_renders_pdf_result_without_template_error` (2 tests, OK).
+
+## Telegram Digest Duplicate Insert Race Fix
+
+### Intended Behavior Changes
+- Ensure test status updates remain idempotent and do not fail the request when concurrent digest event inserts race on the unique key.
+
+### Implemented Changes
+- Wrapped digest-event insert/flush in a nested transaction and caught `IntegrityError` to treat duplicate unique-key insert as a suppressed duplicate event.
+- Added focused regression coverage that simulates duplicate-insert `IntegrityError` and verifies no exception escapes.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_notifications tests.test_security` (46 tests, OK).
+
+## New Test Telegram Channel Notification
+
+### Intended Behavior Changes
+- Send a Telegram status channel/group notification when a new group test is created, if a status channel is configured.
+
+### Implemented Changes
+- Added `_send_new_test_created_to_telegram(...)` helper to send a creation message to the configured Telegram status chat.
+- Hooked create-test flow to call this helper after successful commit so DB writes are never blocked by notification delivery.
+- Added exception guard and logging around the post-commit send path for fail-soft behavior.
+- Added regression coverage for create-test route to assert channel messaging is invoked when `telegram_status_chat_id` is configured.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_lab_costs tests.test_notifications tests.test_security` (53 tests, OK).
+
+## Ready For Payment Status + Payment Panel Placement
+
+### Intended Behavior Changes
+- Add a new group-test lifecycle status: `ready_for_payment`.
+- Allow organizers to set tests to this status.
+- Display payment options at the top of the right-hand column on test detail during this phase.
+- Keep Telegram channel/group status notifications active for this status transition.
+
+### Implemented Changes
+- Added `ready_for_payment` to admin group-test status choices.
+- Updated visibility and grouping logic so approved users can see member-only tests in `ready_for_payment` like `testing` and `closed`.
+- Added status-label formatting helper for underscore-based statuses and applied it to Telegram status digest and new-test channel messages.
+- Updated participant payment preference save/render logic to allow selection in both `testing` and `ready_for_payment`.
+- Moved the payment methods panel to the top of the right column when test status is `ready_for_payment`.
+
+### Validation Results
+- Impacted suite run passed: `python -m unittest tests.test_lab_costs tests.test_security tests.test_notifications tests.test_participant_removal`.
+- New focused checks passed:
+	- `tests.test_lab_costs.LabCostTests.test_create_test_supports_ready_for_payment_status`
+	- `tests.test_security.SecurityTests.test_ready_for_payment_shows_payment_methods_at_top_of_right_column`
+	- `tests.test_notifications.NotificationTests.test_status_digest_formats_ready_for_payment_label`

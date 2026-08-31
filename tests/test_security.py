@@ -493,6 +493,30 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Preferred Payment Method", body)
         self.assertIn("Venmo Main", body)
 
+    def test_ready_for_payment_shows_payment_methods_at_top_of_right_column(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            option = PaymentOption(label="Cash App Main", method_type="cashapp", account_handle="$collector", is_active=True)
+            db.session.add_all([admin, option])
+            db.session.flush()
+
+            test = GroupTest(title="Ready Status Test", status="ready_for_payment", created_by=admin.id)
+            test.payment_options = [option]
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        response = self.client.get(f"/test/{test_id}")
+        self.assertEqual(response.status_code, 200)
+
+        body = response.get_data(as_text=True)
+        self.assertIn("Available Payment Methods", body)
+        self.assertIn("Cash App Main", body)
+        self.assertLess(body.find("Available Payment Methods"), body.find("Quick Admin Actions"))
+
     def test_admin_can_register_telegram_webhook_from_config_page(self):
         with self.app.app_context():
             db.create_all()

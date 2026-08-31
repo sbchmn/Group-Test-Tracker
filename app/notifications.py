@@ -452,7 +452,9 @@ def _render_user_digest_email(user, events):
         "",
     ]
     for event in events:
-        lines.append(f"- #{event.test_id} {event.test_title}: {event.old_status.title()} -> {event.new_status.title()}")
+        old_status = str(event.old_status or '').replace('_', ' ').title()
+        new_status = str(event.new_status or '').replace('_', ' ').title()
+        lines.append(f"- #{event.test_id} {event.test_title}: {old_status} -> {new_status}")
     lines.extend([
         "",
         "You can review details by logging into Group Test Tracker.",

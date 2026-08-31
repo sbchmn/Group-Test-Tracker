@@ -291,7 +291,7 @@ class GroupTest(db.Model):
     size = db.Column(db.String(50), nullable=True)  # e.g. "10x 10mg vials"
     
     status = db.Column(db.String(20), default='recruiting', nullable=False, index=True)
-    # Allowed: recruiting, testing, closed
+    # Allowed: recruiting, testing, ready_for_payment, closed
     
     # Lab testing costs and provider details
     lab_name = db.Column(db.String(200), nullable=True)
@@ -438,8 +438,8 @@ class GroupTest(db.Model):
             return True
         if self.status == 'recruiting':
             return True
-        # testing or closed: only approved participants
-        if self.status in ('testing', 'closed'):
+        # member-only phases: only approved participants
+        if self.status in ('testing', 'ready_for_payment', 'closed'):
             return self.participations.filter_by(user_id=user.id, approved=True).first() is not None
         return False
 

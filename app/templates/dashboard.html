@@ -97,6 +97,8 @@
                                 <span class="badge bg-success status-badge">Recruiting</span>
                             {% elif test.status == 'testing' %}
                                 <span class="badge bg-warning text-dark status-badge">Testing</span>
+                            {% elif test.status == 'ready_for_payment' %}
+                                <span class="badge bg-info text-dark status-badge">Ready For Payment</span>
                             {% else %}
                                 <span class="badge bg-secondary status-badge">Closed</span>
                             {% endif %}

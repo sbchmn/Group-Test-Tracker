@@ -50,8 +50,8 @@ window.addEventListener('DOMContentLoaded', function() {
 <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
         <h2>{{ test.title }}</h2>
-        <span class="badge {% if test.status == 'recruiting' %}bg-success{% elif test.status == 'testing' %}bg-warning text-dark{% else %}bg-secondary{% endif %} fs-6">
-            {{ test.status.title() }}
+        <span class="badge {% if test.status == 'recruiting' %}bg-success{% elif test.status == 'testing' %}bg-warning text-dark{% elif test.status == 'ready_for_payment' %}bg-info text-dark{% else %}bg-secondary{% endif %} fs-6">
+            {{ test.status|replace('_', ' ')|title }}
         </span>
         {% if test.start_date %}<span class="text-muted ms-2">Started {{ test.start_date }}</span>{% endif %}
         {% if test.tag_names() %}
@@ -208,27 +208,6 @@ window.addEventListener('DOMContentLoaded', function() {
         </div>
         {% endif %}
 
-        {% if payment_options %}
-            <div class="card mb-4">
-                <div class="card-header">Available Payment Methods</div>
-                <div class="card-body">
-                    <ul class="list-group list-group-flush">
-                        {% for option in payment_options %}
-                            <li class="list-group-item px-0">
-                                <div class="fw-semibold">{{ option.title }}</div>
-                                <div class="small text-muted">
-                                    {% if option.account_handle %}Handle: {{ option.account_handle }}{% endif %}
-                                    {% if option.wallet_address %}<br>Wallet: {{ option.wallet_address }}{% endif %}
-                                    {% if option.network %}<br>Network: {{ option.network }}{% endif %}
-                                    {% if option.details %}<br>{{ option.details }}{% endif %}
-                                </div>
-                            </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-        {% endif %}
-
         <!-- Results Link (only for approved members when closed) -->
         {% if test.status == 'closed' and test.results_link and can_view_results %}
             <div class="alert alert-success">
@@ -287,6 +266,27 @@ window.addEventListener('DOMContentLoaded', function() {
     
     <!-- Right: Participation / Request -->
     <div class="col-lg-5">
+        {% if test.status == 'ready_for_payment' and payment_options %}
+            <div class="card mb-3">
+                <div class="card-header">Available Payment Methods</div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        {% for option in payment_options %}
+                            <li class="list-group-item px-0">
+                                <div class="fw-semibold">{{ option.title }}</div>
+                                <div class="small text-muted">
+                                    {% if option.account_handle %}Handle: {{ option.account_handle }}{% endif %}
+                                    {% if option.wallet_address %}<br>Wallet: {{ option.wallet_address }}{% endif %}
+                                    {% if option.network %}<br>Network: {{ option.network }}{% endif %}
+                                    {% if option.details %}<br>{{ option.details }}{% endif %}
+                                </div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        {% endif %}
+
         {% if current_user.is_admin %}
             <div class="card mb-3">
                 <div class="card-header">Quick Admin Actions</div>
@@ -343,7 +343,7 @@ window.addEventListener('DOMContentLoaded', function() {
                     {% if my_part.vial_donor %}(as vial donor){% endif %}
                 </div>
 
-                {% if test.status == 'testing' and selected_payment_option %}
+                {% if test.status in ['testing', 'ready_for_payment'] and selected_payment_option %}
                     <div class="alert alert-info small">
                         <div class="fw-semibold mb-1">Your Selected Payment Method</div>
                         <div>{{ selected_payment_option.title }}</div>
@@ -357,7 +357,7 @@ window.addEventListener('DOMContentLoaded', function() {
                     <i class="bi bi-pencil-square"></i> Update My Order &amp; Payment Status
                 </a>
             {% else %}
-                <div class="alert alert-secondary">This test is in {{ test.status }} phase. Participation by invitation/approval only.</div>
+                <div class="alert alert-secondary">This test is in {{ test.status|replace('_', ' ') }} phase. Participation by invitation/approval only.</div>
             {% endif %}
         {% endif %}
         

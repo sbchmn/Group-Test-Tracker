@@ -542,9 +542,11 @@
 - Reliability: Each render path supplies explicit default templates, preserving behavior when configs are empty/malformed.
 - Optimization: Reuses lightweight substitution helper and current config map lookup without adding new query-heavy paths.
 - Reliability: Telegram digest mentions are now resolved from current participation state at send time so denied users are excluded even if older queued events included them.
+- Reliability: Telegram digest mentions now prefer a single @tg_username mention per participant and only use linked-ID mention fallback when no Telegram username exists, preventing duplicate mentions for the same person.
 
 ### Validation Results
 - Focused post-change validation passed: `python -m unittest tests.test_notifications tests.test_lab_costs tests.test_security -q` (65 tests, OK).
 - Follow-up mention-filter fix validation passed: `py -3 -m unittest tests.test_notifications tests.test_security` (58 tests, OK).
+- Mention dedupe preference validation passed: `py -3 -m unittest tests.test_notifications` (30 tests, OK).
 	- `tests.test_security.SecurityTests.test_ready_for_payment_renders_venmo_link_and_qr`
 	- `tests.test_security.SecurityTests.test_payment_option_form_requires_handle_for_venmo_without_override`

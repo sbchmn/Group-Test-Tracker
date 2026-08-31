@@ -565,10 +565,10 @@ class SecurityTests(unittest.TestCase):
         positions = [sent_body.find(line) for line in expected_lines]
         self.assertTrue(all(position >= 0 for position in positions))
         self.assertEqual(positions, sorted(positions))
-        self.assertIn(f"/status {test_one.id}", sent_body)
-        self.assertIn(f"/join {test_one.id}", sent_body)
-        self.assertIn(f"/status {test_two.id}", sent_body)
-        self.assertNotIn(f"/join {test_two.id}", sent_body)
+        self.assertIn(f"/status_{test_one.id}", sent_body)
+        self.assertIn(f"/join_{test_one.id}", sent_body)
+        self.assertIn(f"/status_{test_two.id}", sent_body)
+        self.assertNotIn(f"/join_{test_two.id}", sent_body)
 
     def test_telegram_mytests_command_lists_only_user_interactions_with_states(self):
         with self.app.app_context():
@@ -616,10 +616,10 @@ class SecurityTests(unittest.TestCase):
         self.assertIn(f"#{denied_id} Denied Test [Testing] - Denied", sent_body)
         self.assertIn(f"#{approved_id} Approved Test [Closed] - Approved", sent_body)
         self.assertNotIn("Unrelated Test", sent_body)
-        self.assertIn(f"/status {pending_id}", sent_body)
-        self.assertIn(f"/status {denied_id}", sent_body)
-        self.assertIn(f"/status {approved_id}", sent_body)
-        self.assertNotIn(f"/join {pending_id}", sent_body)
+        self.assertIn(f"/status_{pending_id}", sent_body)
+        self.assertIn(f"/status_{denied_id}", sent_body)
+        self.assertIn(f"/status_{approved_id}", sent_body)
+        self.assertNotIn(f"/join_{pending_id}", sent_body)
 
     def test_telegram_status_command_allows_user_participation_even_if_test_not_visible(self):
         with self.app.app_context():
@@ -652,7 +652,7 @@ class SecurityTests(unittest.TestCase):
                     "message": {
                         "chat": {"id": 3003},
                         "from": {"id": 888, "username": "tgdenied"},
-                        "text": f"/status {test_id}",
+                        "text": f"/status_{test_id}",
                     }
                 },
             )
@@ -661,6 +661,37 @@ class SecurityTests(unittest.TestCase):
         sent_body = mock_send.call_args.args[1]
         self.assertIn(f"#{test_id} Denied Status Test: Denied.", sent_body)
         self.assertIn("Need more verification", sent_body)
+
+    def test_telegram_join_command_accepts_underscored_clickable_form(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgjoin", email="tgjoin@example.com", telegram_chat_id="4004", telegram_user_id="999")
+            user.set_password("secret")
+            owner = User(username="owner", email="owner@example.com", is_admin=True)
+            owner.set_password("secret")
+            db.session.add_all([user, owner])
+            db.session.flush()
+
+            test = GroupTest(title="Clickable Join Test", status="recruiting", created_by=owner.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 4004},
+                        "from": {"id": 999, "username": "tgjoin"},
+                        "text": f"/join_{test_id}",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn(f"Request submitted for #{test_id} Clickable Join Test.", sent_body)
 
     def test_delete_payment_option_in_use_sets_inactive(self):
         with self.app.app_context():

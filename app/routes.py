@@ -1384,6 +1384,27 @@ def _telegram_participation_state(participation):
     return 'Pending'
 
 
+def _telegram_extract_command_test_id(text, command_name):
+    raw_text = str(text or '').strip()
+    if not raw_text:
+        return None
+
+    parts = raw_text.split()
+    head = parts[0].lower()
+    command_prefix = f'/{command_name.lower()}'
+    if head == command_prefix:
+        if len(parts) < 2 or not parts[1].isdigit():
+            return None
+        return int(parts[1])
+
+    underscored_prefix = f'{command_prefix}_'
+    if head.startswith(underscored_prefix):
+        suffix = head[len(underscored_prefix):].strip()
+        if suffix.isdigit():
+            return int(suffix)
+    return None
+
+
 def _telegram_participations_map(user, tests):
     test_ids = [test.id for test in tests if test is not None and getattr(test, 'id', None) is not None]
     if not user or not test_ids:
@@ -1411,9 +1432,9 @@ def _telegram_format_test_list(tests, user=None, participations_by_test_id=None)
         else:
             lines.append(f"#{test.id} {test.title} [{status_label}]")
 
-        command_tokens = [f"/status {test.id}"]
+        command_tokens = [f"/status_{test.id}"]
         if test.status == 'recruiting' and participation is None:
-            command_tokens.append(f"/join {test.id}")
+            command_tokens.append(f"/join_{test.id}")
         lines.append('  ' + ' | '.join(command_tokens))
     return lines
 
@@ -1652,11 +1673,11 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower.startswith('/status'):
-        parts = text.split()
-        if len(parts) < 2 or not parts[1].isdigit():
-            send_telegram_chat_message(chat_id, 'Usage: /status <test_id>')
+        test_id = _telegram_extract_command_test_id(text, 'status')
+        if test_id is None:
+            send_telegram_chat_message(chat_id, 'Usage: /status <test_id> or /status_<test_id>')
             return jsonify({'ok': True})
-        test = GroupTest.query.get(int(parts[1]))
+        test = GroupTest.query.get(test_id)
         user_participation = None
         if test is not None:
             user_participation = Participation.query.filter_by(group_test_id=test.id, user_id=linked_user.id).first()
@@ -1667,11 +1688,11 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower.startswith('/join'):
-        parts = text.split()
-        if len(parts) < 2 or not parts[1].isdigit():
-            send_telegram_chat_message(chat_id, 'Usage: /join <test_id>')
+        test_id = _telegram_extract_command_test_id(text, 'join')
+        if test_id is None:
+            send_telegram_chat_message(chat_id, 'Usage: /join <test_id> or /join_<test_id>')
             return jsonify({'ok': True})
-        test = GroupTest.query.get(int(parts[1]))
+        test = GroupTest.query.get(test_id)
         if test is None or not test.can_user_see(linked_user):
             send_telegram_chat_message(chat_id, 'Test not found or not visible to your account.')
             return jsonify({'ok': True})

@@ -170,7 +170,7 @@ Telegram bot commands:
 - The exception is `/testing`, which can reply in a group or channel with signup/login links to the app.
 - `/tests` lists tests visible to your account, ordered by test number ascending.
 - `/mytests` lists only tests where you have a pending, approved, or denied participation record, ordered by test number ascending.
-- Telegram test lists include per-test command hints under each item, such as `/status <test_id>` and, when eligible, `/join <test_id>`.
+- Telegram test lists include per-test clickable command hints under each item, such as `/status_<test_id>` and, when eligible, `/join_<test_id>`.
 - `/testing` returns the base app links for sign up and login.
 - `/status <test_id>` shows your current interaction status for that test. If the test is closed and you are marked paid, it returns the test results URL.
 - `/join <test_id>` submits a join request for recruiting tests.

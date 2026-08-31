@@ -563,7 +563,7 @@
 - Added shared Telegram test-list formatting and ascending-by-test-id ordering helpers.
 - Updated `/tests` to use the shared ordered formatter.
 - Added participation-scoped `/mytests` output with Pending/Approved/Denied labels.
-- Added per-test command hints under iterated Telegram test items, always including `/status <test_id>` and including `/join <test_id>` only when the user can still join that recruiting test.
+- Added per-test clickable command hints under iterated Telegram test items, using `/status_<test_id>` and including `/join_<test_id>` only when the user can still join that recruiting test.
 - Relaxed Telegram `/status` visibility gating to allow a user's own participation record to resolve status output.
 - Updated README and ADMIN_QUICK_START with the new Telegram bot command guidance.
 
@@ -576,6 +576,7 @@
 - Narrow webhook-command validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states tests.test_security.SecurityTests.test_telegram_status_command_allows_user_participation_even_if_test_not_visible` (3 tests, OK).
 - Broader Telegram/security regression slice passed: `py -3 -m unittest tests.test_security` (32 tests, OK).
 - Follow-up clickable-command list validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states` (2 tests, OK).
+- Clickable underscored-command validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states tests.test_security.SecurityTests.test_telegram_status_command_allows_user_participation_even_if_test_not_visible tests.test_security.SecurityTests.test_telegram_join_command_accepts_underscored_clickable_form` (4 tests, OK).
 
 ## Telegram Closed-Test Results Status Reply
 

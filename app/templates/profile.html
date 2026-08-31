@@ -37,13 +37,27 @@
                             <div class="small text-warning mb-2">Not linked yet. Generate a link, open the bot, then press Start.</div>
                         {% endif %}
 
-                        <form method="POST" action="{{ url_for('main.create_telegram_link_token') }}" class="d-flex flex-wrap gap-2 align-items-center">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-primary">Generate Telegram Link</button>
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <button type="submit" formaction="{{ url_for('main.create_telegram_link_token') }}" formmethod="post" class="btn btn-sm btn-outline-primary">Generate Telegram Link</button>
                             {% if telegram_link_url %}
                                 <a href="{{ telegram_link_url }}" target="_blank" class="btn btn-sm btn-primary">Open Bot Link</a>
                             {% endif %}
-                        </form>
+                        </div>
+
+                        {% if telegram_link_url %}
+                            <label class="form-label small mb-1">Generated Bot Link</label>
+                            <input type="text" class="form-control form-control-sm mb-2" value="{{ telegram_link_url }}" readonly>
+                            <div class="mb-2">
+                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{ telegram_link_url|urlencode }}" alt="Telegram bot link QR code" class="border rounded">
+                            </div>
+                            <div class="small text-muted">Scan QR code or open the link, then press Start in Telegram.</div>
+                        {% elif telegram_link_token %}
+                            <div class="small text-warning mb-1">Bot username is not configured by admin yet, so a clickable t.me link is unavailable.</div>
+                            <label class="form-label small mb-1">Start Command</label>
+                            <input type="text" class="form-control form-control-sm mb-2" value="{{ telegram_start_command }}" readonly>
+                            <label class="form-label small mb-1">Token</label>
+                            <input type="text" class="form-control form-control-sm" value="{{ telegram_link_token }}" readonly>
+                        {% endif %}
                     </div>
 
                     <div class="mb-3 form-check">

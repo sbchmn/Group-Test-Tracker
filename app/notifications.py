@@ -328,6 +328,53 @@ def send_telegram_chat_message(chat_id, body, parse_mode=None):
     return _send_telegram_bot_message(chat_id, body, parse_mode=parse_mode)
 
 
+def _telegram_api_post(method_name, payload):
+    bot_token = str(_get_config("telegram_bot_token") or "").strip()
+    if not bot_token:
+        return False, {"description": "Telegram bot token is not configured."}
+
+    safe_token = quote(bot_token, safe="")
+    url = f"https://api.telegram.org/bot{safe_token}/{method_name}"
+    request_payload = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        url,
+        data=request_payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, context=None) as response:
+            response_body = response.read().decode("utf-8", errors="replace")
+        parsed_response = json.loads(response_body) if response_body else {}
+        ok = isinstance(parsed_response, dict) and parsed_response.get("ok") is True
+        return ok, parsed_response if isinstance(parsed_response, dict) else {"description": response_body}
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        detail = str(exc)
+        if isinstance(exc, HTTPError):
+            try:
+                detail = exc.read().decode("utf-8", errors="replace") or str(exc)
+            except Exception:
+                detail = str(exc)
+        return False, {"description": detail}
+
+
+def register_telegram_webhook(webhook_url, secret_token=None, drop_pending_updates=False):
+    payload = {
+        "url": str(webhook_url or "").strip(),
+        "drop_pending_updates": bool(drop_pending_updates),
+    }
+    secret_value = str(secret_token or "").strip()
+    if secret_value:
+        payload["secret_token"] = secret_value
+    return _telegram_api_post("setWebhook", payload)
+
+
+def unregister_telegram_webhook(drop_pending_updates=False):
+    payload = {"drop_pending_updates": bool(drop_pending_updates)}
+    return _telegram_api_post("deleteWebhook", payload)
+
+
 def send_password_reset(user, new_password):
     template = NotificationTemplate.query.filter_by(is_default_password_reset=True, is_active=True).first()
     if template is None:

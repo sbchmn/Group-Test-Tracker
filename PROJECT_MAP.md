@@ -343,3 +343,23 @@
 
 ### Validation Results
 - Focused PDF-support validation passed: `python -m unittest tests.test_storage tests.test_security tests.test_notifications tests.test_schema_migration` (42 tests, OK).
+
+## Notification Config Webhook Actions
+
+### Intended Behavior Changes
+- Provide admin buttons on Notification Configuration to register and unregister Telegram webhook directly from the app.
+- Add a script-style backend path that calls Telegram Bot API `setWebhook` and `deleteWebhook` with stored credentials.
+- Show effective webhook endpoint used by the app and a manual PowerShell fallback script.
+
+### Implemented Changes
+- Added Telegram webhook API helper functions in `app/notifications.py` for `setWebhook` and `deleteWebhook` requests.
+- Added Notification Config field `telegram_webhook_url` (optional override) with automatic fallback to `service_base_url` or current host + `/telegram/webhook`.
+- Added admin POST routes:
+	- `/admin/notification-config/telegram-webhook/register`
+	- `/admin/notification-config/telegram-webhook/unregister`
+- Added UI controls on Notification Configuration page with Register/Unregister buttons and a PowerShell manual script snippet.
+- Added guard rails and user feedback for missing bot token and non-HTTPS URL.
+- Added focused security tests for register success, missing-token failure, and unregister success.
+
+### Validation Results
+- Focused webhook-action route validation passed: `python -m unittest tests.test_security.SecurityTests.test_admin_can_register_telegram_webhook_from_config_page tests.test_security.SecurityTests.test_register_telegram_webhook_requires_bot_token tests.test_security.SecurityTests.test_admin_can_unregister_telegram_webhook_from_config_page` (3 tests, OK).

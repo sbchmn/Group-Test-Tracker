@@ -465,3 +465,94 @@ class SecurityTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("Preferred Payment Method", body)
         self.assertIn("Venmo Main", body)
+
+    def test_admin_can_register_telegram_webhook_from_config_page(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+                NotificationConfig(key="telegram_webhook_secret", value="secret123"),
+            ])
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        with patch("app.routes.register_telegram_webhook", return_value=(True, {"description": "Webhook was set"})) as mock_register:
+            response = self.client.post("/admin/notification-config/telegram-webhook/register", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Telegram webhook registered successfully.", body)
+        self.assertTrue(mock_register.called)
+        self.assertEqual(mock_register.call_args.args[0], "https://group-tests.example/telegram/webhook")
+
+    def test_register_telegram_webhook_requires_bot_token(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        response = self.client.post("/admin/notification-config/telegram-webhook/register", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Telegram bot token is required before webhook registration.", response.get_data(as_text=True))
+
+    def test_admin_can_unregister_telegram_webhook_from_config_page(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        with patch("app.routes.unregister_telegram_webhook", return_value=(True, {"description": "Webhook was deleted"})) as mock_unregister:
+            response = self.client.post("/admin/notification-config/telegram-webhook/unregister", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Telegram webhook unregistered successfully.", body)
+        self.assertTrue(mock_unregister.called)
+
+    def test_profile_shows_generated_telegram_link_and_qr_when_bot_username_configured(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="profiletg", email="profiletg@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(NotificationConfig(key="telegram_bot_username", value="group_test_tracker_bot"))
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "profiletg", "password": "secret"}, follow_redirects=True)
+        self.client.post("/profile/telegram-link-token", follow_redirects=True)
+        response = self.client.get("/profile")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Generated Bot Link", body)
+        self.assertIn("https://t.me/group_test_tracker_bot?start=", body)
+        self.assertIn("create-qr-code", body)
+
+    def test_profile_shows_start_command_when_bot_username_missing(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="profiletg2", email="profiletg2@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "profiletg2", "password": "secret"}, follow_redirects=True)
+        self.client.post("/profile/telegram-link-token", follow_redirects=True)
+        response = self.client.get("/profile")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Start Command", body)
+        self.assertIn("/start", body)

@@ -1384,16 +1384,37 @@ def _telegram_participation_state(participation):
     return 'Pending'
 
 
-def _telegram_format_test_list(tests, participations_by_test_id=None):
+def _telegram_participations_map(user, tests):
+    test_ids = [test.id for test in tests if test is not None and getattr(test, 'id', None) is not None]
+    if not user or not test_ids:
+        return {}
+    participations = (
+        Participation.query
+        .filter(
+            Participation.user_id == user.id,
+            Participation.group_test_id.in_(test_ids),
+        )
+        .all()
+    )
+    return {part.group_test_id: part for part in participations}
+
+
+def _telegram_format_test_list(tests, user=None, participations_by_test_id=None):
+    participation_map = participations_by_test_id or _telegram_participations_map(user, tests)
     lines = []
     for test in _telegram_sort_tests_by_id(tests):
         status_label = _format_status_label(test.status)
-        participation = (participations_by_test_id or {}).get(test.id)
+        participation = participation_map.get(test.id)
         if participation is not None:
             state_label = _telegram_participation_state(participation)
             lines.append(f"#{test.id} {test.title} [{status_label}] - {state_label}")
-            continue
-        lines.append(f"#{test.id} {test.title} [{status_label}]")
+        else:
+            lines.append(f"#{test.id} {test.title} [{status_label}]")
+
+        command_tokens = [f"/status {test.id}"]
+        if test.status == 'recruiting' and participation is None:
+            command_tokens.append(f"/join {test.id}")
+        lines.append('  ' + ' | '.join(command_tokens))
     return lines
 
 
@@ -1615,7 +1636,7 @@ def telegram_webhook():
         if not tests:
             send_telegram_chat_message(chat_id, 'No eligible tests found right now.')
             return jsonify({'ok': True})
-        lines = _telegram_format_test_list(tests)
+        lines = _telegram_format_test_list(tests, user=linked_user)
         send_telegram_chat_message(chat_id, 'Eligible tests:\n' + '\n'.join(lines))
         return jsonify({'ok': True})
 
@@ -1626,7 +1647,7 @@ def telegram_webhook():
             return jsonify({'ok': True})
         tests = [part.group_test for part in participations if part.group_test is not None]
         participations_by_test_id = {part.group_test_id: part for part in participations}
-        lines = _telegram_format_test_list(tests, participations_by_test_id=participations_by_test_id)
+        lines = _telegram_format_test_list(tests, user=linked_user, participations_by_test_id=participations_by_test_id)
         send_telegram_chat_message(chat_id, 'Your group tests:\n' + '\n'.join(lines))
         return jsonify({'ok': True})
 

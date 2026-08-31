@@ -565,6 +565,10 @@ class SecurityTests(unittest.TestCase):
         positions = [sent_body.find(line) for line in expected_lines]
         self.assertTrue(all(position >= 0 for position in positions))
         self.assertEqual(positions, sorted(positions))
+        self.assertIn(f"/status {test_one.id}", sent_body)
+        self.assertIn(f"/join {test_one.id}", sent_body)
+        self.assertIn(f"/status {test_two.id}", sent_body)
+        self.assertNotIn(f"/join {test_two.id}", sent_body)
 
     def test_telegram_mytests_command_lists_only_user_interactions_with_states(self):
         with self.app.app_context():
@@ -589,6 +593,9 @@ class SecurityTests(unittest.TestCase):
                 Participation(group_test_id=test_approved.id, user_id=user.id, approved=True, denied=False, name="Member"),
             ])
             db.session.commit()
+            pending_id = test_pending.id
+            denied_id = test_denied.id
+            approved_id = test_approved.id
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:
             response = self.client.post(
@@ -605,10 +612,14 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         sent_body = mock_send.call_args.args[1]
         self.assertIn("Your group tests:\n", sent_body)
-        self.assertIn("#1 Pending Test [Recruiting] - Pending", sent_body)
-        self.assertIn("#2 Denied Test [Testing] - Denied", sent_body)
-        self.assertIn("#3 Approved Test [Closed] - Approved", sent_body)
+        self.assertIn(f"#{pending_id} Pending Test [Recruiting] - Pending", sent_body)
+        self.assertIn(f"#{denied_id} Denied Test [Testing] - Denied", sent_body)
+        self.assertIn(f"#{approved_id} Approved Test [Closed] - Approved", sent_body)
         self.assertNotIn("Unrelated Test", sent_body)
+        self.assertIn(f"/status {pending_id}", sent_body)
+        self.assertIn(f"/status {denied_id}", sent_body)
+        self.assertIn(f"/status {approved_id}", sent_body)
+        self.assertNotIn(f"/join {pending_id}", sent_body)
 
     def test_telegram_status_command_allows_user_participation_even_if_test_not_visible(self):
         with self.app.app_context():

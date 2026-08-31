@@ -673,7 +673,7 @@ def _send_status_update_to_telegram(test, previous_status):
     pending_test_ids = sorted({item.test_id for item in pending_events if item.test_id})
     if pending_test_ids:
         mention_rows = (
-            db.session.query(User.tg_username, User.telegram_user_id)
+            db.session.query(User.username, User.tg_username, User.telegram_user_id)
             .join(Participation, Participation.user_id == User.id)
             .filter(
                 Participation.group_test_id.in_(pending_test_ids),
@@ -682,19 +682,23 @@ def _send_status_update_to_telegram(test, previous_status):
             )
             .all()
         )
-        for tg_username, telegram_user_id in mention_rows:
+        for app_username, tg_username, telegram_user_id in mention_rows:
             if tg_username:
                 username = str(tg_username).strip().lstrip('@')
                 if username:
                     mentioned_usernames.add(username)
+                    continue
             if telegram_user_id:
                 user_id = str(telegram_user_id).strip()
                 if user_id:
-                    mentioned_user_ids.add(user_id)
+                    readable_name = str(app_username or '').strip() or f'user-{user_id[-4:]}'
+                    mentioned_user_ids.add((user_id, readable_name))
 
     mention_tokens = []
-    for user_id in sorted(mentioned_user_ids):
-        mention_tokens.append(f'<a href="tg://user?id={html.escape(user_id)}">user-{html.escape(user_id)}</a>')
+    for user_id, readable_name in sorted(mentioned_user_ids, key=lambda item: item[0]):
+        mention_tokens.append(
+            f'<a href="tg://user?id={html.escape(user_id)}">{html.escape(readable_name)}</a>'
+        )
     for username in sorted(mentioned_usernames):
         mention_tokens.append(f"@{username}")
 

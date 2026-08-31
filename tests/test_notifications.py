@@ -564,6 +564,47 @@ class NotificationTests(unittest.TestCase):
             self.assertNotIn("@denyme", sent_body)
             self.assertNotIn("tg://user?id=987654", sent_body)
 
+    def test_status_digest_prefers_username_without_duplicate_id_mention(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-mention-pref", email="admin-mention-pref@example.com", is_admin=True)
+            admin.set_password("secret")
+            member = User(
+                username="member-human-name",
+                email="member-human-name@example.com",
+                tg_username="singlemention",
+                telegram_user_id="12345678",
+            )
+            member.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.flush()
+
+            test = GroupTest(title="No Duplicate Mention Test", status="ready_for_payment", created_by=admin.id)
+            db.session.add(test)
+            db.session.flush()
+
+            db.session.add(Participation(
+                group_test_id=test.id,
+                user_id=member.id,
+                approved=True,
+                denied=False,
+                name="Member",
+            ))
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="false"))
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "testing")
+
+            self.assertTrue(mock_sender.called)
+            sent_body = mock_sender.call_args.args[0]
+            self.assertIn("@singlemention", sent_body)
+            self.assertEqual(sent_body.count("@singlemention"), 1)
+            self.assertNotIn("tg://user?id=12345678", sent_body)
+
     def test_telegram_status_summary_uses_custom_approved_template(self):
         with self.app.app_context():
             from app.routes import _telegram_status_summary_for_user

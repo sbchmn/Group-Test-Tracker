@@ -25,6 +25,13 @@ public_result_tags = db.Table(
     db.Column('tag_id', db.Integer, db.ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True),
 )
 
+
+group_test_payment_options = db.Table(
+    'group_test_payment_options',
+    db.Column('group_test_id', db.Integer, db.ForeignKey('group_tests.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('payment_option_id', db.Integer, db.ForeignKey('payment_options.id', ondelete='CASCADE'), primary_key=True),
+)
+
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
     
@@ -33,10 +40,16 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(256), nullable=False)
     tg_username = db.Column(db.String(80), nullable=True, index=True)
+    telegram_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
+    telegram_chat_id = db.Column(db.String(80), nullable=True, index=True)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     receive_group_test_notifications = db.Column(db.Boolean, default=True, nullable=False)
     notification_channel = db.Column(db.String(20), default='email', nullable=False)
+    digest_frequency = db.Column(db.String(20), default='off', nullable=False)
+    digest_hourly_minute_utc = db.Column(db.Integer, default=0, nullable=False)
+    digest_daily_hour_utc = db.Column(db.Integer, default=9, nullable=False)
+    digest_last_sent_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
@@ -48,6 +61,18 @@ class User(UserMixin, db.Model):
     )
     hidden_dashboard_tests = db.relationship(
         'DashboardHiddenGroupTest',
+        backref='user',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
+    telegram_link_tokens = db.relationship(
+        'TelegramLinkToken',
+        backref='user',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
+    digest_events = db.relationship(
+        'UserDigestEvent',
         backref='user',
         lazy='dynamic',
         cascade='all, delete-orphan'
@@ -147,6 +172,110 @@ class NotificationConfig(db.Model):
     value = db.Column(db.Text, nullable=True)
 
 
+class TelegramLinkToken(db.Model):
+    __tablename__ = 'telegram_link_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    token = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def is_active(self):
+        return self.used_at is None and self.expires_at >= datetime.utcnow()
+
+
+class TelegramWebhookUpdate(db.Model):
+    __tablename__ = 'telegram_webhook_updates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    update_id = db.Column(db.BigInteger, nullable=False, unique=True, index=True)
+    source_ip = db.Column(db.String(45), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class TelegramStatusDigestEvent(db.Model):
+    __tablename__ = 'telegram_status_digest_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    chat_id = db.Column(db.String(120), nullable=False, index=True)
+    window_bucket = db.Column(db.String(32), nullable=False, index=True)
+    event_key = db.Column(db.String(120), nullable=False, index=True)
+    test_id = db.Column(db.Integer, nullable=False, index=True)
+    test_title = db.Column(db.String(200), nullable=False)
+    old_status = db.Column(db.String(20), nullable=False)
+    new_status = db.Column(db.String(20), nullable=False)
+    mention_usernames = db.Column(db.Text, nullable=True)
+    mention_user_ids = db.Column(db.Text, nullable=True)
+    sent_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('chat_id', 'window_bucket', 'event_key', name='_tg_digest_chat_window_event_uc'),
+    )
+
+
+class UserDigestEvent(db.Model):
+    __tablename__ = 'user_digest_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    test_id = db.Column(db.Integer, nullable=False, index=True)
+    test_title = db.Column(db.String(200), nullable=False)
+    old_status = db.Column(db.String(20), nullable=False)
+    new_status = db.Column(db.String(20), nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class PaymentOption(db.Model):
+    __tablename__ = 'payment_options'
+
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(120), nullable=False)
+    method_type = db.Column(db.String(40), nullable=False, index=True)
+    recipient_name = db.Column(db.String(120), nullable=True)
+    account_handle = db.Column(db.String(200), nullable=True)
+    wallet_address = db.Column(db.String(255), nullable=True)
+    network = db.Column(db.String(120), nullable=True)
+    details = db.Column(db.Text, nullable=True)
+    qr_payload_override = db.Column(db.String(500), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def display_title(self):
+        if self.recipient_name:
+            return f"{self.label} ({self.recipient_name})"
+        return self.label
+
+    def to_qr_payload(self):
+        if self.qr_payload_override:
+            return self.qr_payload_override.strip()
+
+        method = (self.method_type or '').strip().lower()
+        handle = (self.account_handle or '').strip()
+        wallet = (self.wallet_address or '').strip()
+        network = (self.network or '').strip()
+
+        if method == 'venmo' and handle:
+            return f"https://venmo.com/{handle.lstrip('@')}"
+        if method == 'cashapp' and handle:
+            return f"https://cash.app/${handle.lstrip('$')}"
+        if method == 'paypal' and handle:
+            return f"https://paypal.me/{handle}"
+        if method == 'crypto' and wallet:
+            return f"{wallet}|{network}" if network else wallet
+        if handle:
+            return handle
+        return wallet
+
+    def __repr__(self):
+        return f'<PaymentOption {self.id} {self.label}>'
+
+
 class GroupTest(db.Model):
     __tablename__ = 'group_tests'
     
@@ -203,6 +332,12 @@ class GroupTest(db.Model):
         secondary=group_test_tags,
         lazy='select',
         order_by='Tag.name',
+    )
+    payment_options = db.relationship(
+        'PaymentOption',
+        secondary=group_test_payment_options,
+        lazy='select',
+        order_by='PaymentOption.label',
     )
 
     def set_tags(self, tags):
@@ -347,6 +482,8 @@ class Participation(db.Model):
     # Financial tracking (admin or future auto)
     amount_owed = db.Column(db.Float, default=0.0)
     amount_paid = db.Column(db.Float, default=0.0)           # Self-reported by participant
+    preferred_payment_option_id = db.Column(db.Integer, db.ForeignKey('payment_options.id'), nullable=True)
+    preferred_payment_snapshot = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     
     requested_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -355,6 +492,8 @@ class Participation(db.Model):
     denied = db.Column(db.Boolean, default=False, nullable=False, index=True)
     denied_at = db.Column(db.DateTime, nullable=True)
     denied_reason = db.Column(db.Text, nullable=True)
+
+    preferred_payment_option = db.relationship('PaymentOption', lazy='joined')
     
     def update_amount_owed(self, costs_dict):
         """Helper to sync individual owed based on role (donor vs non). Call after approve or recalc."""

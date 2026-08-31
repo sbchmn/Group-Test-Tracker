@@ -26,6 +26,24 @@
                     <div class="mb-3">
                         {{ form.tg_username.label(class="form-label") }}
                         {{ form.tg_username(class="form-control") }}
+                        <div class="form-text">Optional display username. Delivery uses linked Telegram chat, not username alone.</div>
+                    </div>
+
+                    <div class="alert alert-light border">
+                        <div class="fw-semibold mb-1">Telegram Link Status</div>
+                        {% if telegram_chat_id %}
+                            <div class="small text-success mb-2">Linked chat ID: {{ telegram_chat_id }}</div>
+                        {% else %}
+                            <div class="small text-warning mb-2">Not linked yet. Generate a link, open the bot, then press Start.</div>
+                        {% endif %}
+
+                        <form method="POST" action="{{ url_for('main.create_telegram_link_token') }}" class="d-flex flex-wrap gap-2 align-items-center">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Generate Telegram Link</button>
+                            {% if telegram_link_url %}
+                                <a href="{{ telegram_link_url }}" target="_blank" class="btn btn-sm btn-primary">Open Bot Link</a>
+                            {% endif %}
+                        </form>
                     </div>
 
                     <div class="mb-3 form-check">
@@ -36,6 +54,25 @@
                     <div class="mb-3">
                         {{ form.notification_channel.label(class="form-label") }}
                         {{ form.notification_channel(class="form-select") }}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.digest_frequency.label(class="form-label") }}
+                        {{ form.digest_frequency(class="form-select") }}
+                        <div class="form-text">If enabled, digest emails are sent in UTC based on the schedule below.</div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.digest_hourly_minute_utc.label(class="form-label") }}
+                            {{ form.digest_hourly_minute_utc(class="form-control", step="1") }}
+                            <div class="form-text">Used when frequency is Hourly (0-59).</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.digest_daily_hour_utc.label(class="form-label") }}
+                            {{ form.digest_daily_hour_utc(class="form-control", step="1") }}
+                            <div class="form-text">Used when frequency is Daily (0-23, UTC).</div>
+                        </div>
                     </div>
 
                     <div class="mb-3">

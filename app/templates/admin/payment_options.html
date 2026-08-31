@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Options{% endblock %}
+
+{% block content %}
+<h3>Payment Options</h3>
+<p class="text-muted">Create reusable payment methods and recipients for assignment to group tests.</p>
+
+<div class="row">
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-header">Add Payment Option</div>
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">{{ form.label.label(class="form-label") }}{{ form.label(class="form-control") }}</div>
+                    <div class="mb-3">{{ form.method_type.label(class="form-label") }}{{ form.method_type(class="form-select") }}</div>
+                    <div class="mb-3">{{ form.recipient_name.label(class="form-label") }}{{ form.recipient_name(class="form-control") }}</div>
+                    <div class="mb-3">{{ form.account_handle.label(class="form-label") }}{{ form.account_handle(class="form-control") }}</div>
+                    <div class="mb-3">{{ form.wallet_address.label(class="form-label") }}{{ form.wallet_address(class="form-control") }}</div>
+                    <div class="mb-3">{{ form.network.label(class="form-label") }}{{ form.network(class="form-control") }}</div>
+                    <div class="mb-3">{{ form.details.label(class="form-label") }}{{ form.details(class="form-control", rows=2) }}</div>
+                    <div class="mb-3">{{ form.qr_payload_override.label(class="form-label") }}{{ form.qr_payload_override(class="form-control") }}</div>
+                    <div class="mb-3 form-check">{{ form.is_active(class="form-check-input") }} {{ form.is_active.label(class="form-check-label") }}</div>
+                    <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">Configured Options</div>
+            <div class="card-body p-0">
+                {% if options %}
+                    <table class="table table-sm mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Method</th>
+                                <th>Recipient</th>
+                                <th>Details</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for option in options %}
+                                <tr>
+                                    <td><strong>{{ option.label }}</strong><br><small class="text-muted">{{ option.method_type }}</small></td>
+                                    <td>{{ option.recipient_name or '—' }}</td>
+                                    <td class="small">
+                                        {% if option.account_handle %}<div>Handle: {{ option.account_handle }}</div>{% endif %}
+                                        {% if option.wallet_address %}<div>Wallet: {{ option.wallet_address }}</div>{% endif %}
+                                        {% if option.network %}<div>Network: {{ option.network }}</div>{% endif %}
+                                    </td>
+                                    <td>
+                                        {% if option.is_active %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="d-flex gap-1">
+                                            <a href="{{ url_for('main.edit_payment_option', option_id=option.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                                            <form method="POST" action="{{ url_for('main.toggle_payment_option', option_id=option.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-primary">Toggle</button>
+                                            </form>
+                                            <form method="POST" action="{{ url_for('main.delete_payment_option', option_id=option.id) }}" onsubmit="return confirm('Delete this payment option? If in use, it will be set inactive instead.');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="p-3 text-muted">No payment options configured yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

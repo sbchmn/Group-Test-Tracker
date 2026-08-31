@@ -14,20 +14,49 @@ from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
 from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
-    FloatField, DateField, SelectField, SubmitField, FieldList, FormField
+    FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField
 )
 from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
+from datetime import timedelta
 from functools import wraps
 from itertools import zip_longest
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
+import secrets
+import ipaddress
+import html
 
-from . import db
+from . import db, csrf
 import os
+import json
 
-from .models import User, GroupTest, Participation, NotificationTemplate, NotificationConfig, Tag, PublicResult, DashboardHiddenGroupTest
+from .models import (
+    User,
+    GroupTest,
+    Participation,
+    NotificationTemplate,
+    NotificationConfig,
+    Tag,
+    PublicResult,
+    DashboardHiddenGroupTest,
+    TelegramLinkToken,
+    TelegramWebhookUpdate,
+    TelegramStatusDigestEvent,
+    UserDigestEvent,
+    PaymentOption,
+)
 from .export import generate_test_export
-from .notifications import append_notification_log, read_notification_log, send_password_reset, send_group_test_notification, render_notification_template, send_notification_message
+from .notifications import (
+    append_notification_log,
+    read_notification_log,
+    send_password_reset,
+    send_group_test_notification,
+    render_notification_template,
+    send_notification_message,
+    send_telegram_status_channel_message,
+    send_telegram_chat_message,
+)
 from .storage import (
     StorageConfigurationError,
     StorageUploadError,
@@ -93,6 +122,7 @@ class GroupTestForm(FlaskForm):
     results_link = StringField('Results Link (URL - shown only to approved members when Closed)', 
                                validators=[Optional(), Length(max=500)])
     tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    payment_option_ids = SelectMultipleField('Available Payment Options', coerce=int, choices=[], validators=[Optional()])
     
     submit = SubmitField('Save Group Test')
 
@@ -153,6 +183,7 @@ class ParticipantStatusForm(FlaskForm):
     ])
     paid_lab = BooleanField('I have paid my lab fees')
     amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
+    preferred_payment_option_id = SelectField('Preferred Payment Method', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes / Comments', validators=[Optional()])
     submit = SubmitField('Update My Status')
 
@@ -166,6 +197,9 @@ class UserForm(FlaskForm):
     is_active = BooleanField('Active', default=True)
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
     notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
+    digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
+    digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
     password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
     submit = SubmitField('Save User')
 
@@ -177,6 +211,9 @@ class ProfileForm(FlaskForm):
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
     notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
+    digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
+    digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
     password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
     submit = SubmitField('Save Profile')
 
@@ -199,13 +236,19 @@ class NotificationConfigForm(FlaskForm):
     mailjet_secret_key = StringField('Mailjet Secret Key', validators=[Optional()])
     mailjet_sender_email = StringField('Mailjet Sender Email', validators=[Optional(), Email()])
     telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
+    telegram_bot_username = StringField('Telegram Bot Username', validators=[Optional(), Length(max=80)])
+    telegram_webhook_secret = PasswordField('Telegram Webhook Secret', validators=[Optional(), Length(max=200)])
+    telegram_webhook_allowed_ips = StringField('Telegram Webhook Allowed IPs (comma-separated CIDRs)', validators=[Optional(), Length(max=500)])
+    telegram_status_chat_id = StringField('Telegram Status Chat / Channel ID', validators=[Optional(), Length(max=120)])
+    telegram_digest_enabled = BooleanField('Enable Telegram Digest Mode')
+    telegram_digest_window_minutes = FloatField('Telegram Digest Window (minutes)', validators=[Optional(), NumberRange(min=1, max=120)], default=10)
     service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
     notification_debug_enabled = BooleanField('Enable debug-level notification logs')
     submit = SubmitField('Save Configuration')
 
 
 class StorageConfigForm(FlaskForm):
-    storage_enabled = BooleanField('Enable object storage image uploads')
+    storage_enabled = BooleanField('Enable object storage result file uploads')
     storage_provider = SelectField('Provider', choices=[('aws', 'AWS S3'), ('do', 'DigitalOcean Spaces')], validators=[DataRequired()])
     storage_bucket = StringField('Bucket / Space Name', validators=[Optional(), Length(max=120)])
     storage_region = StringField('Region', validators=[Optional(), Length(max=80)])
@@ -220,6 +263,29 @@ class StorageConfigForm(FlaskForm):
     storage_max_upload_size_mb = FloatField('Max Upload Size (MB)', validators=[Optional(), NumberRange(min=1, max=50)])
     storage_allowed_formats = StringField('Allowed Formats (comma-separated)', validators=[Optional(), Length(max=200)])
     submit = SubmitField('Save Storage Configuration')
+
+
+class PaymentOptionForm(FlaskForm):
+    label = StringField('Display Label', validators=[DataRequired(), Length(max=120)])
+    method_type = SelectField(
+        'Method Type',
+        choices=[
+            ('venmo', 'Venmo'),
+            ('cashapp', 'Cash App'),
+            ('paypal', 'PayPal'),
+            ('crypto', 'Crypto Wallet'),
+            ('other', 'Other'),
+        ],
+        validators=[DataRequired()],
+    )
+    recipient_name = StringField('Recipient Name', validators=[Optional(), Length(max=120)])
+    account_handle = StringField('App Handle / Username', validators=[Optional(), Length(max=200)])
+    wallet_address = StringField('Wallet Address', validators=[Optional(), Length(max=255)])
+    network = StringField('Network / Chain', validators=[Optional(), Length(max=120)])
+    details = TextAreaField('Details / Notes', validators=[Optional()])
+    qr_payload_override = StringField('QR Payload Override', validators=[Optional(), Length(max=500)])
+    is_active = BooleanField('Active', default=True)
+    submit = SubmitField('Save Payment Option')
 
 
 class PasswordResetForm(FlaskForm):
@@ -255,6 +321,250 @@ def populate_donor_shipping_choices(form):
     form.donor_shipping_reimbursed_by_id.choices = choices
 
 
+def populate_payment_option_choices(form, include_ids=None):
+    include_ids = include_ids or []
+    active_options = PaymentOption.query.filter_by(is_active=True).order_by(PaymentOption.label, PaymentOption.recipient_name).all()
+    options = list(active_options)
+    if include_ids:
+        existing = {option.id for option in active_options}
+        extra_options = PaymentOption.query.filter(PaymentOption.id.in_(include_ids)).all()
+        for option in extra_options:
+            if option.id not in existing:
+                options.append(option)
+    options.sort(key=lambda option: ((option.label or '').lower(), (option.recipient_name or '').lower()))
+    form.payment_option_ids.choices = [
+        (option.id, option.display_title() + ('' if option.is_active else ' [inactive]'))
+        for option in options
+    ]
+
+
+def _serialize_payment_option_snapshot(option):
+    if option is None:
+        return ''
+
+    parts = [option.display_title()]
+    if option.account_handle:
+        parts.append(f"Handle: {option.account_handle}")
+    if option.wallet_address:
+        parts.append(f"Wallet: {option.wallet_address}")
+    if option.network:
+        parts.append(f"Network: {option.network}")
+    return ' | '.join(parts)
+
+
+def _result_file_kind(result_key):
+    value = (result_key or '').strip().lower()
+    if value.endswith('.pdf'):
+        return 'pdf'
+    return 'image'
+
+
+def _build_payment_option_context(option):
+    if option is None:
+        return None
+
+    qr_payload = option.to_qr_payload()
+    return {
+        'id': option.id,
+        'label': option.label,
+        'title': option.display_title(),
+        'method_type': option.method_type,
+        'recipient_name': option.recipient_name,
+        'account_handle': option.account_handle,
+        'wallet_address': option.wallet_address,
+        'network': option.network,
+        'details': option.details,
+        'qr_payload': qr_payload,
+    }
+
+
+def _build_telegram_deep_link(token_value):
+    bot_username = str(_config_values_map().get('telegram_bot_username') or '').strip().lstrip('@')
+    if not bot_username or not token_value:
+        return None
+    return f"https://t.me/{bot_username}?start={token_value}"
+
+
+def _issue_telegram_link_token(user):
+    if user is None:
+        return None
+
+    token_value = secrets.token_urlsafe(24)
+    token = TelegramLinkToken(
+        user_id=user.id,
+        token=token_value,
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
+    db.session.add(token)
+    return token
+
+
+def _is_telegram_webhook_ip_allowed(source_ip, config_map):
+    allowed = str(config_map.get('telegram_webhook_allowed_ips') or '').strip()
+    if not allowed:
+        return True
+
+    if not source_ip:
+        return False
+
+    try:
+        candidate_ip = ipaddress.ip_address(source_ip)
+    except ValueError:
+        return False
+
+    for raw_entry in allowed.split(','):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            continue
+        if candidate_ip in network:
+            return True
+    return False
+
+
+def _reserve_telegram_update(update_id, source_ip):
+    if update_id is None:
+        return True
+    try:
+        update_id = int(update_id)
+    except (TypeError, ValueError):
+        return False
+
+    exists = TelegramWebhookUpdate.query.filter_by(update_id=update_id).first()
+    if exists is not None:
+        return False
+
+    db.session.add(TelegramWebhookUpdate(update_id=update_id, source_ip=source_ip or None))
+    try:
+        db.session.flush()
+    except IntegrityError:
+        return False
+    return True
+
+
+def _send_status_update_to_telegram(test, previous_status):
+    participants = test.participations.filter_by(approved=True, denied=False).all()
+    for participant in participants:
+        user = participant.user
+        if user is None:
+            continue
+        if not user.receive_group_test_notifications:
+            continue
+        if (user.digest_frequency or 'off') not in {'hourly', 'daily'}:
+            continue
+        db.session.add(UserDigestEvent(
+            user_id=user.id,
+            test_id=test.id,
+            test_title=test.title,
+            old_status=previous_status,
+            new_status=test.status,
+        ))
+
+    config_map = _config_values_map()
+    target_chat = str(config_map.get('telegram_status_chat_id') or '').strip()
+    if not target_chat:
+        return
+
+    mention_usernames = []
+    mention_user_ids = []
+    for participant in participants:
+        if participant.user and participant.user.tg_username:
+            username = participant.user.tg_username.strip().lstrip('@')
+            if username:
+                mention_usernames.append(username)
+        if participant.user and participant.user.telegram_user_id:
+            user_id = str(participant.user.telegram_user_id).strip()
+            if user_id:
+                mention_user_ids.append(user_id)
+
+    digest_enabled = str(config_map.get('telegram_digest_enabled', 'false')).lower() == 'true'
+    try:
+        window_minutes = int(float(config_map.get('telegram_digest_window_minutes') or 10))
+    except (TypeError, ValueError):
+        window_minutes = 10
+    window_minutes = max(1, min(window_minutes, 120))
+
+    now = datetime.utcnow()
+    bucket_seconds = window_minutes * 60
+    bucket_index = int(now.timestamp() // bucket_seconds)
+    window_bucket = f"{window_minutes}:{bucket_index}"
+    event_key = f"{test.id}:{previous_status}:{test.status}"
+
+    existing_event = TelegramStatusDigestEvent.query.filter_by(
+        chat_id=target_chat,
+        window_bucket=window_bucket,
+        event_key=event_key,
+    ).first()
+    if existing_event is not None:
+        append_notification_log(f"telegram: digest suppressed duplicate status update for test {test.id}")
+        return
+
+    event = TelegramStatusDigestEvent(
+        chat_id=target_chat,
+        window_bucket=window_bucket,
+        event_key=event_key,
+        test_id=test.id,
+        test_title=test.title,
+        old_status=previous_status,
+        new_status=test.status,
+        mention_usernames=','.join(sorted(set(mention_usernames))),
+        mention_user_ids=','.join(sorted(set(mention_user_ids))),
+    )
+    db.session.add(event)
+    db.session.flush()
+
+    pending_events = (
+        TelegramStatusDigestEvent.query
+        .filter_by(chat_id=target_chat, window_bucket=window_bucket, sent_at=None)
+        .order_by(TelegramStatusDigestEvent.created_at.asc(), TelegramStatusDigestEvent.id.asc())
+        .all()
+    )
+    if not pending_events:
+        return
+
+    if digest_enabled:
+        should_send_digest = len(pending_events) > 1 or str(test.status or '').lower() == 'closed'
+        if not should_send_digest:
+            append_notification_log(f"telegram: digest queued event for test {test.id}", debug=True)
+            return
+    else:
+        pending_events = [event]
+
+    lines = ["Group test status digest", ""]
+    mentioned_usernames = set()
+    mentioned_user_ids = set()
+    for item in pending_events:
+        lines.append(f"- #{item.test_id} {item.test_title}: {item.old_status.title()} -> {item.new_status.title()}")
+        for username in (item.mention_usernames or '').split(','):
+            username = username.strip().lstrip('@')
+            if username:
+                mentioned_usernames.add(username)
+        for user_id in (item.mention_user_ids or '').split(','):
+            user_id = user_id.strip()
+            if user_id:
+                mentioned_user_ids.add(user_id)
+
+    mention_tokens = []
+    for user_id in sorted(mentioned_user_ids):
+        mention_tokens.append(f'<a href="tg://user?id={html.escape(user_id)}">user-{html.escape(user_id)}</a>')
+    for username in sorted(mentioned_usernames):
+        mention_tokens.append(f"@{username}")
+
+    if mention_tokens:
+        lines.extend(["", "Participants: " + ' '.join(mention_tokens)])
+
+    digest_text = "\n".join(lines)
+    sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML')
+    if sent:
+        sent_at = datetime.utcnow()
+        for item in pending_events:
+            item.sent_at = sent_at
+        db.session.add_all(pending_events)
+
+
 def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
     if not value:
         return ''
@@ -262,6 +572,14 @@ def mask_secret(value, reveal_prefix=4, reveal_suffix=6):
     if len(value) <= reveal_prefix + reveal_suffix:
         return value
     return f"{value[:reveal_prefix]}{'*' * (len(value) - reveal_prefix - reveal_suffix)}{value[-reveal_suffix:]}"
+
+
+def _clamp_int(value, default, low, high):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    return max(low, min(high, parsed))
 
 
 _STORAGE_CONFIG_KEYS = {
@@ -450,12 +768,21 @@ def password_reset():
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
         if user:
+            selected_channel = form.notification_channel.data or user.notification_channel or 'email'
+            if selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip():
+                flash('To use Telegram reset, open the bot and press Start first, then try again.', 'warning')
+                return render_template('password_reset.html', form=form)
+
             new_password = os.urandom(6).hex()
             user.set_password(new_password)
-            user.notification_channel = form.notification_channel.data or user.notification_channel or 'email'
-            db.session.commit()
-            send_password_reset(user, new_password)
-            flash('A password reset message has been sent.', 'success')
+            user.notification_channel = selected_channel
+            sent = send_password_reset(user, new_password)
+            if sent:
+                db.session.commit()
+                flash('A password reset message has been sent.', 'success')
+            else:
+                db.session.rollback()
+                flash('Reset message could not be delivered. Please try email or contact an admin.', 'danger')
         else:
             flash('No account matched that username.', 'warning')
         return redirect(url_for('main.login'))
@@ -469,9 +796,13 @@ def send_password_reset_admin(user_id):
     user = User.query.get_or_404(user_id)
     new_password = os.urandom(6).hex()
     user.set_password(new_password)
-    db.session.commit()
-    send_password_reset(user, new_password)
-    flash(f'A password reset message was sent to {user.username}.', 'success')
+    sent = send_password_reset(user, new_password)
+    if sent:
+        db.session.commit()
+        flash(f'A password reset message was sent to {user.username}.', 'success')
+    else:
+        db.session.rollback()
+        flash(f'Could not deliver password reset message to {user.username}.', 'danger')
     return redirect(url_for('main.manage_users'))
 
 
@@ -496,6 +827,9 @@ def profile():
         current_user.tg_username = form.tg_username.data or None
         current_user.receive_group_test_notifications = form.receive_group_test_notifications.data
         current_user.notification_channel = form.notification_channel.data or 'email'
+        current_user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
+        current_user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
+        current_user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
 
         if form.password.data:
             current_user.set_password(form.password.data)
@@ -505,7 +839,35 @@ def profile():
         flash('Profile updated.', 'success')
         return redirect(url_for('main.profile'))
 
-    return render_template('profile.html', form=form)
+    active_token = (
+        current_user.telegram_link_tokens
+        .filter(TelegramLinkToken.used_at.is_(None), TelegramLinkToken.expires_at >= datetime.utcnow())
+        .order_by(TelegramLinkToken.created_at.desc())
+        .first()
+    )
+    telegram_link_url = _build_telegram_deep_link(active_token.token) if active_token else None
+
+    return render_template(
+        'profile.html',
+        form=form,
+        telegram_link_url=telegram_link_url,
+        telegram_chat_id=current_user.telegram_chat_id,
+    )
+
+
+@main_bp.route('/profile/telegram-link-token', methods=['POST'])
+@login_required
+def create_telegram_link_token():
+    token = _issue_telegram_link_token(current_user)
+    db.session.commit()
+
+    deep_link = _build_telegram_deep_link(token.token)
+    if deep_link:
+        flash('Telegram link created. Open the bot link and press Start to complete setup.', 'success')
+    else:
+        flash('Token created, but Telegram bot username is not configured by admin yet.', 'warning')
+
+    return redirect(url_for('main.profile'))
 
 
 @main_bp.route('/dashboard')
@@ -740,6 +1102,230 @@ def _can_user_view_group_test_results(test, user):
     return _can_user_view_group_test_result_image(test, user)
 
 
+def _telegram_help_message():
+    return (
+        "Group Test Manager bot commands:\n"
+        "/tests - list tests you can see\n"
+        "/status <test_id> - view your request/approval status\n"
+        "/join <test_id> - submit a join request for recruiting tests\n"
+        "/help - show this help message"
+    )
+
+
+def _telegram_user_visible_tests(user):
+    if user.is_admin:
+        return GroupTest.query.order_by(GroupTest.updated_at.desc()).limit(20).all()
+
+    recruiting = GroupTest.query.filter_by(status='recruiting').all()
+    member_tests = (
+        GroupTest.query
+        .join(Participation)
+        .filter(
+            Participation.user_id == user.id,
+            Participation.approved == True,
+            Participation.denied == False,
+            GroupTest.status.in_(['testing', 'closed'])
+        )
+        .all()
+    )
+    seen = set()
+    tests = []
+    for test in recruiting + member_tests:
+        if test.id in seen:
+            continue
+        seen.add(test.id)
+        tests.append(test)
+    return tests[:20]
+
+
+def _telegram_status_summary_for_user(user, test):
+    part = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
+    if part is None:
+        return f"You have no request for #{test.id} {test.title}."
+    if part.denied:
+        reason = f" Reason: {part.denied_reason}" if part.denied_reason else ""
+        return f"#{test.id} {test.title}: Denied.{reason}"
+    if part.approved:
+        return (
+            f"#{test.id} {test.title}: Approved. "
+            f"Order status: {part.order_status or 'pending'}. "
+            f"Amount owed: ${part.amount_owed or 0:.2f}. "
+            f"Paid: ${part.amount_paid or 0:.2f}."
+        )
+    return f"#{test.id} {test.title}: Pending admin review."
+
+
+def _telegram_join_test_for_user(user, test):
+    if test.status != 'recruiting':
+        return f"#{test.id} {test.title} is not accepting new requests right now."
+
+    existing = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
+    if existing:
+        if existing.denied:
+            reason_suffix = f" Reason: {existing.denied_reason}" if existing.denied_reason else ""
+            return f"Your request for #{test.id} was denied.{reason_suffix}"
+        if existing.approved:
+            return f"You are already approved for #{test.id} {test.title}."
+        return f"You already have a pending request for #{test.id} {test.title}."
+
+    part = Participation(
+        group_test_id=test.id,
+        user_id=user.id,
+        name=user.username,
+        tg_username=user.tg_username,
+        us_based=True,
+        vial_donor=False,
+        notes='Requested from Telegram bot',
+        denied=False,
+        approved=False,
+    )
+    db.session.add(part)
+    db.session.commit()
+    return f"Request submitted for #{test.id} {test.title}. An admin will review shortly."
+
+
+@main_bp.route('/telegram/webhook', methods=['POST'])
+@csrf.exempt
+def telegram_webhook():
+    config_map = _config_values_map()
+    source_ip = (request.remote_addr or '').strip()
+    if not _is_telegram_webhook_ip_allowed(source_ip, config_map):
+        return jsonify({'ok': False}), 403
+
+    secret = str(config_map.get('telegram_webhook_secret') or '').strip()
+    provided_secret = str(request.headers.get('X-Telegram-Bot-Api-Secret-Token') or '').strip()
+    if secret and not (provided_secret and secrets.compare_digest(secret, provided_secret)):
+        return jsonify({'ok': False}), 403
+
+    if not request.is_json:
+        return jsonify({'ok': False}), 415
+
+    payload = request.get_json(silent=True) or {}
+    update_id = payload.get('update_id')
+    if update_id is not None:
+        try:
+            update_id = int(update_id)
+        except (TypeError, ValueError):
+            return jsonify({'ok': False}), 400
+
+        if not _reserve_telegram_update(update_id, source_ip):
+            append_notification_log(f"telegram: duplicate webhook update ignored ({update_id})", debug=True)
+            db.session.rollback()
+            return jsonify({'ok': True})
+
+    message = payload.get('message') or payload.get('edited_message') or {}
+    if not isinstance(message, dict):
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    chat = message.get('chat') or {}
+    from_user = message.get('from') or {}
+    chat_id_raw = chat.get('id')
+    telegram_user_id_raw = from_user.get('id')
+    incoming_username = str(from_user.get('username') or '').strip().lstrip('@')
+    chat_id = str(chat_id_raw).strip() if chat_id_raw is not None else ''
+    telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
+    text = (message.get('text') or '').strip()
+    if not chat_id or not text:
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    if text.lower().startswith('/start'):
+        token_value = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ''
+        if not token_value:
+            if incoming_username:
+                matched_users = User.query.filter(User.tg_username.ilike(incoming_username)).all()
+                if len(matched_users) == 1:
+                    send_telegram_chat_message(chat_id, 'We found a possible profile match by username. For security, generate a link token from your profile and use /start <token> to confirm.')
+                    db.session.commit()
+                    return jsonify({'ok': True})
+            send_telegram_chat_message(chat_id, 'Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.')
+            db.session.commit()
+            return jsonify({'ok': True})
+
+        token = TelegramLinkToken.query.filter_by(token=token_value).first()
+        if token is None or token.used_at is not None or token.expires_at < datetime.utcnow():
+            send_telegram_chat_message(chat_id, 'This link token is invalid or expired. Please generate a new link token from your profile.')
+            db.session.commit()
+            return jsonify({'ok': True})
+
+        if telegram_user_id:
+            existing_owner = User.query.filter_by(telegram_user_id=telegram_user_id).first()
+            if existing_owner is not None and existing_owner.id != token.user_id:
+                send_telegram_chat_message(chat_id, 'This Telegram account is already linked to a different user. Contact an admin for relink support.')
+                db.session.commit()
+                return jsonify({'ok': True})
+
+        token.user.telegram_chat_id = chat_id
+        if telegram_user_id:
+            token.user.telegram_user_id = telegram_user_id
+        if incoming_username:
+            token.user.tg_username = incoming_username
+        token.used_at = datetime.utcnow()
+        db.session.commit()
+        send_telegram_chat_message(chat_id, 'Your Telegram account is now linked. Use /help to see available commands.')
+        return jsonify({'ok': True})
+
+    linked_user = None
+    if telegram_user_id:
+        linked_user = User.query.filter_by(telegram_user_id=telegram_user_id).first()
+    if linked_user is None:
+        linked_user = User.query.filter_by(telegram_chat_id=chat_id).first()
+    if linked_user is None:
+        send_telegram_chat_message(chat_id, 'Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.')
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    if telegram_user_id and not linked_user.telegram_user_id:
+        linked_user.telegram_user_id = telegram_user_id
+    if incoming_username and incoming_username != (linked_user.tg_username or '').strip().lstrip('@'):
+        linked_user.tg_username = incoming_username
+    if chat_id != (linked_user.telegram_chat_id or '').strip():
+        linked_user.telegram_chat_id = chat_id
+    db.session.commit()
+
+    lower = text.lower()
+    if lower == '/help':
+        send_telegram_chat_message(chat_id, _telegram_help_message())
+        return jsonify({'ok': True})
+
+    if lower == '/tests':
+        tests = _telegram_user_visible_tests(linked_user)
+        if not tests:
+            send_telegram_chat_message(chat_id, 'No eligible tests found right now.')
+            return jsonify({'ok': True})
+        lines = [f"#{test.id} {test.title} [{test.status}]" for test in tests]
+        send_telegram_chat_message(chat_id, 'Eligible tests:\n' + '\n'.join(lines))
+        return jsonify({'ok': True})
+
+    if lower.startswith('/status'):
+        parts = text.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            send_telegram_chat_message(chat_id, 'Usage: /status <test_id>')
+            return jsonify({'ok': True})
+        test = GroupTest.query.get(int(parts[1]))
+        if test is None or not test.can_user_see(linked_user):
+            send_telegram_chat_message(chat_id, 'Test not found or not visible to your account.')
+            return jsonify({'ok': True})
+        send_telegram_chat_message(chat_id, _telegram_status_summary_for_user(linked_user, test))
+        return jsonify({'ok': True})
+
+    if lower.startswith('/join'):
+        parts = text.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            send_telegram_chat_message(chat_id, 'Usage: /join <test_id>')
+            return jsonify({'ok': True})
+        test = GroupTest.query.get(int(parts[1]))
+        if test is None or not test.can_user_see(linked_user):
+            send_telegram_chat_message(chat_id, 'Test not found or not visible to your account.')
+            return jsonify({'ok': True})
+        send_telegram_chat_message(chat_id, _telegram_join_test_for_user(linked_user, test))
+        return jsonify({'ok': True})
+
+    send_telegram_chat_message(chat_id, _telegram_help_message())
+    return jsonify({'ok': True})
+
+
 @main_bp.route('/result-image/group-test/<int:test_id>')
 @login_required
 def serve_group_test_result_image(test_id):
@@ -804,6 +1390,10 @@ def test_detail(test_id):
     templates = NotificationTemplate.query.filter_by(is_active=True, hide_from_participant_notifications=False).order_by(NotificationTemplate.name).all()
     form.template_id.choices = [(template.id, template.name) for template in templates]
     can_view_results = _can_user_view_group_test_results(test, current_user)
+    payment_option_contexts = [_build_payment_option_context(option) for option in test.payment_options if option.is_active]
+    selected_payment_option = None
+    if my_part and my_part.preferred_payment_option_id:
+        selected_payment_option = _build_payment_option_context(my_part.preferred_payment_option)
 
     if current_user.is_admin and form.validate_on_submit():
         template = NotificationTemplate.query.get_or_404(form.template_id.data)
@@ -826,6 +1416,7 @@ def test_detail(test_id):
             if test.results_image_key and _can_user_view_group_test_result_image(test, current_user)
             else None
         ),
+        test_results_file_kind=_result_file_kind(test.results_image_key) if test.results_image_key else None,
         can_view_results=can_view_results,
         costs=costs,
         participations=parts,
@@ -833,7 +1424,9 @@ def test_detail(test_id):
         show_participant_list=show_participant_list,
         reimbursed_by_user=reimbursed_by_user,
         notify_form=form,
-        notification_templates=templates
+        notification_templates=templates,
+        payment_options=payment_option_contexts,
+        selected_payment_option=selected_payment_option,
     )
 
 
@@ -883,6 +1476,7 @@ def my_results():
                     if test.results_image_key and _can_user_view_group_test_result_image(test, current_user)
                 else None
             ),
+            'results_file_kind': _result_file_kind(test.results_image_key) if test.results_image_key else None,
             'posted_at': test.results_posted_at or test.updated_at or test.created_at,
             'source_label': 'Group Test',
             'lab_item_results': [
@@ -911,6 +1505,7 @@ def my_results():
             'summary': result.summary or '',
             'results_link': result.results_link,
             'results_image_url': url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
+            'results_file_kind': _result_file_kind(result.results_image_key) if result.results_image_key else None,
             'posted_at': result.posted_at,
             'source_label': 'Public Result',
             'lab_item_results': [
@@ -997,20 +1592,43 @@ def update_my_participant_status(test_id):
         return redirect(url_for('main.test_detail', test_id=test_id))
 
     form = ParticipantStatusForm(obj=part)
+    available_options = [option for option in test.payment_options if option.is_active]
+    form.preferred_payment_option_id.choices = [(0, 'No preference selected')] + [
+        (option.id, option.display_title()) for option in available_options
+    ]
+    if not form.is_submitted():
+        form.preferred_payment_option_id.data = part.preferred_payment_option_id or 0
 
     if form.validate_on_submit():
         part.order_status = form.order_status.data
         part.paid_lab = form.paid_lab.data
         if form.amount_paid.data is not None:
             part.amount_paid = form.amount_paid.data
-        if form.notes.data:
-            part.notes = form.notes.data
+        part.notes = form.notes.data or part.notes
+
+        selected_id = int(form.preferred_payment_option_id.data or 0)
+        if test.status == 'testing' and selected_id > 0:
+            selected_option = next((opt for opt in available_options if opt.id == selected_id), None)
+            if selected_option:
+                part.preferred_payment_option_id = selected_option.id
+                part.preferred_payment_snapshot = _serialize_payment_option_snapshot(selected_option)
+        elif selected_id == 0:
+            part.preferred_payment_option_id = None
+            part.preferred_payment_snapshot = None
 
         db.session.commit()
         flash("Your status has been updated.", "success")
         return redirect(url_for('main.test_detail', test_id=test_id))
 
-    return render_template('participant_update_status.html', form=form, test=test, part=part)
+    selected_option = next((opt for opt in available_options if opt.id == (form.preferred_payment_option_id.data or 0)), None)
+    return render_template(
+        'participant_update_status.html',
+        form=form,
+        test=test,
+        part=part,
+        available_payment_options=[_build_payment_option_context(option) for option in available_options],
+        selected_payment_option=_build_payment_option_context(selected_option),
+    )
 
 
 @main_bp.route('/test/<int:test_id>/request', methods=['GET', 'POST'])
@@ -1130,8 +1748,10 @@ def reapply_participation(test_id):
 def create_test():
     form = GroupTestForm()
     populate_donor_shipping_choices(form)
+    populate_payment_option_choices(form)
     if not form.is_submitted():
         form.tag_names.data = ''
+        form.payment_option_ids.data = []
     if form.validate_on_submit():
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -1193,6 +1813,9 @@ def create_test():
             results_posted_at=datetime.utcnow() if form.status.data == 'closed' and form.results_link.data else None,
             created_by=current_user.id
         )
+        selected_payment_ids = form.payment_option_ids.data or []
+        if selected_payment_ids:
+            test.payment_options = PaymentOption.query.filter(PaymentOption.id.in_(selected_payment_ids)).all()
         db.session.add(test)
         db.session.flush()
         apply_tags_to_record(test, form.tag_names.data)
@@ -1209,14 +1832,17 @@ def edit_test(test_id):
     test = GroupTest.query.get_or_404(test_id)
     form = GroupTestForm(obj=test)  # Pre-populate
     populate_donor_shipping_choices(form)
+    populate_payment_option_choices(form, include_ids=[option.id for option in test.payment_options])
     if not form.is_submitted():
         form.tag_names.data = test.tag_names()
+        form.payment_option_ids.data = [option.id for option in test.payment_options if option.is_active]
     if form.donor_shipping_reimbursed_by_id.data in (None, '') and test.donor_shipping_reimbursed_by_id:
         form.donor_shipping_reimbursed_by_id.data = test.donor_shipping_reimbursed_by_id
     elif form.donor_shipping_reimbursed_by_id.data is None:
         form.donor_shipping_reimbursed_by_id.data = 0
     
     if form.validate_on_submit():
+        previous_status = test.status
         form.populate_obj(test)
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -1278,6 +1904,11 @@ def edit_test(test_id):
             delete_result_image(old_key)
 
         apply_tags_to_record(test, form.tag_names.data)
+        selected_payment_ids = form.payment_option_ids.data or []
+        if selected_payment_ids:
+            test.payment_options = PaymentOption.query.filter(PaymentOption.id.in_(selected_payment_ids)).all()
+        else:
+            test.payment_options = []
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
             if test.results_image_key:
@@ -1286,6 +1917,10 @@ def edit_test(test_id):
             test.results_posted_at = None
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
+
+        if previous_status != test.status:
+            _send_status_update_to_telegram(test, previous_status)
+
         db.session.commit()
         flash('Group test updated.', 'success')
         return redirect(url_for('main.test_detail', test_id=test_id))
@@ -1815,33 +2450,152 @@ def edit_notification_template(template_id):
 @admin_required
 def notification_config():
     form = NotificationConfigForm()
+    configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+    existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
+
     if form.validate_on_submit():
+        webhook_secret = (form.telegram_webhook_secret.data or '').strip()
         for key, value in {
             'mailjet_api_key': form.mailjet_api_key.data,
             'mailjet_secret_key': form.mailjet_secret_key.data,
             'mailjet_sender_email': form.mailjet_sender_email.data,
             'telegram_bot_token': form.telegram_bot_token.data,
+            'telegram_bot_username': form.telegram_bot_username.data,
+            'telegram_webhook_allowed_ips': form.telegram_webhook_allowed_ips.data,
+            'telegram_status_chat_id': form.telegram_status_chat_id.data,
+            'telegram_digest_enabled': 'true' if form.telegram_digest_enabled.data else 'false',
+            'telegram_digest_window_minutes': str(int(form.telegram_digest_window_minutes.data or 10)),
             'service_base_url': form.service_base_url.data,
             'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
         }.items():
             config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
             config.value = value or None
             db.session.add(config)
+
+        if webhook_secret:
+            config = NotificationConfig.query.filter_by(key='telegram_webhook_secret').first() or NotificationConfig(key='telegram_webhook_secret')
+            config.value = webhook_secret
+            db.session.add(config)
+        elif not existing_webhook_secret:
+            config = NotificationConfig.query.filter_by(key='telegram_webhook_secret').first() or NotificationConfig(key='telegram_webhook_secret')
+            config.value = None
+            db.session.add(config)
+
         db.session.commit()
         append_notification_log('configuration: credentials updated')
         flash('Notification configuration saved.', 'success')
         return redirect(url_for('main.notification_config'))
 
     if not form.is_submitted():
-        configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
         form.mailjet_api_key.data = mask_secret(configs.get('mailjet_api_key'))
         form.mailjet_secret_key.data = mask_secret(configs.get('mailjet_secret_key'))
         form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
         form.telegram_bot_token.data = mask_secret(configs.get('telegram_bot_token'))
+        form.telegram_bot_username.data = configs.get('telegram_bot_username')
+        form.telegram_webhook_secret.data = ''
+        form.telegram_webhook_allowed_ips.data = configs.get('telegram_webhook_allowed_ips')
+        form.telegram_status_chat_id.data = configs.get('telegram_status_chat_id')
+        form.telegram_digest_enabled.data = str(configs.get('telegram_digest_enabled', 'false')).lower() == 'true'
+        try:
+            form.telegram_digest_window_minutes.data = float(configs.get('telegram_digest_window_minutes') or 10)
+        except (TypeError, ValueError):
+            form.telegram_digest_window_minutes.data = 10
         form.service_base_url.data = configs.get('service_base_url')
         form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
     log_contents = read_notification_log()
-    return render_template('admin/notification_config.html', form=form, log_contents=log_contents)
+    return render_template(
+        'admin/notification_config.html',
+        form=form,
+        log_contents=log_contents,
+        webhook_secret_mask=mask_secret(existing_webhook_secret),
+    )
+
+
+@main_bp.route('/admin/payment-options', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def payment_options():
+    form = PaymentOptionForm()
+    if form.validate_on_submit():
+        option = PaymentOption(
+            label=form.label.data,
+            method_type=form.method_type.data,
+            recipient_name=form.recipient_name.data or None,
+            account_handle=form.account_handle.data or None,
+            wallet_address=form.wallet_address.data or None,
+            network=form.network.data or None,
+            details=form.details.data or None,
+            qr_payload_override=form.qr_payload_override.data or None,
+            is_active=bool(form.is_active.data),
+        )
+        db.session.add(option)
+        db.session.commit()
+        flash('Payment option saved.', 'success')
+        return redirect(url_for('main.payment_options'))
+
+    options = PaymentOption.query.order_by(PaymentOption.is_active.desc(), PaymentOption.label.asc(), PaymentOption.recipient_name.asc()).all()
+    return render_template('admin/payment_options.html', form=form, options=options)
+
+
+@main_bp.route('/admin/payment-options/<int:option_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_payment_option(option_id):
+    option = PaymentOption.query.get_or_404(option_id)
+    form = PaymentOptionForm(obj=option)
+    form.submit.label.text = 'Save Changes'
+
+    if form.validate_on_submit():
+        option.label = form.label.data
+        option.method_type = form.method_type.data
+        option.recipient_name = form.recipient_name.data or None
+        option.account_handle = form.account_handle.data or None
+        option.wallet_address = form.wallet_address.data or None
+        option.network = form.network.data or None
+        option.details = form.details.data or None
+        option.qr_payload_override = form.qr_payload_override.data or None
+        option.is_active = bool(form.is_active.data)
+        db.session.commit()
+        flash('Payment option updated.', 'success')
+        return redirect(url_for('main.payment_options'))
+
+    return render_template('admin/edit_payment_option.html', form=form, option=option)
+
+
+@main_bp.route('/admin/payment-options/<int:option_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_payment_option(option_id):
+    option = PaymentOption.query.get_or_404(option_id)
+
+    assigned_test_count = GroupTest.query.join(GroupTest.payment_options).filter(PaymentOption.id == option.id).count()
+    participant_pref_count = Participation.query.filter_by(preferred_payment_option_id=option.id).count()
+
+    if assigned_test_count > 0 or participant_pref_count > 0:
+        option.is_active = False
+        db.session.commit()
+        flash(
+            f'Payment option "{option.display_title()}" is in use and cannot be deleted. It was set inactive instead.',
+            'warning',
+        )
+        return redirect(url_for('main.payment_options'))
+
+    title = option.display_title()
+    db.session.delete(option)
+    db.session.commit()
+    flash(f'Payment option "{title}" was deleted.', 'success')
+    return redirect(url_for('main.payment_options'))
+
+
+@main_bp.route('/admin/payment-options/<int:option_id>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def toggle_payment_option(option_id):
+    option = PaymentOption.query.get_or_404(option_id)
+    option.is_active = not option.is_active
+    db.session.commit()
+    flash(f'Payment option "{option.display_title()}" updated.', 'success')
+    return redirect(url_for('main.payment_options'))
 
 
 @main_bp.route('/admin/storage-config', methods=['GET', 'POST'])
@@ -1891,7 +2645,7 @@ def storage_config():
                 'storage_force_path_style': 'true' if form.storage_force_path_style.data else 'false',
                 'storage_signed_url_ttl_seconds': str(int(form.storage_signed_url_ttl_seconds.data or 60)),
                 'storage_max_upload_size_mb': str(form.storage_max_upload_size_mb.data or 8),
-                'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF').strip(),
+                'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF,PDF').strip(),
             }
             for key, value in updates.items():
                 _save_config_value(key, value)
@@ -1923,7 +2677,7 @@ def storage_config():
             form.storage_max_upload_size_mb.data = float(configs.get('storage_max_upload_size_mb') or 8)
         except (TypeError, ValueError):
             form.storage_max_upload_size_mb.data = 8
-        form.storage_allowed_formats.data = configs.get('storage_allowed_formats') or 'JPEG,PNG,WEBP,GIF'
+        form.storage_allowed_formats.data = configs.get('storage_allowed_formats') or 'JPEG,PNG,WEBP,GIF,PDF'
 
     secret_mask = mask_secret(existing_secret)
     effective_settings = get_storage_settings()
@@ -1965,7 +2719,10 @@ def create_user():
             is_admin=form.is_admin.data,
             is_active=form.is_active.data,
             receive_group_test_notifications=form.receive_group_test_notifications.data,
-            notification_channel=form.notification_channel.data or 'email'
+            notification_channel=form.notification_channel.data or 'email',
+            digest_frequency=(form.digest_frequency.data or 'off').strip().lower(),
+            digest_hourly_minute_utc=_clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59),
+            digest_daily_hour_utc=_clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23),
         )
         if form.password.data:
             user.set_password(form.password.data)
@@ -2010,6 +2767,9 @@ def edit_user(user_id):
         user.is_active = form.is_active.data
         user.receive_group_test_notifications = form.receive_group_test_notifications.data
         user.notification_channel = form.notification_channel.data or 'email'
+        user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
+        user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
+        user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
 
         if form.password.data:
             user.set_password(form.password.data)
@@ -2041,12 +2801,17 @@ def toggle_user_active(user_id):
 def set_results_link(test_id):
     """Quick update for results link when closing test."""
     test = GroupTest.query.get_or_404(test_id)
+    previous_status = test.status
     link = request.form.get('results_link', '').strip()
     test.results_link = link if link else None
     if test.status != 'closed':
         test.status = 'closed'
     if test.results_link and not test.results_posted_at:
         test.results_posted_at = datetime.utcnow()
+
+    if previous_status != test.status:
+        _send_status_update_to_telegram(test, previous_status)
+
     db.session.commit()
     flash('Results link updated and test marked closed (if needed). Visible only to approved members.', 'success')
     return redirect(url_for('main.test_detail', test_id=test_id))

@@ -47,6 +47,22 @@
             </div>
 
             <div class="mb-3">
+                {{ form.digest_frequency.label(class="form-label") }}
+                {{ form.digest_frequency(class="form-select") }}
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.digest_hourly_minute_utc.label(class="form-label") }}
+                    {{ form.digest_hourly_minute_utc(class="form-control", step="1") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.digest_daily_hour_utc.label(class="form-label") }}
+                    {{ form.digest_daily_hour_utc(class="form-control", step="1") }}
+                </div>
+            </div>
+
+            <div class="mb-3">
                 {{ form.password.label(class="form-label") }}
                 {{ form.password(class="form-control") }}
                 <div class="form-text">Leave blank to keep the current password.</div>

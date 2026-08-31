@@ -27,6 +27,36 @@
                 {{ form.telegram_bot_token(class="form-control") }}
             </div>
             <div class="mb-3">
+                {{ form.telegram_bot_username.label(class="form-label") }}
+                {{ form.telegram_bot_username(class="form-control", placeholder="your_bot_username") }}
+            </div>
+            <div class="mb-3">
+                {{ form.telegram_webhook_secret.label(class="form-label") }}
+                {{ form.telegram_webhook_secret(class="form-control") }}
+                {% if webhook_secret_mask %}
+                    <div class="form-text">Existing secret: {{ webhook_secret_mask }} (leave blank to keep current value).</div>
+                {% endif %}
+            </div>
+            <div class="mb-3">
+                {{ form.telegram_webhook_allowed_ips.label(class="form-label") }}
+                {{ form.telegram_webhook_allowed_ips(class="form-control", placeholder="149.154.160.0/20,91.108.4.0/22") }}
+                <div class="form-text">Optional. Restrict webhook requests to these source CIDRs. Leave blank to allow any IP.</div>
+            </div>
+            <div class="mb-3">
+                {{ form.telegram_status_chat_id.label(class="form-label") }}
+                {{ form.telegram_status_chat_id(class="form-control", placeholder="-1001234567890 or @channelname") }}
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3 form-check mt-4">
+                    {{ form.telegram_digest_enabled(class="form-check-input") }}
+                    {{ form.telegram_digest_enabled.label(class="form-check-label") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.telegram_digest_window_minutes.label(class="form-label") }}
+                    {{ form.telegram_digest_window_minutes(class="form-control", step="1") }}
+                </div>
+            </div>
+            <div class="mb-3">
                 {{ form.service_base_url.label(class="form-label") }}
                 {{ form.service_base_url(class="form-control", placeholder="https://your-domain.example") }}
                 <div class="form-text">Used to build fully qualified links like {{ '{{ test_link }}' }} in notification templates.</div>

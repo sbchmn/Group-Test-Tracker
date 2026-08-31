@@ -185,6 +185,15 @@ def create_app(config_overrides=None):
         with app.app_context():
             db.create_all()
             click.echo("Development tables created/verified.")
+
+    @app.cli.command('send-user-digests')
+    def send_user_digests():
+        """Send due hourly/daily digest emails for users who opted in via profile settings."""
+        from .notifications import send_due_user_digests
+
+        with app.app_context():
+            result = send_due_user_digests()
+            click.echo(f"Digest delivery complete: users={result.get('users', 0)} events={result.get('events', 0)}")
     
     # === Shell context for easy debugging ===
     @app.shell_context_processor

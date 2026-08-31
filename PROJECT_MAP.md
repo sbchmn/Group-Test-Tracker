@@ -144,6 +144,8 @@
 - Added a dedicated admin one-pager quick start guide in `ADMIN_QUICK_START.md` for onboarding and day-to-day operations.
 - README now includes a full Table of Contents and a prominent top-level link to `ADMIN_QUICK_START.md` for faster admin navigation.
 - README and ADMIN_QUICK_START now document private-bucket signed URL access, 60-second TTL guidance, and paid-participant requirements for group-test image viewing.
+- README and ADMIN_QUICK_START refreshed for the latest release features: ready_for_payment lifecycle, payment option matrix workflows, Telegram webhook register/unregister actions, editable Telegram status templates with variables, status-channel digest behavior, Telegram account-linking reset guidance, and PDF result modal/download behavior.
+- Admin docs/UI now present Telegram status template configuration as a sub-item under Notification Templates via an "Open Telegram Status Template Config" button that deep-links to the anchored section on Notification Config.
 
 ## Telegram Bot Workstream
 
@@ -539,8 +541,10 @@
 - Security: Template rendering uses existing placeholder substitution and static context values; no dynamic code execution introduced.
 - Reliability: Each render path supplies explicit default templates, preserving behavior when configs are empty/malformed.
 - Optimization: Reuses lightweight substitution helper and current config map lookup without adding new query-heavy paths.
+- Reliability: Telegram digest mentions are now resolved from current participation state at send time so denied users are excluded even if older queued events included them.
 
 ### Validation Results
 - Focused post-change validation passed: `python -m unittest tests.test_notifications tests.test_lab_costs tests.test_security -q` (65 tests, OK).
+- Follow-up mention-filter fix validation passed: `py -3 -m unittest tests.test_notifications tests.test_security` (58 tests, OK).
 	- `tests.test_security.SecurityTests.test_ready_for_payment_renders_venmo_link_and_qr`
 	- `tests.test_security.SecurityTests.test_payment_option_form_requires_handle_for_venmo_without_override`

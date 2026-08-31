@@ -30,8 +30,12 @@ DATABASE_URL=sqlite:///group_tests.db
 
 1. Open Admin -> Notification Config.
 2. Enter Mailjet and/or Telegram values.
-3. Set Service Base URL for links in templates.
-4. Save.
+3. Set Telegram bot username and status chat target.
+4. Optionally set webhook URL override and allowed source IP CIDRs.
+5. Set digest mode/window.
+6. Set Service Base URL for links in templates.
+7. Use Register Telegram Webhook to publish webhook settings to Telegram.
+8. Save.
 
 1. Open Admin -> Manage Templates.
 2. Create or edit templates for:
@@ -39,7 +43,24 @@ DATABASE_URL=sqlite:///group_tests.db
 - registration welcome
 - participant notifications
 3. Mark defaults as needed.
-4. Save.
+4. Use Open Telegram Status Template Config for Telegram status-specific message templates.
+5. Save.
+
+1. From Manage Templates, click Open Telegram Status Template Config.
+2. Review Telegram Status Message Templates.
+3. Customize digest, new-test, and user status response text using placeholders.
+4. Save and test from Telegram.
+
+Common Telegram template placeholders:
+- test_id
+- test_title
+- old_status, old_status_label
+- new_status, new_status_label, new_status_phrase
+- test_url
+- mentions
+- denied_reason
+- order_status
+- amount_owed, amount_paid
 
 ## 3) Optional: Enable Result Image Uploads
 
@@ -75,11 +96,12 @@ Secure access behavior:
 
 1. Create tests from Admin -> Create Test.
 2. Keep recruiting tests open while collecting requests.
-3. Use Admin -> Action Queue to approve/deny quickly across tests.
-4. Use Manage Participants inside each test for detailed per-user updates.
-5. Send participant notifications from test detail pages.
-6. Move tests to closed and set results link when complete.
-7. Publish broader results from Admin -> Public Results.
+3. Move to ready_for_payment when you want payment options shown before active testing.
+4. Use Admin -> Action Queue to approve/deny quickly across tests.
+5. Use Manage Participants inside each test for detailed per-user updates.
+6. Send participant notifications from test detail pages.
+7. Move tests to testing and then closed when complete.
+8. Publish broader results from Admin -> Public Results.
 
 ## 5) Group Test Setup Checklist
 
@@ -89,12 +111,23 @@ Secure access behavior:
 4. Cost fields: lab, shipping, donor-shipping, refund per donor.
 5. Status selection:
 - recruiting: collecting requests
+- ready_for_payment: approved users can review payment instructions before testing
 - testing: active processing, no new joins
 - closed: results can be shown to approved members
-6. Optional tags for search/grouping.
-7. Optional result image upload (if storage enabled).
+6. Assign payment options for this test (optional but recommended for paid workflows).
+7. Optional tags for search/grouping.
+8. Optional result file upload (image or PDF) when closed.
 
-## 6) Public Results Checklist
+## 6) Payment Options Quick Setup
+
+1. Open Admin -> Payment Options.
+2. Add one option per method/payee combination.
+3. For app methods, confirm generated payment link and QR preview.
+4. For crypto methods, set network carefully and verify address formatting.
+5. Activate/deactivate options as needed; in-use options are protected by safe-delete behavior.
+6. Assign relevant options per test in Create Test or Edit Test.
+
+## 7) Public Results Checklist
 
 1. Title and optional summary.
 2. Required results link.
@@ -104,17 +137,22 @@ Secure access behavior:
 
 Result image behavior:
 - Thumbnail appears in results views.
-- Clicking thumbnail opens full-size modal.
-- Replacing image removes old image best-effort.
+- Clicking thumbnail opens full-size modal or embedded PDF preview.
+- Modal includes download action.
+- Replacing file removes old file best-effort.
 
-## 7) User and Access Management
+## 8) User and Access Management
 
 1. Admin -> Manage Users for account changes.
 2. Use Toggle Active for temporary access control.
 3. Use admin password reset action when needed.
 4. Keep admin accounts minimal and controlled.
 
-## 8) Troubleshooting Quick Hits
+Telegram account-linking notes:
+- Users must open the bot and press Start before Telegram direct delivery can work.
+- Telegram delivery depends on stored linked chat identity, not just username text.
+
+## 9) Troubleshooting Quick Hits
 
 Storage upload fails:
 1. Verify Storage Config is enabled.
@@ -124,16 +162,18 @@ Storage upload fails:
 
 Notifications fail:
 1. Verify Notification Config keys.
-2. Verify recipient email/Telegram values.
+2. Verify recipient email and Telegram linking status.
 3. Enable notification debug logs.
 4. Review notification log in Notification Config page.
+5. Re-run Register Telegram Webhook after changing bot token or base URL.
+6. For status channel posts, verify chat target format and optional thread suffix.
 
 Migrations fail:
 1. Activate venv.
 2. Re-run flask --app app db upgrade head.
 3. Verify DATABASE_URL and DB access.
 
-## 9) Pre-Release Admin Checklist
+## 10) Pre-Release Admin Checklist
 
 1. Run tests:
 python -m unittest
@@ -150,13 +190,21 @@ python -m unittest
 - Create recruiting test
 - Submit request from non-admin account
 - Approve from Action Queue
+- Switch test to ready_for_payment and verify payment panel/link/QR renders correctly
 - Close test and set results link
 - Confirm appearance in My Results
 
-## 10) Security Best Practices
+4. Verify Telegram flow:
+- Generate Telegram link from a user profile
+- Complete /start in bot
+- Trigger a status update and confirm channel post formatting
+- Trigger password reset via Telegram for linked user
+
+## 11) Security Best Practices
 
 1. Use strong SECRET_KEY and rotate when required.
 2. Use least-privilege object storage credentials.
 3. Rotate Mailjet/Telegram/storage secrets periodically.
 4. Keep debug logging disabled in normal production operations.
 5. Limit number of admin users and review access regularly.
+6. Use webhook IP allowlists where possible and re-check after infrastructure changes.

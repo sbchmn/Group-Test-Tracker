@@ -35,6 +35,7 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 	- [Set Results Link Quickly](#set-results-link-quickly)
 	- [Manage Public Results](#manage-public-results)
 	- [Manage Users](#manage-users)
+	- [Manage Payment Options](#manage-payment-options)
 	- [Notification Templates](#notification-templates)
 	- [Notification Config](#notification-config)
 	- [Send Notifications to Test Participants](#send-notifications-to-test-participants)
@@ -58,14 +59,17 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 ## What This App Includes
 
 - Account registration, login, logout, profile management, and password reset.
-- Group test lifecycle management (recruiting, testing, closed).
+- Group test lifecycle management (recruiting, ready_for_payment, testing, closed).
 - Participant request, approve, deny, reopen, and status management.
 - Cost split automation with donor-credit logic.
 - Admin Action Queue for cross-test pending approvals.
 - Dashboard controls for search, grouping, sorting, and hide/unhide.
 - My Results page that combines closed group-test results and public results.
 - Public Results CRUD for admins, including itemized lab values.
-- Result image upload with S3-compatible object storage (AWS S3 or DigitalOcean Spaces).
+- Result file upload with S3-compatible object storage (AWS S3 or DigitalOcean Spaces), including image and PDF support.
+- Payment option matrix with method-aware payment links, destinations, and QR payload previews.
+- Telegram bot account linking, webhook processing, status channel posts, digest mode, and Telegram password reset delivery for linked users.
+- Editable Telegram status message templates with variables for channel updates and user status replies.
 - Notification templates/configuration for email/Telegram.
 - Excel export for test backups/reporting.
 
@@ -149,6 +153,10 @@ python run.py
 3. Choose delivery channel (email or Telegram).
 4. Submit to receive a temporary password.
 
+Telegram note:
+
+- Telegram reset requires a linked bot chat. If not linked, open the bot and press Start first, then retry Telegram reset.
+
 ### Update Your Profile
 
 1. Open My Profile.
@@ -193,12 +201,17 @@ If approved:
 3. Update order progress, payment flags, amount paid, and notes.
 4. Save.
 
+Payment method behavior:
+
+- If the test is in ready_for_payment or testing and payment options are configured, you can choose your preferred payment method and view generated destination/link/QR details.
+
 ### View Results (My Results)
 
 1. Open My Results.
 2. Use search/group/sort to filter combined results.
 3. Click Open Results for source link.
 4. If a thumbnail exists, click it to open full-size modal image.
+5. If the result file is a PDF, the modal opens an embedded PDF preview and includes a direct download action.
 
 Note:
 
@@ -214,20 +227,32 @@ Note:
 3. Add optional tags (comma-separated).
 4. Add lab/provider and itemized lab rows.
 5. Fill cost fields (lab, shipping, donor-shipping, refund-per-donor).
-6. Set status.
-7. If status is closed, add results link and optional result image upload.
-8. Save.
+6. Set status (recruiting, ready_for_payment, testing, or closed).
+7. Select allowed payment options for this test if payment collection is in scope.
+8. If status is closed, add results link and optional result file upload (image or PDF).
+9. Save.
 
 ### Edit Group Test
 
 1. Open test -> Edit Test.
 2. Update fields, lab rows, tags, and status.
-3. Update or remove result image if needed.
+3. Update payment options assigned to the test as needed.
+4. Update or remove result file if needed.
 4. Save.
 
 Important behavior:
 
-- If status is changed away from closed, results link and result image are cleared.
+- If status is changed away from closed, results link and result file are cleared.
+
+### Manage Payment Options
+
+1. Open Admin -> Payment Options.
+2. Create method entries for Venmo, Cash App, PayPal, Crypto Wallet, or Other.
+3. Fill destination details by method (handle, link, wallet address, network, or custom fields).
+4. Use generated matrix preview to confirm destination label, payment link, and QR payload behavior.
+5. Toggle Active to hide/show options for new assignments.
+6. Edit existing options to refine details.
+7. Delete unused options. If an option is already assigned or selected, delete safely deactivates it.
 
 ### Delete Group Test
 
@@ -295,15 +320,29 @@ If the user was previously denied for that test, the record is reactivated and a
 - telegram body
 3. Mark defaults for password-reset and registration-welcome templates.
 4. Mark templates hidden from participant-notify picker if needed.
+5. Use Open Telegram Status Template Config to jump to Telegram status-specific templates.
 
 ### Notification Config
 
 1. Open Admin -> Notification Config.
 2. Configure Mailjet keys/sender email.
-3. Configure Telegram bot token.
-4. Set service base URL (used for fully qualified links in templates).
-5. Optionally enable debug logs.
-6. Save.
+3. Configure Telegram bot token and bot username.
+4. Configure Telegram webhook URL override (optional) and allowed source IP CIDRs (optional).
+5. Configure Telegram status chat target. Thread targets are supported using chatId_threadId format.
+6. Configure digest mode and digest window.
+7. Edit Telegram status message templates (linked from Notification Templates) and variables for:
+- digest header
+- digest line item
+- digest participants line
+- new-test channel post
+- user /status no-request reply
+- user /status denied reply
+- user /status approved reply
+- user /status pending reply
+8. Set service base URL (used for fully qualified links in templates and Telegram message links).
+9. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage bot webhook from the UI.
+10. Optionally enable debug logs.
+11. Save.
 
 ### Send Notifications to Test Participants
 
@@ -321,7 +360,7 @@ The app renders participant-specific values (including amount owed) per recipien
 
 ## Object Storage and Result Image Upload How-To
 
-Result images are optional and uploaded to S3-compatible storage.
+Result files are optional and uploaded to S3-compatible storage.
 
 ### Configure Storage
 
@@ -359,10 +398,11 @@ Result images are optional and uploaded to S3-compatible storage.
 
 - Upload on Group Test create/edit when results are present.
 - Upload on Public Result create/edit.
-- Thumbnails and modal images are fetched through app-controlled authenticated routes.
+- Thumbnails and modal previews are fetched through app-controlled authenticated routes.
 - The app generates short-lived signed object URLs on demand (default 60 seconds).
 - Group test result images require admin access or approved plus paid participation in that test.
 - Public result images require login.
+- PDFs are supported for result uploads and render in embedded modal preview with download option.
 - Replacing image deletes old object best-effort.
 - Clearing image removes object key and attempts remote delete.
 
@@ -380,7 +420,7 @@ Result images are optional and uploaded to S3-compatible storage.
 - CSRF is enabled for forms.
 - Group test visibility:
 - Recruiting: visible to authenticated users.
-- Testing/Closed: visible to admins and approved members.
+- Ready_for_payment/Testing/Closed: visible to admins and approved members.
 - Results links/images for group tests are shown only when closed and user is authorized.
 - Group test result images specifically require admin or approved+paid participant access before signed URL issuance.
 
@@ -397,6 +437,25 @@ Supported variables:
 - `test_link`
 - `test_id`
 - `login_url`
+
+Telegram status template variables:
+
+- `test_id`
+- `test_title`
+- `old_status`
+- `old_status_label`
+- `new_status`
+- `new_status_label`
+- `new_status_phrase`
+- `status`
+- `status_label`
+- `status_phrase`
+- `test_url`
+- `mentions`
+- `denied_reason`
+- `order_status`
+- `amount_owed`
+- `amount_paid`
 
 ## Testing and Validation
 
@@ -433,8 +492,10 @@ Check Admin -> Storage Config:
 ### Notifications Not Delivering
 
 1. Verify Notification Config keys.
-2. Verify user has channel-compatible address/username.
+2. Verify user has channel-compatible address and linked Telegram chat if Telegram delivery is expected.
 3. Enable debug logging and inspect notification log in Admin -> Notification Config.
+4. For Telegram bot delivery, verify webhook registration status and that bot token includes full value (including colon separator).
+5. For Telegram status channel posts, verify status chat target format and optional thread suffix.
 
 ### Migration Errors
 

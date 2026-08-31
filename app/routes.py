@@ -667,14 +667,30 @@ def _send_status_update_to_telegram(test, previous_status):
             },
         )
         lines.append(f"- {line_text}")
-        for username in (item.mention_usernames or '').split(','):
-            username = username.strip().lstrip('@')
-            if username:
-                mentioned_usernames.add(username)
-        for user_id in (item.mention_user_ids or '').split(','):
-            user_id = user_id.strip()
-            if user_id:
-                mentioned_user_ids.add(user_id)
+
+    # Resolve mentions from current participation state so recently denied
+    # users are excluded even if older digest events included them.
+    pending_test_ids = sorted({item.test_id for item in pending_events if item.test_id})
+    if pending_test_ids:
+        mention_rows = (
+            db.session.query(User.tg_username, User.telegram_user_id)
+            .join(Participation, Participation.user_id == User.id)
+            .filter(
+                Participation.group_test_id.in_(pending_test_ids),
+                Participation.approved.is_(True),
+                or_(Participation.denied.is_(False), Participation.denied.is_(None)),
+            )
+            .all()
+        )
+        for tg_username, telegram_user_id in mention_rows:
+            if tg_username:
+                username = str(tg_username).strip().lstrip('@')
+                if username:
+                    mentioned_usernames.add(username)
+            if telegram_user_id:
+                user_id = str(telegram_user_id).strip()
+                if user_id:
+                    mentioned_user_ids.add(user_id)
 
     mention_tokens = []
     for user_id in sorted(mentioned_user_ids):

@@ -252,6 +252,7 @@ class NotificationConfigForm(FlaskForm):
     telegram_status_new_test_template = TextAreaField('Telegram New Test Message Template', validators=[Optional(), Length(max=2000)])
     telegram_status_user_no_request_template = TextAreaField('Telegram /status No Request Template', validators=[Optional(), Length(max=2000)])
     telegram_status_user_denied_template = TextAreaField('Telegram /status Denied Template', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_results_template = TextAreaField('Telegram /status Completed + Paid Results Template', validators=[Optional(), Length(max=2000)])
     telegram_status_user_approved_template = TextAreaField('Telegram /status Approved Template', validators=[Optional(), Length(max=2000)])
     telegram_status_user_pending_template = TextAreaField('Telegram /status Pending Template', validators=[Optional(), Length(max=2000)])
     service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
@@ -1309,17 +1310,28 @@ def _telegram_help_message():
     return (
         "Group Test Manager bot commands:\n"
         "/tests - list tests you can see\n"
+        "/mytests - list tests you are interacting with\n"
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/help - show this help message"
     )
 
 
+def _telegram_sort_tests_by_id(tests, limit=20):
+    unique_tests = {}
+    for test in tests:
+        if test is None or test.id in unique_tests:
+            continue
+        unique_tests[test.id] = test
+    sorted_tests = [unique_tests[test_id] for test_id in sorted(unique_tests)]
+    return sorted_tests[:limit]
+
+
 def _telegram_user_visible_tests(user):
     if user.is_admin:
-        return GroupTest.query.order_by(GroupTest.updated_at.desc()).limit(20).all()
+        return GroupTest.query.order_by(GroupTest.id.asc()).limit(20).all()
 
-    recruiting = GroupTest.query.filter_by(status='recruiting').all()
+    recruiting = GroupTest.query.filter_by(status='recruiting').order_by(GroupTest.id.asc()).all()
     member_tests = (
         GroupTest.query
         .join(Participation)
@@ -1329,16 +1341,41 @@ def _telegram_user_visible_tests(user):
             Participation.denied == False,
             GroupTest.status.in_(['testing', 'ready_for_payment', 'closed'])
         )
+        .order_by(GroupTest.id.asc())
         .all()
     )
-    seen = set()
-    tests = []
-    for test in recruiting + member_tests:
-        if test.id in seen:
+    return _telegram_sort_tests_by_id(recruiting + member_tests)
+
+
+def _telegram_user_interacting_tests(user):
+    participations = (
+        Participation.query
+        .filter_by(user_id=user.id)
+        .order_by(Participation.group_test_id.asc(), Participation.requested_at.asc())
+        .all()
+    )
+    return [part for part in participations if part.group_test is not None][:20]
+
+
+def _telegram_participation_state(participation):
+    if participation.denied:
+        return 'Denied'
+    if participation.approved:
+        return 'Approved'
+    return 'Pending'
+
+
+def _telegram_format_test_list(tests, participations_by_test_id=None):
+    lines = []
+    for test in _telegram_sort_tests_by_id(tests):
+        status_label = _format_status_label(test.status)
+        participation = (participations_by_test_id or {}).get(test.id)
+        if participation is not None:
+            state_label = _telegram_participation_state(participation)
+            lines.append(f"#{test.id} {test.title} [{status_label}] - {state_label}")
             continue
-        seen.add(test.id)
-        tests.append(test)
-    return tests[:20]
+        lines.append(f"#{test.id} {test.title} [{status_label}]")
+    return lines
 
 
 def _telegram_status_summary_for_user(user, test):
@@ -1366,6 +1403,20 @@ def _telegram_status_summary_for_user(user, test):
             '#{{ test_id }} {{ test_title }}: Denied. {{ denied_reason }}',
             denied_context,
         ).strip()
+    if part.approved and part.paid_lab and test.status == 'closed' and test.results_link:
+        results_context = {
+            **base_context,
+            'results_url': test.results_link,
+            'order_status': part.order_status or 'pending',
+            'amount_owed': f"{(part.amount_owed or 0):.2f}",
+            'amount_paid': f"{(part.amount_paid or 0):.2f}",
+        }
+        return _render_telegram_status_template(
+            config_map,
+            'telegram_status_user_results_template',
+            '#{{ test_id }} {{ test_title }}: Results are available: {{ results_url }}',
+            results_context,
+        )
     if part.approved:
         approved_context = {
             **base_context,
@@ -1526,8 +1577,19 @@ def telegram_webhook():
         if not tests:
             send_telegram_chat_message(chat_id, 'No eligible tests found right now.')
             return jsonify({'ok': True})
-        lines = [f"#{test.id} {test.title} [{test.status}]" for test in tests]
+        lines = _telegram_format_test_list(tests)
         send_telegram_chat_message(chat_id, 'Eligible tests:\n' + '\n'.join(lines))
+        return jsonify({'ok': True})
+
+    if lower == '/mytests':
+        participations = _telegram_user_interacting_tests(linked_user)
+        if not participations:
+            send_telegram_chat_message(chat_id, 'You have no group test requests or approvals yet.')
+            return jsonify({'ok': True})
+        tests = [part.group_test for part in participations if part.group_test is not None]
+        participations_by_test_id = {part.group_test_id: part for part in participations}
+        lines = _telegram_format_test_list(tests, participations_by_test_id=participations_by_test_id)
+        send_telegram_chat_message(chat_id, 'Your group tests:\n' + '\n'.join(lines))
         return jsonify({'ok': True})
 
     if lower.startswith('/status'):
@@ -1536,7 +1598,10 @@ def telegram_webhook():
             send_telegram_chat_message(chat_id, 'Usage: /status <test_id>')
             return jsonify({'ok': True})
         test = GroupTest.query.get(int(parts[1]))
-        if test is None or not test.can_user_see(linked_user):
+        user_participation = None
+        if test is not None:
+            user_participation = Participation.query.filter_by(group_test_id=test.id, user_id=linked_user.id).first()
+        if test is None or (user_participation is None and not test.can_user_see(linked_user)):
             send_telegram_chat_message(chat_id, 'Test not found or not visible to your account.')
             return jsonify({'ok': True})
         send_telegram_chat_message(chat_id, _telegram_status_summary_for_user(linked_user, test))
@@ -2725,6 +2790,7 @@ def notification_config():
             'telegram_status_new_test_template': form.telegram_status_new_test_template.data,
             'telegram_status_user_no_request_template': form.telegram_status_user_no_request_template.data,
             'telegram_status_user_denied_template': form.telegram_status_user_denied_template.data,
+            'telegram_status_user_results_template': form.telegram_status_user_results_template.data,
             'telegram_status_user_approved_template': form.telegram_status_user_approved_template.data,
             'telegram_status_user_pending_template': form.telegram_status_user_pending_template.data,
             'service_base_url': form.service_base_url.data,
@@ -2769,6 +2835,7 @@ def notification_config():
         form.telegram_status_new_test_template.data = configs.get('telegram_status_new_test_template')
         form.telegram_status_user_no_request_template.data = configs.get('telegram_status_user_no_request_template')
         form.telegram_status_user_denied_template.data = configs.get('telegram_status_user_denied_template')
+        form.telegram_status_user_results_template.data = configs.get('telegram_status_user_results_template')
         form.telegram_status_user_approved_template.data = configs.get('telegram_status_user_approved_template')
         form.telegram_status_user_pending_template.data = configs.get('telegram_status_user_pending_template')
         form.service_base_url.data = configs.get('service_base_url')

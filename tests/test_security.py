@@ -412,6 +412,131 @@ class SecurityTests(unittest.TestCase):
             self.assertIsNone(refreshed_target.telegram_user_id)
             self.assertIsNone(refreshed_token.used_at)
 
+    def test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgviewer", email="tgviewer@example.com", telegram_chat_id="1001", telegram_user_id="555")
+            user.set_password("secret")
+            owner = User(username="owner", email="owner@example.com", is_admin=True)
+            owner.set_password("secret")
+            db.session.add_all([user, owner])
+            db.session.flush()
+
+            test_three = GroupTest(title="Third Test", status="recruiting", created_by=owner.id)
+            test_one = GroupTest(title="First Test", status="recruiting", created_by=owner.id)
+            test_two = GroupTest(title="Second Test", status="ready_for_payment", created_by=owner.id)
+            db.session.add_all([test_three, test_one, test_two])
+            db.session.flush()
+            db.session.add(Participation(group_test_id=test_two.id, user_id=user.id, approved=True, denied=False, name="Viewer"))
+            db.session.commit()
+            expected_lines = [
+                f"#{test.id} {test.title}" for test in sorted([test_three, test_one, test_two], key=lambda item: item.id)
+            ]
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 555, "username": "tgviewer"},
+                        "text": "/tests",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn("Eligible tests:\n", sent_body)
+        positions = [sent_body.find(line) for line in expected_lines]
+        self.assertTrue(all(position >= 0 for position in positions))
+        self.assertEqual(positions, sorted(positions))
+
+    def test_telegram_mytests_command_lists_only_user_interactions_with_states(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgmember", email="tgmember@example.com", telegram_chat_id="2002", telegram_user_id="777")
+            user.set_password("secret")
+            owner = User(username="owner", email="owner@example.com", is_admin=True)
+            owner.set_password("secret")
+            db.session.add_all([user, owner])
+            db.session.flush()
+
+            test_pending = GroupTest(title="Pending Test", status="recruiting", created_by=owner.id)
+            test_denied = GroupTest(title="Denied Test", status="testing", created_by=owner.id)
+            test_approved = GroupTest(title="Approved Test", status="closed", created_by=owner.id)
+            test_unrelated = GroupTest(title="Unrelated Test", status="recruiting", created_by=owner.id)
+            db.session.add_all([test_pending, test_denied, test_approved, test_unrelated])
+            db.session.flush()
+
+            db.session.add_all([
+                Participation(group_test_id=test_pending.id, user_id=user.id, approved=False, denied=False, name="Member"),
+                Participation(group_test_id=test_denied.id, user_id=user.id, approved=False, denied=True, denied_reason="Nope", name="Member"),
+                Participation(group_test_id=test_approved.id, user_id=user.id, approved=True, denied=False, name="Member"),
+            ])
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 2002},
+                        "from": {"id": 777, "username": "tgmember"},
+                        "text": "/mytests",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn("Your group tests:\n", sent_body)
+        self.assertIn("#1 Pending Test [Recruiting] - Pending", sent_body)
+        self.assertIn("#2 Denied Test [Testing] - Denied", sent_body)
+        self.assertIn("#3 Approved Test [Closed] - Approved", sent_body)
+        self.assertNotIn("Unrelated Test", sent_body)
+
+    def test_telegram_status_command_allows_user_participation_even_if_test_not_visible(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgdenied", email="tgdenied@example.com", telegram_chat_id="3003", telegram_user_id="888")
+            user.set_password("secret")
+            owner = User(username="owner", email="owner@example.com", is_admin=True)
+            owner.set_password("secret")
+            db.session.add_all([user, owner])
+            db.session.flush()
+
+            test = GroupTest(title="Denied Status Test", status="testing", created_by=owner.id)
+            db.session.add(test)
+            db.session.flush()
+            db.session.add(Participation(
+                group_test_id=test.id,
+                user_id=user.id,
+                approved=False,
+                denied=True,
+                denied_reason="Need more verification",
+                name="Member",
+            ))
+            db.session.commit()
+            test_id = test.id
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 3003},
+                        "from": {"id": 888, "username": "tgdenied"},
+                        "text": f"/status {test_id}",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn(f"#{test_id} Denied Status Test: Denied.", sent_body)
+        self.assertIn("Need more verification", sent_body)
+
     def test_delete_payment_option_in_use_sets_inactive(self):
         with self.app.app_context():
             db.create_all()
@@ -734,6 +859,7 @@ class SecurityTests(unittest.TestCase):
                 "telegram_status_new_test_template": "New {{ test_id }} {{ test_url }}",
                 "telegram_status_user_no_request_template": "None {{ test_title }}",
                 "telegram_status_user_denied_template": "Denied {{ denied_reason }}",
+                "telegram_status_user_results_template": "Results {{ results_url }}",
                 "telegram_status_user_approved_template": "Approved {{ amount_owed }}",
                 "telegram_status_user_pending_template": "Pending {{ test_id }}",
                 "service_base_url": "",
@@ -750,6 +876,7 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_new_test_template").first().value, "New {{ test_id }} {{ test_url }}")
             self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_no_request_template").first().value, "None {{ test_title }}")
             self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_denied_template").first().value, "Denied {{ denied_reason }}")
+            self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_results_template").first().value, "Results {{ results_url }}")
             self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_approved_template").first().value, "Approved {{ amount_owed }}")
             self.assertEqual(NotificationConfig.query.filter_by(key="telegram_status_user_pending_template").first().value, "Pending {{ test_id }}")
 

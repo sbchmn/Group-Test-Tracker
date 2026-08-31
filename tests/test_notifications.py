@@ -641,6 +641,86 @@ class NotificationTests(unittest.TestCase):
 
         self.assertIn("Status Template Status Test | ordered_from_vendor | owed=45.50 | paid=10.00", text)
 
+    def test_telegram_status_summary_returns_results_url_for_closed_paid_participant(self):
+        with self.app.app_context():
+            from app.routes import _telegram_status_summary_for_user
+
+            db.create_all()
+            user = User(username="member-results-template", email="member-results-template@example.com")
+            user.set_password("secret")
+            admin = User(username="admin-results-template", email="admin-results-template@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add_all([user, admin])
+            db.session.flush()
+
+            test = GroupTest(
+                title="Closed Results Test",
+                status="closed",
+                results_link="https://example.com/results/closed-results-test",
+                created_by=admin.id,
+            )
+            db.session.add(test)
+            db.session.flush()
+
+            db.session.add(Participation(
+                group_test_id=test.id,
+                user_id=user.id,
+                approved=True,
+                denied=False,
+                paid_lab=True,
+                order_status="received",
+                amount_owed=20.0,
+                amount_paid=20.0,
+                name="Member",
+            ))
+            db.session.commit()
+
+            text = _telegram_status_summary_for_user(user, test)
+
+        self.assertIn("Results are available", text)
+        self.assertIn("https://example.com/results/closed-results-test", text)
+
+    def test_telegram_status_summary_uses_custom_results_template(self):
+        with self.app.app_context():
+            from app.routes import _telegram_status_summary_for_user
+
+            db.create_all()
+            user = User(username="member-results-custom", email="member-results-custom@example.com")
+            user.set_password("secret")
+            admin = User(username="admin-results-custom", email="admin-results-custom@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add_all([user, admin])
+            db.session.flush()
+
+            test = GroupTest(
+                title="Custom Results Test",
+                status="closed",
+                results_link="https://example.com/results/custom-results-test",
+                created_by=admin.id,
+            )
+            db.session.add(test)
+            db.session.flush()
+
+            db.session.add(Participation(
+                group_test_id=test.id,
+                user_id=user.id,
+                approved=True,
+                denied=False,
+                paid_lab=True,
+                amount_owed=30.0,
+                amount_paid=30.0,
+                name="Member",
+            ))
+            db.session.add(NotificationConfig(
+                key="telegram_status_user_results_template",
+                value="Done {{ test_title }} => {{ results_url }}",
+            ))
+            db.session.commit()
+
+            text = _telegram_status_summary_for_user(user, test)
+
+        self.assertIn("Done Custom Results Test => https://example.com/results/custom-results-test", text)
+
     def test_status_digest_duplicate_insert_race_is_ignored(self):
         with self.app.app_context():
             from app.routes import _send_status_update_to_telegram

@@ -151,6 +151,10 @@ Result image behavior:
 Telegram account-linking notes:
 - Users must open the bot and press Start before Telegram direct delivery can work.
 - Telegram delivery depends on stored linked chat identity, not just username text.
+- Bot command quick reference for participants:
+- `/tests` lists visible tests in ascending test-number order.
+- `/mytests` lists only their own pending/approved/denied group-test interactions in ascending test-number order.
+- `/status <test_id>` returns their current status for a specific test, including denied records. For closed tests where they are marked paid, it returns the results URL.
 
 ## 9) Troubleshooting Quick Hits
 

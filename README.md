@@ -164,6 +164,13 @@ Telegram note:
 3. Optionally set a new password.
 4. Save Profile.
 
+Telegram bot commands:
+
+- `/tests` lists tests visible to your account, ordered by test number ascending.
+- `/mytests` lists only tests where you have a pending, approved, or denied participation record, ordered by test number ascending.
+- `/status <test_id>` shows your current interaction status for that test. If the test is closed and you are marked paid, it returns the test results URL.
+- `/join <test_id>` submits a join request for recruiting tests.
+
 ### Use Dashboard
 
 Dashboard shows tests based on visibility rules:
@@ -456,6 +463,7 @@ Telegram status template variables:
 - `order_status`
 - `amount_owed`
 - `amount_paid`
+- `results_url`
 
 ## Testing and Validation
 

@@ -550,3 +550,47 @@
 - Mention dedupe preference validation passed: `py -3 -m unittest tests.test_notifications` (30 tests, OK).
 	- `tests.test_security.SecurityTests.test_ready_for_payment_renders_venmo_link_and_qr`
 	- `tests.test_security.SecurityTests.test_payment_option_form_requires_handle_for_venmo_without_override`
+
+## Telegram My Tests Command + Ordered Lists
+
+### Intended Behavior Changes
+- Add a `/mytests` bot command that lists only group tests the linked user is actively interacting with (pending, approved, or denied).
+- Ensure Telegram test list responses are ordered by group test number ascending.
+- Keep `/status <test_id>` usable for a user's own participation record even when that test is no longer broadly visible to them.
+
+### Implemented Changes
+- Added `/mytests` to Telegram help output and webhook command handling.
+- Added shared Telegram test-list formatting and ascending-by-test-id ordering helpers.
+- Updated `/tests` to use the shared ordered formatter.
+- Added participation-scoped `/mytests` output with Pending/Approved/Denied labels.
+- Relaxed Telegram `/status` visibility gating to allow a user's own participation record to resolve status output.
+- Updated README and ADMIN_QUICK_START with the new Telegram bot command guidance.
+
+### Security / Reliability / Optimization Notes
+- Security: `/status` now allows access only when the requesting linked user has a participation record for that test; it does not expose unrelated tests.
+- Reliability: Shared ordered formatter removes inconsistent list ordering across Telegram test list responses.
+- Optimization: Sorting is done on de-duplicated in-memory test sets capped to the existing list size, avoiding wider query churn.
+
+### Validation Results
+- Narrow webhook-command validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_tests_command_lists_visible_tests_in_ascending_test_number_order tests.test_security.SecurityTests.test_telegram_mytests_command_lists_only_user_interactions_with_states tests.test_security.SecurityTests.test_telegram_status_command_allows_user_participation_even_if_test_not_visible` (3 tests, OK).
+- Broader Telegram/security regression slice passed: `py -3 -m unittest tests.test_security` (32 tests, OK).
+
+## Telegram Closed-Test Results Status Reply
+
+### Intended Behavior Changes
+- When a linked user requests `/status <test_id>` for a closed test where they are approved and marked paid, return a message containing the test results URL.
+- Keep this message configurable within the existing Telegram status template system.
+
+### Implemented Changes
+- Added a completed+paid `/status` branch that returns the closed test's `results_link` when available.
+- Added a new notification-config key and admin field: `telegram_status_user_results_template`.
+- Exposed `results_url` as a supported Telegram status template variable.
+- Updated README and ADMIN_QUICK_START with the new bot behavior.
+
+### Security / Reliability / Optimization Notes
+- Security: The results URL is returned only for the linked user's own approved, paid participation on a closed test.
+- Reliability: The branch falls back to the standard approved reply when the test is not closed, the user is not paid, or no results URL exists.
+- Optimization: The change reuses the existing `/status` lookup path and template renderer with no new broad queries.
+
+### Validation Results
+- Narrow results-status validation passed: `py -3 -m unittest tests.test_notifications.NotificationTests.test_telegram_status_summary_returns_results_url_for_closed_paid_participant tests.test_notifications.NotificationTests.test_telegram_status_summary_uses_custom_results_template tests.test_security.SecurityTests.test_notification_config_persists_telegram_status_templates` (3 tests, OK).

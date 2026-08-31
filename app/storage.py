@@ -16,12 +16,16 @@ class StorageUploadError(RuntimeError):
     """Raised when an upload fails validation or transport."""
 
 
-_DEFAULT_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
+_DEFAULT_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "PDF"}
 _IMAGE_FORMAT_META = {
     "JPEG": ("jpg", "image/jpeg"),
     "PNG": ("png", "image/png"),
     "WEBP": ("webp", "image/webp"),
     "GIF": ("gif", "image/gif"),
+}
+_RESULT_FORMAT_META = {
+    **_IMAGE_FORMAT_META,
+    "PDF": ("pdf", "application/pdf"),
 }
 
 
@@ -65,7 +69,7 @@ def get_storage_settings():
         max_upload_mb = 8.0
     max_upload_mb = min(max(max_upload_mb, 1.0), 50.0)
 
-    allowed_formats_raw = str(_get_config_value("storage_allowed_formats", "JPEG,PNG,WEBP,GIF") or "")
+    allowed_formats_raw = str(_get_config_value("storage_allowed_formats", "JPEG,PNG,WEBP,GIF,PDF") or "")
     allowed_formats = {
         token.strip().upper()
         for token in allowed_formats_raw.split(",")
@@ -142,26 +146,37 @@ def _assert_configured(settings):
         raise StorageConfigurationError(f"Storage is not fully configured: missing {missing_text}.")
 
 
-def _validate_and_prepare_image(file_storage, settings):
+def _validate_and_prepare_result_file(file_storage, settings):
+    payload = file_storage.read() if file_storage else b""
+    if not payload:
+        raise StorageUploadError("No file data was received.")
+
+    max_bytes = int(settings["max_upload_size_mb"] * 1024 * 1024)
+    if len(payload) > max_bytes:
+        raise StorageUploadError(f"File exceeds the configured upload limit ({settings['max_upload_size_mb']:.0f} MB).")
+
+    filename = (getattr(file_storage, "filename", "") or "").strip().lower()
+    is_pdf_upload = filename.endswith(".pdf") or payload.startswith(b"%PDF-")
+    if is_pdf_upload:
+        if not payload.startswith(b"%PDF-"):
+            raise StorageUploadError("Uploaded PDF is invalid.")
+        if "PDF" not in settings["allowed_formats"]:
+            allowed = ", ".join(sorted(settings["allowed_formats"]))
+            raise StorageUploadError(f"File format PDF is not allowed. Allowed formats: {allowed}.")
+        ext, content_type = _RESULT_FORMAT_META["PDF"]
+        return payload, ext, content_type
+
     try:
         from PIL import Image, UnidentifiedImageError
     except Exception as exc:
         raise StorageConfigurationError('Image processing library is not installed. Run pip install -r requirements.txt.') from exc
-
-    payload = file_storage.read() if file_storage else b""
-    if not payload:
-        raise StorageUploadError("No image data was received.")
-
-    max_bytes = int(settings["max_upload_size_mb"] * 1024 * 1024)
-    if len(payload) > max_bytes:
-        raise StorageUploadError(f"Image exceeds the configured upload limit ({settings['max_upload_size_mb']:.0f} MB).")
 
     try:
         with Image.open(io.BytesIO(payload)) as img:
             image_format = (img.format or "").upper()
             width, height = img.size
     except UnidentifiedImageError as exc:
-        raise StorageUploadError("Uploaded file is not a supported image.") from exc
+        raise StorageUploadError("Uploaded file is not a supported image or PDF.") from exc
     except Exception as exc:
         raise StorageUploadError("Unable to process the uploaded image.") from exc
 
@@ -174,7 +189,7 @@ def _validate_and_prepare_image(file_storage, settings):
     if width <= 0 or height <= 0 or width * height > 50_000_000:
         raise StorageUploadError("Image dimensions are invalid or too large.")
 
-    ext, content_type = _IMAGE_FORMAT_META[image_format]
+    ext, content_type = _RESULT_FORMAT_META[image_format]
     return payload, ext, content_type
 
 
@@ -191,7 +206,7 @@ def upload_result_image(file_storage, category):
     settings = get_storage_settings()
     _assert_configured(settings)
 
-    payload, ext, content_type = _validate_and_prepare_image(file_storage, settings)
+    payload, ext, content_type = _validate_and_prepare_result_file(file_storage, settings)
     object_key = _build_object_key(settings, category, ext)
 
     client = _build_client(settings)

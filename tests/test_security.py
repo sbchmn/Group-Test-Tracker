@@ -239,6 +239,33 @@ class SecurityTests(unittest.TestCase):
         self.assertIn('data-file-kind="pdf"', body)
         self.assertIn('id="resultFileModalDownload"', body)
 
+    def test_admin_public_results_page_renders_pdf_result_without_template_error(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+
+            db.session.add(
+                PublicResult(
+                    title="PDF Public Result",
+                    summary="PDF summary",
+                    results_link="https://example.com/public-pdf",
+                    results_image_key="result-images/public-results/coa.pdf",
+                    created_by=admin.id,
+                )
+            )
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        response = self.client.get("/admin/public-results")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('data-file-kind="pdf"', body)
+
     def test_admin_my_results_shows_closed_results_without_membership(self):
         with self.app.app_context():
             db.create_all()

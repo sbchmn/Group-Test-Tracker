@@ -131,7 +131,7 @@ window.addEventListener('DOMContentLoaded', function() {
                         <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf">
                         {% if editing_result_image_url %}
                             <div class="mt-2 d-flex align-items-center gap-3">
-                                {% if editing_result and editing_result.results_image_key and editing_result.results_image_key|lower|endswith('.pdf') %}
+                                {% if editing_result and editing_result.results_image_key and (editing_result.results_image_key|lower)[-4:] == '.pdf' %}
                                     <div class="d-flex align-items-center justify-content-center" style="width: 88px; height: 88px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
                                         <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
                                     </div>
@@ -224,9 +224,9 @@ window.addEventListener('DOMContentLoaded', function() {
                                                         data-bs-target="#resultImageModal"
                                                         data-result-image-trigger="true"
                                                         data-image-src="{{ result_image_url }}"
-                                                        data-file-kind="{{ 'pdf' if result.results_image_key and result.results_image_key|lower|endswith('.pdf') else 'image' }}"
+                                                        data-file-kind="{{ 'pdf' if result.results_image_key and (result.results_image_key|lower)[-4:] == '.pdf' else 'image' }}"
                                                         data-image-title="{{ result.title }}">
-                                                    {% if result.results_image_key and result.results_image_key|lower|endswith('.pdf') %}
+                                                    {% if result.results_image_key and (result.results_image_key|lower)[-4:] == '.pdf' %}
                                                         <div class="d-flex align-items-center justify-content-center" style="width: 84px; height: 84px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
                                                             <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
                                                         </div>

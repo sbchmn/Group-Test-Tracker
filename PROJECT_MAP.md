@@ -395,3 +395,17 @@
 
 ### Validation Results
 - Focused token-safety validation passed: `python -m unittest tests.test_security.SecurityTests.test_admin_can_register_telegram_webhook_from_config_page tests.test_security.SecurityTests.test_register_telegram_webhook_requires_bot_token tests.test_security.SecurityTests.test_notification_config_preserves_telegram_token_when_masked_value_submitted` (3 tests, OK).
+
+## Public Results Template Runtime Fix
+
+### Intended Behavior Changes
+- Eliminate runtime template errors on admin pages caused by unsupported Jinja filters.
+
+### Implemented Changes
+- Replaced unsupported `|endswith('.pdf')` filter usage with slice-based extension checks in admin templates.
+- Updated both public-results and edit-test PDF-preview branches to use the same compatible extension logic.
+- Added a focused regression test that renders `/admin/public-results` with a PDF-backed public result to guard against template runtime failures.
+
+### Validation Results
+- Focused regression run passed: `python -m unittest tests.test_security tests.test_storage` (24 tests, OK).
+- Additional focused rendering check passed: `python -m unittest tests.test_security.SecurityTests.test_group_test_pdf_result_renders_pdf_modal_trigger_and_download_button tests.test_security.SecurityTests.test_admin_public_results_page_renders_pdf_result_without_template_error` (2 tests, OK).

@@ -61,3 +61,6 @@
 [2026-08-31 19:28:27] configuration: credentials updated
 [2026-08-31 19:29:00] mailjet: queued for admin
 [2026-08-31 19:29:01] mailjet: queued for admin
+[2026-08-31 19:49:18] telegram: webhook registered url=https://group-tests.example/telegram/webhook
+[2026-08-31 19:49:19] telegram: webhook unregistered
+[2026-08-31 19:49:24] configuration: credentials updated

@@ -77,6 +77,10 @@ def get_storage_settings():
     }
     if not allowed_formats:
         allowed_formats = set(_DEFAULT_ALLOWED_FORMATS)
+    elif "PDF" not in allowed_formats:
+        # Backward compatibility: legacy deployments may still have image-only
+        # allowed formats saved before PDF support was introduced.
+        allowed_formats.add("PDF")
 
     if provider not in {"aws", "do"}:
         provider = "aws"

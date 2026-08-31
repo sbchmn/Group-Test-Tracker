@@ -82,6 +82,25 @@ class StorageUploadTests(unittest.TestCase):
                 with self.assertRaises(StorageUploadError):
                     upload_result_image(file_storage, "public-results")
 
+    def test_upload_result_image_accepts_pdf_when_legacy_allowed_formats_omit_pdf(self):
+        with self.app.app_context():
+            db.create_all()
+            self._seed_storage_config(allowed_formats="JPEG,PNG,WEBP,GIF")
+
+            fake_client = _FakeS3Client()
+            file_storage = FileStorage(
+                stream=io.BytesIO(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"),
+                filename="legacy.pdf",
+                content_type="application/pdf",
+            )
+
+            with patch("app.storage._build_client", return_value=fake_client):
+                object_key = upload_result_image(file_storage, "public-results")
+
+            self.assertTrue(object_key.endswith(".pdf"))
+            self.assertEqual(len(fake_client.calls), 1)
+            self.assertEqual(fake_client.calls[0]["ContentType"], "application/pdf")
+
 
 if __name__ == "__main__":
     unittest.main()

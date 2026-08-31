@@ -457,3 +457,15 @@
 	- `tests.test_lab_costs.LabCostTests.test_create_test_supports_ready_for_payment_status`
 	- `tests.test_security.SecurityTests.test_ready_for_payment_shows_payment_methods_at_top_of_right_column`
 	- `tests.test_notifications.NotificationTests.test_status_digest_formats_ready_for_payment_label`
+
+## PDF Upload Legacy Format Compatibility Fix
+
+### Intended Behavior Changes
+- Ensure PDF uploads for group/public results keep working even when older storage format config values omit `PDF`.
+
+### Implemented Changes
+- Updated storage settings parsing to auto-include `PDF` in allowed formats for backward compatibility with legacy image-only config values.
+- Added regression coverage for successful PDF upload when `storage_allowed_formats` is stored as `JPEG,PNG,WEBP,GIF`.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_storage tests.test_security` (27 tests, OK).

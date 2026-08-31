@@ -107,3 +107,11 @@
 [2026-08-31 21:36:04] telegram: webhook unregistered
 [2026-08-31 21:36:10] configuration: credentials updated
 [2026-08-31 21:36:11] configuration: credentials updated
+[2026-08-31 21:44:50] telegram: webhook registered url=https://group-tests.example/telegram/webhook
+[2026-08-31 21:44:51] telegram: webhook unregistered
+[2026-08-31 21:44:58] configuration: credentials updated
+[2026-08-31 21:44:59] configuration: credentials updated
+[2026-08-31 21:48:25] telegram: webhook registered url=https://group-tests.example/telegram/webhook
+[2026-08-31 21:48:25] telegram: webhook unregistered
+[2026-08-31 21:48:31] configuration: credentials updated
+[2026-08-31 21:48:32] configuration: credentials updated

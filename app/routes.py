@@ -481,6 +481,24 @@ def _resolve_telegram_webhook_url(config_map):
     return f"{request.host_url.rstrip('/')}{url_for('main.telegram_webhook')}"
 
 
+def _resolve_service_base_url(config_map):
+    service_base = str(config_map.get('service_base_url') or '').strip()
+    if service_base:
+        return service_base.rstrip('/')
+    return request.host_url.rstrip('/')
+
+
+def _telegram_testing_message(config_map):
+    base_url = _resolve_service_base_url(config_map)
+    register_url = f"{base_url}{url_for('main.register')}"
+    login_url = f"{base_url}{url_for('main.login')}"
+    return (
+        "To join and view group testing, sign up or log in at Group Test Manager.\n"
+        f"Sign up: {register_url}\n"
+        f"Log in: {login_url}"
+    )
+
+
 def _issue_telegram_link_token(user):
     if user is None:
         return None
@@ -1311,6 +1329,7 @@ def _telegram_help_message():
         "Group Test Manager bot commands:\n"
         "/tests - list tests you can see\n"
         "/mytests - list tests you are interacting with\n"
+        "/testing - get signup/login links for group testing\n"
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/help - show this help message"
@@ -1496,7 +1515,7 @@ def telegram_webhook():
             db.session.rollback()
             return jsonify({'ok': True})
 
-    message = payload.get('message') or payload.get('edited_message') or {}
+    message = payload.get('message') or payload.get('edited_message') or payload.get('channel_post') or payload.get('edited_channel_post') or {}
     if not isinstance(message, dict):
         db.session.commit()
         return jsonify({'ok': True})
@@ -1504,12 +1523,32 @@ def telegram_webhook():
     chat = message.get('chat') or {}
     from_user = message.get('from') or {}
     chat_id_raw = chat.get('id')
+    chat_type = str(chat.get('type') or '').strip().lower()
     telegram_user_id_raw = from_user.get('id')
     incoming_username = str(from_user.get('username') or '').strip().lstrip('@')
     chat_id = str(chat_id_raw).strip() if chat_id_raw is not None else ''
+    message_thread_id = message.get('message_thread_id')
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     if not chat_id or not text:
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    lower = text.lower()
+    if lower == '/testing':
+        send_telegram_chat_message(
+            chat_id,
+            _telegram_testing_message(config_map),
+            message_thread_id=message_thread_id,
+        )
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    if chat_type and chat_type != 'private':
+        append_notification_log(
+            f"telegram: ignoring non-private bot command/update from chat {chat_id} ({chat_type})",
+            debug=True,
+        )
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -1567,7 +1606,6 @@ def telegram_webhook():
         linked_user.telegram_chat_id = chat_id
     db.session.commit()
 
-    lower = text.lower()
     if lower == '/help':
         send_telegram_chat_message(chat_id, _telegram_help_message())
         return jsonify({'ok': True})

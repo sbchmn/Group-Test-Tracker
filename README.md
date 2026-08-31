@@ -166,8 +166,11 @@ Telegram note:
 
 Telegram bot commands:
 
+- Bot commands are handled in private chat with the bot. Group/status-channel messages are ignored for command replies.
+- The exception is `/testing`, which can reply in a group or channel with signup/login links to the app.
 - `/tests` lists tests visible to your account, ordered by test number ascending.
 - `/mytests` lists only tests where you have a pending, approved, or denied participation record, ordered by test number ascending.
+- `/testing` returns the base app links for sign up and login.
 - `/status <test_id>` shows your current interaction status for that test. If the test is closed and you are marked paid, it returns the test results URL.
 - `/join <test_id>` submits a join request for recruiting tests.
 

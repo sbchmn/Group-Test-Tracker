@@ -359,6 +359,120 @@ class SecurityTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_telegram_webhook_ignores_group_messages_without_reply(self):
+        with self.app.app_context():
+            db.create_all()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -10012345, "type": "supergroup"},
+                        "from": {"id": 1001, "username": "groupuser"},
+                        "text": "/help",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
+
+    def test_telegram_webhook_group_message_does_not_overwrite_private_chat_link(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgprivate", email="tgprivate@example.com", telegram_chat_id="777888", telegram_user_id="123456")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -1009000, "type": "group"},
+                        "from": {"id": 123456, "username": "tgprivate"},
+                        "text": "/mytests",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
+        with self.app.app_context():
+            refreshed = User.query.get(user_id)
+            self.assertEqual(refreshed.telegram_chat_id, "777888")
+
+    def test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -100333, "type": "supergroup"},
+                        "text": "/testing",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn("https://group-tests.example/register", sent_body)
+        self.assertIn("https://group-tests.example/login", sent_body)
+
+    def test_telegram_webhook_testing_command_replies_in_originating_message_thread(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -100333, "type": "supergroup"},
+                        "message_thread_id": 42,
+                        "text": "/testing",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args.kwargs.get("message_thread_id"), 42)
+
+    def test_telegram_webhook_testing_command_replies_in_channel_post(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "channel_post": {
+                        "chat": {"id": -100444, "type": "channel"},
+                        "text": "/testing",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn("Sign up:", sent_body)
+        self.assertIn("Log in:", sent_body)
+
     def test_telegram_webhook_ignores_duplicate_update_id(self):
         with self.app.app_context():
             db.create_all()

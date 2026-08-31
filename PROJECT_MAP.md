@@ -594,3 +594,45 @@
 
 ### Validation Results
 - Narrow results-status validation passed: `py -3 -m unittest tests.test_notifications.NotificationTests.test_telegram_status_summary_returns_results_url_for_closed_paid_participant tests.test_notifications.NotificationTests.test_telegram_status_summary_uses_custom_results_template tests.test_security.SecurityTests.test_notification_config_persists_telegram_status_templates` (3 tests, OK).
+
+## Telegram Group Outbound-Only Guard
+
+### Intended Behavior Changes
+- Do not let the bot reply to commands in Telegram groups/topics used for status updates.
+- Prevent group messages from overwriting a user's linked private `telegram_chat_id`.
+
+### Implemented Changes
+- Added an early non-private chat guard in the Telegram webhook so `group`, `supergroup`, and other non-private chats are ignored for bot command handling.
+- Kept status-channel/topic posting unchanged because outbound status messages use the separate status sender path.
+- Updated README and ADMIN_QUICK_START to state that bot commands should be used in private DM only.
+
+### Security / Reliability / Optimization Notes
+- Security: Prevents accidental disclosure of per-user bot replies in shared group chats.
+- Reliability: Prevents a linked user's private chat binding from being replaced by a group chat ID.
+- Optimization: Early return reduces unnecessary user lookup and command processing for group traffic.
+
+### Validation Results
+- Narrow group-guard validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply tests.test_security.SecurityTests.test_telegram_webhook_group_message_does_not_overwrite_private_chat_link` (2 tests, OK).
+
+## Telegram /testing Public Reply Path
+
+### Intended Behavior Changes
+- Allow one public Telegram command path, `/testing`, in groups and channels.
+- Reply with the app base URL plus sign-up and login instructions so users can onboard without private bot interaction.
+- Keep all other non-private commands ignored.
+
+### Implemented Changes
+- Added `_resolve_service_base_url(...)` and `_telegram_testing_message(...)` helpers.
+- Extended webhook payload parsing to accept `channel_post` and `edited_channel_post` so `/testing` can work in channels as well as groups.
+- Added an early `/testing` branch before the non-private-chat guard, returning sign-up and login links built from `service_base_url` with host fallback.
+- Threaded `/testing` replies to the originating Telegram topic by forwarding `message_thread_id` through the direct chat send helper when present.
+- Added `/testing` to the bot help text and updated README/ADMIN_QUICK_START.
+
+### Security / Reliability / Optimization Notes
+- Security: The public reply contains only onboarding links and no user-specific state.
+- Reliability: The message uses configured `service_base_url` when available and falls back to the current host, matching existing link-building patterns.
+- Optimization: Early branching avoids unnecessary user-link lookups for this public onboarding path.
+
+### Validation Results
+- Narrow `/testing` validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_channel_post tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply tests.test_security.SecurityTests.test_telegram_webhook_group_message_does_not_overwrite_private_chat_link` (4 tests, OK).
+- Focused thread-routing validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_originating_message_thread tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_channel_post tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply` (4 tests, OK).

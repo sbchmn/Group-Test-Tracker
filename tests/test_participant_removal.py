@@ -438,6 +438,34 @@ class ParticipantRemovalTests(unittest.TestCase):
         self.assertIn("Not Joined", body)
         self.assertNotIn("Join Request Pending", body)
 
+    def test_dashboard_status_group_order_places_ready_for_payment_before_testing(self):
+        with self.app.app_context():
+            db.create_all()
+
+            admin = User(username="admin-order", email="admin-order@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.flush()
+
+            db.session.add_all([
+                GroupTest(title="Recruiting Bucket", created_by=admin.id, status="recruiting"),
+                GroupTest(title="Ready Bucket", created_by=admin.id, status="ready_for_payment"),
+                GroupTest(title="Testing Bucket", created_by=admin.id, status="testing"),
+                GroupTest(title="Closed Bucket", created_by=admin.id, status="closed"),
+            ])
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "admin-order", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.get("/dashboard?group_by=status&sort_by=status", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertLess(body.find("Ready For Payment"), body.find("Testing"))
+
     def test_group_test_detail_shows_denied_status_and_reason(self):
         with self.app.app_context():
             db.create_all()

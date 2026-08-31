@@ -38,6 +38,11 @@
                 </div>
                 <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas.</small>
             </div>
+            <div class="mb-3">
+                {{ form.payment_option_ids.label(class="form-label") }}
+                {{ form.payment_option_ids(class="form-select", size="6", multiple=true) }}
+                <small class="text-muted d-block mt-2">Select one or more payment options available to participants in this test.</small>
+            </div>
         </div>
     </div>
     
@@ -100,12 +105,12 @@
                 {{ form.results_link(class="form-control", placeholder="https://drive.google.com/... or DO Spaces URL (only shown when Closed + approved members)") }}
             </div>
             <div class="mb-3">
-                <label class="form-label">Result Image (optional)</label>
-                <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif">
+                <label class="form-label">Result File (optional: image or PDF)</label>
+                <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf">
                 {% if storage_settings.enabled %}
-                    <small class="text-muted">Image uploads are enabled. Uploaded image will be shown as a thumbnail on results pages.</small>
+                    <small class="text-muted">Image and PDF uploads are enabled. Uploaded files are shown as thumbnails on results pages.</small>
                 {% else %}
-                    <small class="text-warning">Image uploads are disabled. Enable storage in Admin -> Storage Config.</small>
+                    <small class="text-warning">Result file uploads are disabled. Enable storage in Admin -> Storage Config.</small>
                 {% endif %}
             </div>
         </div>

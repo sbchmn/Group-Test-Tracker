@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Payment Option{% endblock %}
+
+{% block content %}
+<h3>Edit Payment Option</h3>
+<p class="text-muted">Update method details while preserving existing test and participant references.</p>
+
+<div class="card" style="max-width: 760px;">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="mb-3">{{ form.label.label(class="form-label") }}{{ form.label(class="form-control") }}</div>
+            <div class="mb-3">{{ form.method_type.label(class="form-label") }}{{ form.method_type(class="form-select") }}</div>
+            <div class="mb-3">{{ form.recipient_name.label(class="form-label") }}{{ form.recipient_name(class="form-control") }}</div>
+            <div class="mb-3">{{ form.account_handle.label(class="form-label") }}{{ form.account_handle(class="form-control") }}</div>
+            <div class="mb-3">{{ form.wallet_address.label(class="form-label") }}{{ form.wallet_address(class="form-control") }}</div>
+            <div class="mb-3">{{ form.network.label(class="form-label") }}{{ form.network(class="form-control") }}</div>
+            <div class="mb-3">{{ form.details.label(class="form-label") }}{{ form.details(class="form-control", rows=2) }}</div>
+            <div class="mb-3">{{ form.qr_payload_override.label(class="form-label") }}{{ form.qr_payload_override(class="form-control") }}</div>
+            <div class="mb-3 form-check">{{ form.is_active(class="form-check-input") }} {{ form.is_active.label(class="form-check-label") }}</div>
+            <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('main.payment_options') }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

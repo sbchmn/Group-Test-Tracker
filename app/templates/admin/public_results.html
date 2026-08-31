@@ -65,10 +65,30 @@ window.addEventListener('DOMContentLoaded', function() {
         button.addEventListener('click', function() {
             const src = button.getAttribute('data-image-src') || '';
             const title = button.getAttribute('data-image-title') || 'Result Image';
+            const kind = button.getAttribute('data-file-kind') || 'image';
             const modalImage = document.getElementById('resultImageModalSrc');
+            const modalPdf = document.getElementById('resultFileModalPdf');
             const modalTitle = document.getElementById('resultImageModalTitle');
-            if (modalImage) modalImage.src = src;
+            const modalDownload = document.getElementById('resultFileModalDownload');
+            if (modalImage) {
+                modalImage.src = '';
+                modalImage.classList.add('d-none');
+            }
+            if (modalPdf) {
+                modalPdf.src = '';
+                modalPdf.classList.add('d-none');
+            }
+            if (kind === 'pdf') {
+                if (modalPdf) {
+                    modalPdf.src = src;
+                    modalPdf.classList.remove('d-none');
+                }
+            } else if (modalImage) {
+                modalImage.src = src;
+                modalImage.classList.remove('d-none');
+            }
             if (modalTitle) modalTitle.textContent = title;
+            if (modalDownload) modalDownload.href = src;
         });
     });
 });
@@ -107,21 +127,27 @@ window.addEventListener('DOMContentLoaded', function() {
                         {{ form.results_link(class="form-control", placeholder="https://...") }}
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Result Image (optional)</label>
-                        <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif">
+                        <label class="form-label">Result File (optional: image or PDF)</label>
+                        <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf">
                         {% if editing_result_image_url %}
                             <div class="mt-2 d-flex align-items-center gap-3">
-                                <img src="{{ editing_result_image_url }}" alt="Current result image" style="width: 88px; height: 88px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                                {% if editing_result and editing_result.results_image_key and (editing_result.results_image_key|lower)[-4:] == '.pdf' %}
+                                    <div class="d-flex align-items-center justify-content-center" style="width: 88px; height: 88px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
+                                        <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
+                                    </div>
+                                {% else %}
+                                    <img src="{{ editing_result_image_url }}" alt="Current result image" style="width: 88px; height: 88px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                                {% endif %}
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" name="clear_results_image" id="clearPublicResultImage">
-                                    <label class="form-check-label" for="clearPublicResultImage">Remove existing image</label>
+                                    <label class="form-check-label" for="clearPublicResultImage">Remove existing file</label>
                                 </div>
                             </div>
                         {% endif %}
                         {% if storage_settings.enabled %}
-                            <small class="text-muted">Image uploads are enabled and will appear beside result links.</small>
+                            <small class="text-muted">Image and PDF uploads are enabled and appear beside result links.</small>
                         {% else %}
-                            <small class="text-warning">Image uploads are disabled. Enable storage in Admin -> Storage Config.</small>
+                            <small class="text-warning">Result file uploads are disabled. Enable storage in Admin -> Storage Config.</small>
                         {% endif %}
                     </div>
                     <div class="mb-3">
@@ -198,8 +224,15 @@ window.addEventListener('DOMContentLoaded', function() {
                                                         data-bs-target="#resultImageModal"
                                                         data-result-image-trigger="true"
                                                         data-image-src="{{ result_image_url }}"
+                                                        data-file-kind="{{ 'pdf' if result.results_image_key and (result.results_image_key|lower)[-4:] == '.pdf' else 'image' }}"
                                                         data-image-title="{{ result.title }}">
-                                                    <img src="{{ result_image_url }}" alt="{{ result.title }} image" style="width: 84px; height: 84px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                                                    {% if result.results_image_key and (result.results_image_key|lower)[-4:] == '.pdf' %}
+                                                        <div class="d-flex align-items-center justify-content-center" style="width: 84px; height: 84px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
+                                                            <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
+                                                        </div>
+                                                    {% else %}
+                                                        <img src="{{ result_image_url }}" alt="{{ result.title }} image" style="width: 84px; height: 84px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;">
+                                                    {% endif %}
                                                 </button>
                                             </div>
                                         {% endif %}
@@ -228,11 +261,15 @@ window.addEventListener('DOMContentLoaded', function() {
     <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="resultImageModalTitle">Result Image</h5>
+                <h5 class="modal-title" id="resultImageModalTitle">Result File</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body text-center">
-                <img id="resultImageModalSrc" src="" alt="Result image" class="img-fluid rounded">
+                <img id="resultImageModalSrc" src="" alt="Result image" class="img-fluid rounded d-none">
+                <iframe id="resultFileModalPdf" src="" title="Result PDF" class="w-100 border rounded d-none" style="min-height: 75vh;"></iframe>
+            </div>
+            <div class="modal-footer">
+                <a id="resultFileModalDownload" href="#" class="btn btn-primary" target="_blank" rel="noopener" download>Download File</a>
             </div>
         </div>
     </div>

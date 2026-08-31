@@ -28,6 +28,31 @@
                 <div class="form-text">Enter the total amount you have paid toward this test.</div>
             </div>
 
+            {% if test.status in ['testing', 'ready_for_payment'] and available_payment_options %}
+                <div class="mb-3">
+                    {{ form.preferred_payment_option_id.label(class="form-label") }}
+                    {{ form.preferred_payment_option_id(class="form-select") }}
+                    <div class="form-text">Choose your preferred method so admins can reconcile payments faster.</div>
+                </div>
+
+                {% if selected_payment_option %}
+                    <div class="alert alert-light border small">
+                        <div class="fw-semibold mb-1">Selected Payment Details</div>
+                        <div>{{ selected_payment_option.title }}</div>
+                        {% if selected_payment_option.account_handle %}<div>Handle: {{ selected_payment_option.account_handle }}</div>{% endif %}
+                        {% if selected_payment_option.wallet_address %}<div>Wallet: {{ selected_payment_option.wallet_address }}</div>{% endif %}
+                        {% if selected_payment_option.network %}<div>Network: {{ selected_payment_option.network }}</div>{% endif %}
+                        {% if selected_payment_option.details %}<div>{{ selected_payment_option.details }}</div>{% endif %}
+                        {% if selected_payment_option.qr_payload %}
+                            <div class="mt-2">
+                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Payment QR code" class="border rounded">
+                                <div class="text-muted mt-1">QR payload: {{ selected_payment_option.qr_payload }}</div>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endif %}
+
             <div class="mb-3">
                 {{ form.notes.label(class="form-label") }}
                 {{ form.notes(class="form-control", rows=3) }}

@@ -1,11 +1,13 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
+from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, User
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message
+from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message, send_telegram_status_channel_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -60,6 +62,23 @@ class NotificationTests(unittest.TestCase):
             self.assertNotEqual(refreshed.password_hash, "")
             self.assertTrue(mock_send.called)
             self.assertEqual(mock_send.call_args.args[1], "email")
+
+    def test_password_reset_route_requires_linked_chat_for_telegram(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="reset_tg", email="reset_tg@example.com", notification_channel="telegram")
+            user.set_password("old-password")
+            db.session.add(user)
+            db.session.commit()
+
+        response = self.client.post(
+            "/password-reset",
+            data={"username": "reset_tg", "notification_channel": "telegram"},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("open the bot and press Start", response.get_data(as_text=True))
 
     def test_register_route_sends_welcome_email_with_login_link(self):
         with self.app.app_context():
@@ -314,6 +333,52 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("telegram: response", log_contents)
         self.assertIn("\"ok\": true", log_contents)
 
+    def test_send_telegram_status_channel_message_includes_message_thread_id_suffix(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="telegram_status_chat_id", value="-1003638912415_2 "),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_telegram_status_channel_message("Thread message")
+
+        self.assertTrue(result)
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn(b'"chat_id": "-1003638912415"', request.data)
+        self.assertIn(b'"message_thread_id": 2', request.data)
+
+    def test_send_telegram_status_channel_message_without_thread_suffix_uses_chat_only(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="telegram_status_chat_id", value="-1003638912415"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_telegram_status_channel_message("No thread")
+
+        self.assertTrue(result)
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn(b'"chat_id": "-1003638912415"', request.data)
+        self.assertNotIn(b'"message_thread_id"', request.data)
+
     def test_send_notification_message_falls_back_to_email_when_telegram_requires_start(self):
         with self.app.app_context():
             db.create_all()
@@ -334,6 +399,183 @@ class NotificationTests(unittest.TestCase):
         self.assertTrue(result)
         mock_telegram.assert_called_once()
         mock_mailjet.assert_called_once()
+
+    def test_status_digest_event_persists_and_marks_sent(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            member = User(username="member", email="member@example.com", tg_username="membername", telegram_user_id="111")
+            member.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.flush()
+
+            test = GroupTest(title="Digest Test", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.flush()
+
+            participation = Participation(group_test_id=test.id, user_id=member.id, approved=True, denied=False, name="Member")
+            db.session.add(participation)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="true"))
+            db.session.add(NotificationConfig(key="telegram_digest_window_minutes", value="10"))
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "recruiting")
+                test.status = "closed"
+                _send_status_update_to_telegram(test, "testing")
+                db.session.commit()
+
+            self.assertTrue(mock_sender.called)
+            events = TelegramStatusDigestEvent.query.all()
+            self.assertEqual(len(events), 2)
+            self.assertTrue(all(event.sent_at is not None for event in events))
+
+    def test_status_digest_suppresses_duplicate_event_key_in_same_window(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+
+            test = GroupTest(title="Digest Duplicate Test", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="true"))
+            db.session.add(NotificationConfig(key="telegram_digest_window_minutes", value="10"))
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True):
+                _send_status_update_to_telegram(test, "recruiting")
+                _send_status_update_to_telegram(test, "recruiting")
+                db.session.commit()
+
+            events = TelegramStatusDigestEvent.query.all()
+            self.assertEqual(len(events), 1)
+
+    def test_status_digest_formats_ready_for_payment_label(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-ready", email="admin-ready@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+
+            test = GroupTest(title="Ready Label Test", status="ready_for_payment", created_by=admin.id)
+            db.session.add(test)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="false"))
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "testing")
+
+            self.assertTrue(mock_sender.called)
+            sent_body = mock_sender.call_args.args[0]
+            self.assertIn("Ready Label Test is now ready for payment", sent_body)
+
+    def test_status_digest_duplicate_insert_race_is_ignored(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-race", email="admin-race@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+
+            test = GroupTest(title="Digest Race Test", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.add(NotificationConfig(key="telegram_digest_enabled", value="true"))
+            db.session.add(NotificationConfig(key="telegram_digest_window_minutes", value="10"))
+            db.session.commit()
+
+            with patch(
+                "app.routes.db.session.flush",
+                side_effect=IntegrityError("INSERT", {"event_key": "x"}, Exception("duplicate")),
+            ):
+                _send_status_update_to_telegram(test, "recruiting")
+
+            db.session.commit()
+            events = TelegramStatusDigestEvent.query.all()
+            self.assertEqual(len(events), 0)
+
+    def test_send_due_user_digests_hourly_dispatches_and_marks_events_sent(self):
+        with self.app.app_context():
+            from app.notifications import send_due_user_digests
+
+            db.create_all()
+            user = User(
+                username="digest_hourly",
+                email="digest_hourly@example.com",
+                digest_frequency="hourly",
+                digest_hourly_minute_utc=0,
+                receive_group_test_notifications=True,
+                is_active=True,
+            )
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.flush()
+
+            db.session.add_all([
+                UserDigestEvent(user_id=user.id, test_id=1, test_title="One", old_status="recruiting", new_status="testing"),
+                UserDigestEvent(user_id=user.id, test_id=2, test_title="Two", old_status="testing", new_status="closed"),
+            ])
+            db.session.commit()
+
+            now = datetime(2026, 8, 31, 12, 5, 0)
+            with patch("app.notifications.send_mailjet_message", return_value=True) as mock_mail:
+                result = send_due_user_digests(now=now)
+
+            self.assertEqual(result["users"], 1)
+            self.assertEqual(result["events"], 2)
+            self.assertTrue(mock_mail.called)
+
+            pending = UserDigestEvent.query.filter_by(user_id=user.id, sent_at=None).count()
+            self.assertEqual(pending, 0)
+            refreshed = User.query.get(user.id)
+            self.assertEqual(refreshed.digest_last_sent_at, now)
+
+    def test_send_due_user_digests_daily_not_due_skips_user(self):
+        with self.app.app_context():
+            from app.notifications import send_due_user_digests
+
+            db.create_all()
+            user = User(
+                username="digest_daily",
+                email="digest_daily@example.com",
+                digest_frequency="daily",
+                digest_daily_hour_utc=22,
+                digest_last_sent_at=datetime(2026, 8, 31, 22, 0, 0),
+                receive_group_test_notifications=True,
+                is_active=True,
+            )
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.flush()
+
+            db.session.add(UserDigestEvent(user_id=user.id, test_id=3, test_title="Three", old_status="recruiting", new_status="testing"))
+            db.session.commit()
+
+            now = datetime(2026, 8, 31, 22, 30, 0)
+            with patch("app.notifications.send_mailjet_message", return_value=True) as mock_mail:
+                result = send_due_user_digests(now=now)
+
+            self.assertEqual(result["users"], 0)
+            self.assertEqual(result["events"], 0)
+            self.assertFalse(mock_mail.called)
+
+            pending = UserDigestEvent.query.filter_by(user_id=user.id, sent_at=None).count()
+            self.assertEqual(pending, 1)
 
     def test_group_test_notifications_use_each_participants_amount(self):
         with self.app.app_context():

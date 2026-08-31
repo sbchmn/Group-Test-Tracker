@@ -26,6 +26,38 @@
                     <div class="mb-3">
                         {{ form.tg_username.label(class="form-label") }}
                         {{ form.tg_username(class="form-control") }}
+                        <div class="form-text">Optional display username. Delivery uses linked Telegram chat, not username alone.</div>
+                    </div>
+
+                    <div class="alert alert-light border">
+                        <div class="fw-semibold mb-1">Telegram Link Status</div>
+                        {% if telegram_chat_id %}
+                            <div class="small text-success mb-2">Linked chat ID: {{ telegram_chat_id }}</div>
+                        {% else %}
+                            <div class="small text-warning mb-2">Not linked yet. Generate a link, open the bot, then press Start.</div>
+                        {% endif %}
+
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <button type="submit" formaction="{{ url_for('main.create_telegram_link_token') }}" formmethod="post" class="btn btn-sm btn-outline-primary">Generate Telegram Link</button>
+                            {% if telegram_link_url %}
+                                <a href="{{ telegram_link_url }}" target="_blank" class="btn btn-sm btn-primary">Open Bot Link</a>
+                            {% endif %}
+                        </div>
+
+                        {% if telegram_link_url %}
+                            <label class="form-label small mb-1">Generated Bot Link</label>
+                            <input type="text" class="form-control form-control-sm mb-2" value="{{ telegram_link_url }}" readonly>
+                            <div class="mb-2">
+                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{ telegram_link_url|urlencode }}" alt="Telegram bot link QR code" class="border rounded">
+                            </div>
+                            <div class="small text-muted">Scan QR code or open the link, then press Start in Telegram.</div>
+                        {% elif telegram_link_token %}
+                            <div class="small text-warning mb-1">Bot username is not configured by admin yet, so a clickable t.me link is unavailable.</div>
+                            <label class="form-label small mb-1">Start Command</label>
+                            <input type="text" class="form-control form-control-sm mb-2" value="{{ telegram_start_command }}" readonly>
+                            <label class="form-label small mb-1">Token</label>
+                            <input type="text" class="form-control form-control-sm" value="{{ telegram_link_token }}" readonly>
+                        {% endif %}
                     </div>
 
                     <div class="mb-3 form-check">
@@ -36,6 +68,25 @@
                     <div class="mb-3">
                         {{ form.notification_channel.label(class="form-label") }}
                         {{ form.notification_channel(class="form-select") }}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.digest_frequency.label(class="form-label") }}
+                        {{ form.digest_frequency(class="form-select") }}
+                        <div class="form-text">If enabled, digest emails are sent in UTC based on the schedule below.</div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.digest_hourly_minute_utc.label(class="form-label") }}
+                            {{ form.digest_hourly_minute_utc(class="form-control", step="1") }}
+                            <div class="form-text">Used when frequency is Hourly (0-59).</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.digest_daily_hour_utc.label(class="form-label") }}
+                            {{ form.digest_daily_hour_utc(class="form-control", step="1") }}
+                            <div class="form-text">Used when frequency is Daily (0-23, UTC).</div>
+                        </div>
                     </div>
 
                     <div class="mb-3">

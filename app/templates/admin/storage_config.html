@@ -4,7 +4,7 @@
 
 {% block content %}
 <h3>Storage Configuration</h3>
-<p class="text-muted">Configure S3-compatible object storage for result image uploads (AWS S3 or DigitalOcean Spaces).</p>
+<p class="text-muted">Configure S3-compatible object storage for result file uploads (images and PDFs on AWS S3 or DigitalOcean Spaces).</p>
 
 <div class="card mb-4">
     <div class="card-body">
@@ -68,7 +68,7 @@
                 <div class="col-md-4">
                     {{ form.storage_signed_url_ttl_seconds.label(class="form-label") }}
                     {{ form.storage_signed_url_ttl_seconds(class="form-control", step="1") }}
-                    <div class="form-text">Used for authenticated image access links. Recommended: 60 seconds.</div>
+                    <div class="form-text">Used for authenticated result file access links. Recommended: 60 seconds.</div>
                 </div>
                 <div class="col-md-4">
                     {{ form.storage_max_upload_size_mb.label(class="form-label") }}
@@ -76,7 +76,7 @@
                 </div>
                 <div class="col-md-12">
                     {{ form.storage_allowed_formats.label(class="form-label") }}
-                    {{ form.storage_allowed_formats(class="form-control", placeholder="JPEG,PNG,WEBP,GIF") }}
+                    {{ form.storage_allowed_formats(class="form-control", placeholder="JPEG,PNG,WEBP,GIF,PDF") }}
                 </div>
             </div>
 

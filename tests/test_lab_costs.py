@@ -1,9 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import create_app, db
-from app.models import GroupTest, Participation, User
+from app.models import GroupTest, NotificationConfig, Participation, User
 
 
 class LabCostTests(unittest.TestCase):
@@ -189,6 +190,78 @@ class LabCostTests(unittest.TestCase):
             self.assertIsNotNone(test)
             self.assertIsNotNone(test.results_posted_at)
             self.assertEqual([tag.name for tag in test.tags], ["Shed GB#3", "tirz"])
+
+    def test_create_test_sends_telegram_status_channel_message_when_configured(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="tg-admin", email="tg-admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "tg-admin", "password": "password"},
+            follow_redirects=True,
+        )
+
+        with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_send:
+            response = self.client.post(
+                "/admin/create-test",
+                data={
+                    "title": "Notify Channel Test",
+                    "status": "recruiting",
+                    "total_lab_cost": "100",
+                    "shipping_cost": "20",
+                    "refund_per_donor": "0",
+                    "lab_item_name": ["MASS"],
+                    "lab_item_price": ["100"],
+                    "lab_item_vials": ["1"],
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_send.called)
+        sent_body = mock_send.call_args.args[0]
+        self.assertIn("New group test created", sent_body)
+        self.assertIn("Notify Channel Test", sent_body)
+
+    def test_create_test_supports_ready_for_payment_status(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="ready-admin", email="ready-admin@example.com", is_admin=True, is_active=True)
+            admin.set_password("password")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post(
+            "/login",
+            data={"username": "ready-admin", "password": "password"},
+            follow_redirects=True,
+        )
+
+        response = self.client.post(
+            "/admin/create-test",
+            data={
+                "title": "Ready Payment Test",
+                "status": "ready_for_payment",
+                "total_lab_cost": "100",
+                "shipping_cost": "20",
+                "refund_per_donor": "0",
+                "lab_item_name": ["MASS"],
+                "lab_item_price": ["100"],
+                "lab_item_vials": ["1"],
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            test = GroupTest.query.filter_by(title="Ready Payment Test").first()
+            self.assertIsNotNone(test)
+            self.assertEqual(test.status, "ready_for_payment")
 
     def test_donor_share_becomes_negative_when_refund_exceeds_base_share(self):
         with self.app.app_context():

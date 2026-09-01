@@ -55,6 +55,13 @@ DATABASE_URL=sqlite:///group_tests.db
 3. Customize digest, new-test, and user status response text using placeholders.
 4. Save and test from Telegram.
 
+1. Open Admin -> Telegram Commands.
+2. Create custom slash commands (for example `/pricecheck`) with reply text.
+3. Optionally set category, args policy (any/none/required/regex), and args help text.
+4. Optionally set rate-limit window + max calls and a custom throttle message.
+5. Enable/disable templates as needed.
+6. Use optional placeholders such as `{{ username }}` and `{{ args }}`.
+
 Common Telegram template placeholders:
 - test_id
 - test_title
@@ -163,6 +170,7 @@ Telegram account-linking notes:
 - Both list commands include per-test clickable `/status_<test_id>` hints and `/join_<test_id>` when that recruiting test can still be joined.
 - `/testing` returns sign-up and login links for Group Test Manager.
 - `/status <test_id>` returns their current status for a specific test, including denied records. For closed tests where they are marked paid, it returns the results URL.
+- Active admin-created custom commands also appear in `/help` under Custom commands.
 
 ## 9) Troubleshooting Quick Hits
 
@@ -197,6 +205,7 @@ python -m unittest
 - Manage Users
 - Notification Config
 - Telegram Config
+- Telegram Commands
 - Storage Config
 - Public Results
 

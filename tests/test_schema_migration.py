@@ -49,6 +49,8 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("telegram_webhook_updates", table_names)
             self.assertIn("telegram_status_digest_events", table_names)
             self.assertIn("user_digest_events", table_names)
+            self.assertIn("telegram_command_templates", table_names)
+            self.assertIn("telegram_command_invocations", table_names)
 
     def test_latest_migration_includes_lab_name_column(self):
         migration_dir = Path(__file__).resolve().parent.parent / "migrations" / "versions"
@@ -72,6 +74,10 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("digest_hourly_minute_utc", migration_text)
         self.assertIn("digest_daily_hour_utc", migration_text)
         self.assertIn("user_digest_events", migration_text)
+        self.assertIn("telegram_command_templates", migration_text)
+        self.assertIn("telegram_command_invocations", migration_text)
+        self.assertIn("args_policy", migration_text)
+        self.assertIn("rate_limit_window_seconds", migration_text)
 
 
 if __name__ == "__main__":

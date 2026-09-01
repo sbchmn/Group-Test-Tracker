@@ -715,3 +715,87 @@
 
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_security` (39 tests, OK).
+
+## Phase 3: Telegram Custom Command Templates
+
+### Target Files and Modules
+- `app/models.py`
+- `app/routes.py`
+- `app/templates/admin/telegram_config.html`
+- `app/templates/admin/telegram_command_templates.html`
+- `app/templates/base.html`
+- `migrations/versions/a4c9d2e7f1b3_add_telegram_command_templates.py`
+- `tests/test_security.py`
+- `tests/test_schema_migration.py`
+- `README.md`
+- `ADMIN_QUICK_START.md`
+
+### Intended Behavior Changes
+- Allow admins to create and manage custom Telegram slash commands and reply text from the admin interface.
+- Keep built-in Telegram commands reserved to prevent workflow/auth regressions.
+- Execute active custom command replies in Telegram webhook handling for linked private users.
+- Expose custom commands in `/help` output for discoverability.
+
+### Implemented Changes
+- Added `TelegramCommandTemplate` model with unique command key, reply text, active state, and timestamps.
+- Added additive Alembic revision `a4c9d2e7f1b3_add_telegram_command_templates.py`.
+- Added `TelegramCommandTemplateForm` and admin CRUD routes:
+	- `/admin/telegram-command-templates`
+	- `/admin/telegram-command-templates/<id>/edit`
+	- `/admin/telegram-command-templates/<id>/delete`
+- Added command normalization/validation helpers with reserved command + prefix protection.
+- Added runtime custom command processing in Telegram webhook for active command templates.
+- Extended `/help` output to include active custom commands and descriptions.
+- Added Telegram Commands links from Telegram Config and admin navigation.
+- Added focused tests for template creation, reserved-command rejection, and runtime webhook reply rendering.
+- Extended schema tests for `telegram_command_templates` table/migration presence.
+
+### Security / Reliability / Optimization Notes
+- Security: Built-in command overrides are blocked (`/start`, `/help`, `/tests`, `/mytests`, `/testing`, `/status`, `/join`) and reserved prefixes (`/status_`, `/join_`) are blocked.
+- Security: Custom command processing remains inside existing linked-user/private-chat webhook boundary.
+- Reliability: Normalized lowercase command keys avoid case-sensitive duplicates and inconsistent matching.
+- Optimization: Runtime lookup is a single indexed query by command + active flag.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_security tests.test_schema_migration` (44 tests, OK).
+
+## Phase 4: Command Categories, Rate Limits, and Args Policies
+
+### Target Files and Modules
+- `app/models.py`
+- `app/routes.py`
+- `app/templates/admin/telegram_command_templates.html`
+- `migrations/versions/b6e2d4c8a1f9_add_telegram_command_controls_and_invocations.py`
+- `tests/test_security.py`
+- `tests/test_schema_migration.py`
+- `README.md`
+- `ADMIN_QUICK_START.md`
+
+### Intended Behavior Changes
+- Add category metadata for custom Telegram commands.
+- Add optional argument policies (any, none, required, regex) and failure guidance.
+- Add optional per-command, per-chat rate limits.
+- Keep built-in command reservation and linked-user/private-chat boundaries intact.
+
+### Implemented Changes
+- Extended `TelegramCommandTemplate` with category, args policy/regex/help, and rate-limit fields.
+- Added new `TelegramCommandInvocation` table/model for per-command rate-limit accounting.
+- Added additive Alembic revision `b6e2d4c8a1f9_add_telegram_command_controls_and_invocations.py`.
+- Extended Telegram command template admin form with category, argument, and rate-limit controls.
+- Added save-time validation for args policy/regex and rate-limit paired fields.
+- Updated webhook command execution to:
+	- enforce args policy before reply,
+	- enforce per-command rate limits,
+	- render custom rate-limit message placeholders,
+	- persist invocation rows for accepted command executions.
+- Updated custom-command list UI and `/help` output to include category labels.
+
+### Security / Reliability / Optimization Notes
+- Security: Commands remain restricted to non-reserved names; built-in and clickable status/join prefixes cannot be overridden.
+- Security: Runtime command execution continues only for linked private users.
+- Reliability: Regex patterns are validated at save time to prevent runtime regex crashes.
+- Reliability: Rate limiting uses persisted invocation records, ensuring deterministic behavior across requests.
+- Optimization: Rate-limit checks use indexed filters (`command_template_id`, `chat_id`, `created_at`) to keep lookup cost bounded.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_security tests.test_schema_migration` (47 tests, OK).

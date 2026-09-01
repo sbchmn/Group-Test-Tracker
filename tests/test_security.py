@@ -7,7 +7,7 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.models import GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
 
 
 class SecurityTests(unittest.TestCase):
@@ -486,6 +486,221 @@ class SecurityTests(unittest.TestCase):
         with self.app.app_context():
             rows = TelegramWebhookUpdate.query.filter_by(update_id=99).all()
             self.assertEqual(len(rows), 1)
+
+    def test_admin_can_create_telegram_command_template(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        response = self.client.post(
+            "/admin/telegram-command-templates",
+            data={
+                "command": "pricecheck",
+                "description": "Show quick payment guidance",
+                "reply_text": "Hi {{ username }}, use /mytests to check your active tests.",
+                "is_active": "y",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Telegram command template created.", response.get_data(as_text=True))
+        with self.app.app_context():
+            template = TelegramCommandTemplate.query.filter_by(command="/pricecheck").first()
+            self.assertIsNotNone(template)
+            self.assertTrue(template.is_active)
+
+    def test_admin_cannot_create_reserved_telegram_command_template(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        response = self.client.post(
+            "/admin/telegram-command-templates",
+            data={
+                "command": "/help",
+                "description": "Attempt to override",
+                "reply_text": "Nope",
+                "is_active": "y",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("That command is reserved by built-in bot behavior.", response.get_data(as_text=True))
+        with self.app.app_context():
+            template = TelegramCommandTemplate.query.filter_by(command="/help").first()
+            self.assertIsNone(template)
+
+    def test_telegram_webhook_executes_custom_command_template_reply(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgcustom", email="tgcustom@example.com", telegram_chat_id="3003", telegram_user_id="999")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(
+                TelegramCommandTemplate(
+                    command="/pricecheck",
+                    description="Custom price response",
+                    reply_text="Hi {{ username }} ({{ tg_username }}), args={{ args }}.",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 3003, "type": "private"},
+                        "from": {"id": 999, "username": "tgcustomname"},
+                        "text": "/pricecheck now",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        sent_body = mock_send.call_args.args[1]
+        self.assertIn("Hi tgcustom (tgcustomname), args=now.", sent_body)
+
+    def test_telegram_webhook_custom_command_requires_arguments(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgargs", email="tgargs@example.com", telegram_chat_id="4040", telegram_user_id="14040")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(
+                TelegramCommandTemplate(
+                    command="/pricecheck",
+                    args_policy="required",
+                    args_help_text="Usage: /pricecheck <code>",
+                    reply_text="ok",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 4040, "type": "private"},
+                        "from": {"id": 14040, "username": "tgargs"},
+                        "text": "/pricecheck",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        self.assertIn("Usage: /pricecheck <code>", mock_send.call_args.args[1])
+
+    def test_telegram_webhook_custom_command_regex_arguments(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tgregex", email="tgregex@example.com", telegram_chat_id="5050", telegram_user_id="15050")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(
+                TelegramCommandTemplate(
+                    command="/order",
+                    args_policy="regex",
+                    args_regex=r"^[0-9]{4}$",
+                    args_help_text="Usage: /order 4-digit-id",
+                    reply_text="Order {{ args }} accepted",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            bad = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 5050, "type": "private"},
+                        "from": {"id": 15050, "username": "tgregex"},
+                        "text": "/order ABCD",
+                    }
+                },
+            )
+        self.assertEqual(bad.status_code, 200)
+        self.assertIn("Usage: /order 4-digit-id", mock_send.call_args.args[1])
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send_ok:
+            good = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 5050, "type": "private"},
+                        "from": {"id": 15050, "username": "tgregex"},
+                        "text": "/order 1234",
+                    }
+                },
+            )
+        self.assertEqual(good.status_code, 200)
+        self.assertIn("Order 1234 accepted", mock_send_ok.call_args.args[1])
+
+    def test_telegram_webhook_custom_command_rate_limit_blocks_excess_calls(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="tglimit", email="tglimit@example.com", telegram_chat_id="6060", telegram_user_id="16060")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(
+                TelegramCommandTemplate(
+                    command="/quote",
+                    rate_limit_window_seconds=60,
+                    rate_limit_max_calls=1,
+                    rate_limit_message="Slow down on {{ command }}",
+                    reply_text="Quote delivered",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as first_send:
+            first = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 6060, "type": "private"},
+                        "from": {"id": 16060, "username": "tglimit"},
+                        "text": "/quote",
+                    }
+                },
+            )
+        self.assertEqual(first.status_code, 200)
+        self.assertIn("Quote delivered", first_send.call_args.args[1])
+
+        with patch("app.routes.send_telegram_chat_message") as second_send:
+            second = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 6060, "type": "private"},
+                        "from": {"id": 16060, "username": "tglimit"},
+                        "text": "/quote",
+                    }
+                },
+            )
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("Slow down on /quote", second_send.call_args.args[1])
+
+        with self.app.app_context():
+            invocations = TelegramCommandInvocation.query.all()
+            self.assertEqual(len(invocations), 1)
 
     def test_telegram_start_rejects_user_id_already_linked_elsewhere(self):
         with self.app.app_context():

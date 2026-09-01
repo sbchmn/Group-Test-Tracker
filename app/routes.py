@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 import secrets
 import ipaddress
 import html
+import re
 
 from . import db, csrf
 import os
@@ -36,6 +37,8 @@ from .models import (
     GroupTest,
     Participation,
     NotificationTemplate,
+    TelegramCommandTemplate,
+    TelegramCommandInvocation,
     NotificationConfig,
     Tag,
     PublicResult,
@@ -262,6 +265,31 @@ class TelegramConfigForm(FlaskForm):
     telegram_status_user_pending_template = TextAreaField('Telegram /status Pending Template', validators=[Optional(), Length(max=2000)])
     service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
     submit = SubmitField('Save Telegram Configuration')
+
+
+class TelegramCommandTemplateForm(FlaskForm):
+    command = StringField('Bot Command', validators=[DataRequired(), Length(max=40)])
+    category = StringField('Category', validators=[Optional(), Length(max=80)])
+    description = TextAreaField('Description', validators=[Optional()])
+    args_policy = SelectField(
+        'Arguments Policy',
+        choices=[
+            ('any', 'Any args accepted'),
+            ('none', 'No args allowed'),
+            ('required', 'Args required'),
+            ('regex', 'Args must match regex'),
+        ],
+        default='any',
+        validators=[Optional()],
+    )
+    args_regex = StringField('Arguments Regex (for regex mode)', validators=[Optional(), Length(max=500)])
+    args_help_text = TextAreaField('Arguments Help Text', validators=[Optional(), Length(max=2000)])
+    rate_limit_window_seconds = FloatField('Rate Limit Window (seconds)', validators=[Optional(), NumberRange(min=1, max=3600)])
+    rate_limit_max_calls = FloatField('Rate Limit Max Calls', validators=[Optional(), NumberRange(min=1, max=1000)])
+    rate_limit_message = TextAreaField('Rate Limit Message', validators=[Optional(), Length(max=2000)])
+    reply_text = TextAreaField('Reply Text', validators=[DataRequired(), Length(max=4000)])
+    is_active = BooleanField('Active', default=True)
+    submit = SubmitField('Save Command Template')
 
 
 class StorageConfigForm(FlaskForm):
@@ -1328,6 +1356,204 @@ def _can_user_view_group_test_results(test, user):
     return _can_user_view_group_test_result_image(test, user)
 
 
+TELEGRAM_RESERVED_COMMANDS = {
+    '/start',
+    '/help',
+    '/tests',
+    '/mytests',
+    '/testing',
+    '/status',
+    '/join',
+}
+
+TELEGRAM_RESERVED_PREFIXES = (
+    '/status_',
+    '/join_',
+)
+
+
+def _normalize_telegram_command(raw_value):
+    value = str(raw_value or '').strip().lower()
+    if not value:
+        return ''
+    if not value.startswith('/'):
+        value = '/' + value
+    return value
+
+
+def _validate_custom_telegram_command(command):
+    normalized = _normalize_telegram_command(command)
+    if not normalized:
+        return normalized, 'Command is required.'
+    if ' ' in normalized:
+        return normalized, 'Command cannot contain spaces. Use slash command format like /pricecheck.'
+    if len(normalized) < 2:
+        return normalized, 'Command must include at least one character after /.'
+    allowed_chars = set('abcdefghijklmnopqrstuvwxyz0123456789_')
+    if any(char not in allowed_chars for char in normalized[1:]):
+        return normalized, 'Command may only use letters, numbers, and underscores.'
+    if normalized in TELEGRAM_RESERVED_COMMANDS or any(normalized.startswith(prefix) for prefix in TELEGRAM_RESERVED_PREFIXES):
+        return normalized, 'That command is reserved by built-in bot behavior.'
+    return normalized, None
+
+
+def _extract_telegram_command_args(message_text):
+    text = str(message_text or '').strip()
+    if not text:
+        return ''
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        return ''
+    return parts[1].strip()
+
+
+def _validate_custom_telegram_command_options(form):
+    errors = []
+    args_policy = str(form.args_policy.data or 'any').strip().lower()
+    args_regex = str(form.args_regex.data or '').strip()
+
+    if args_policy not in {'any', 'none', 'required', 'regex'}:
+        errors.append('Invalid arguments policy selected.')
+
+    if args_policy == 'regex':
+        if not args_regex:
+            errors.append('Arguments regex is required when policy is set to regex.')
+        else:
+            try:
+                re.compile(args_regex)
+            except re.error:
+                errors.append('Arguments regex is invalid. Please provide a valid regular expression.')
+
+    window_value = form.rate_limit_window_seconds.data
+    max_calls_value = form.rate_limit_max_calls.data
+    has_window = window_value not in (None, '')
+    has_max_calls = max_calls_value not in (None, '')
+    if has_window != has_max_calls:
+        errors.append('Set both rate-limit window and max calls, or leave both blank to disable rate limiting.')
+
+    if has_window and has_max_calls:
+        try:
+            if int(window_value) < 1 or int(max_calls_value) < 1:
+                errors.append('Rate-limit values must be positive integers.')
+        except (TypeError, ValueError):
+            errors.append('Rate-limit values must be positive integers.')
+
+    return errors
+
+
+def _custom_command_args_error_message(template):
+    custom = (template.args_help_text or '').strip()
+    if custom:
+        return custom
+    return f'Usage rules for {template.command} are not met. Please check command usage and try again.'
+
+
+def _custom_command_rate_limit_message(template, chat_id):
+    source = (template.rate_limit_message or '').strip()
+    if not source:
+        return 'This command is temporarily rate-limited. Please try again shortly.'
+    return render_notification_template(
+        source,
+        {
+            'command': template.command,
+            'chat_id': str(chat_id or ''),
+        },
+    ).strip() or 'This command is temporarily rate-limited. Please try again shortly.'
+
+
+def _custom_command_rate_limited(template, chat_id):
+    window_seconds = int(template.rate_limit_window_seconds or 0)
+    max_calls = int(template.rate_limit_max_calls or 0)
+    if window_seconds < 1 or max_calls < 1:
+        return False
+
+    since = datetime.utcnow() - timedelta(seconds=window_seconds)
+    recent_calls = (
+        TelegramCommandInvocation.query
+        .filter(
+            TelegramCommandInvocation.command_template_id == template.id,
+            TelegramCommandInvocation.chat_id == str(chat_id),
+            TelegramCommandInvocation.created_at >= since,
+        )
+        .count()
+    )
+    return recent_calls >= max_calls
+
+
+def _record_custom_command_invocation(template, chat_id):
+    db.session.add(
+        TelegramCommandInvocation(
+            command_template_id=template.id,
+            chat_id=str(chat_id),
+        )
+    )
+
+
+def _custom_command_args_allowed(template, args_text):
+    args_policy = str(template.args_policy or 'any').strip().lower()
+    args_text = str(args_text or '').strip()
+    if args_policy == 'none':
+        return args_text == ''
+    if args_policy == 'required':
+        return args_text != ''
+    if args_policy == 'regex':
+        pattern = str(template.args_regex or '').strip()
+        if not pattern:
+            return False
+        try:
+            return re.fullmatch(pattern, args_text or '') is not None
+        except re.error:
+            return False
+    return True
+
+
+def _telegram_extract_command_head(text):
+    raw_text = str(text or '').strip()
+    if not raw_text:
+        return ''
+    return raw_text.split()[0].lower()
+
+
+def _render_custom_telegram_reply(template, linked_user, message_text, chat_id):
+    first_name = ''
+    if linked_user and linked_user.username:
+        first_name = str(linked_user.username).strip().split()[0]
+    message_text = str(message_text or '').strip()
+    args = _extract_telegram_command_args(message_text)
+
+    context = {
+        'username': linked_user.username if linked_user else '',
+        'first_name': first_name,
+        'tg_username': (linked_user.tg_username or '').lstrip('@') if linked_user else '',
+        'command': template.command,
+        'args': args,
+        'message_text': message_text,
+        'chat_id': str(chat_id or ''),
+    }
+    return render_notification_template(template.reply_text or '', context).strip()
+
+
+def _telegram_help_custom_commands_block():
+    commands = (
+        TelegramCommandTemplate.query
+        .filter_by(is_active=True)
+        .order_by(TelegramCommandTemplate.command.asc())
+        .all()
+    )
+    if not commands:
+        return ''
+    lines = ['\nCustom commands:']
+    for template in commands:
+        description = (template.description or '').strip()
+        category = (template.category or '').strip()
+        prefix = f"[{category}] " if category else ''
+        if description:
+            lines.append(f"{prefix}{template.command} - {description}")
+        else:
+            lines.append(f"{prefix}{template.command}")
+    return '\n'.join(lines)
+
+
 def _telegram_help_message():
     return (
         "Group Test Manager bot commands:\n"
@@ -1337,7 +1563,7 @@ def _telegram_help_message():
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/help - show this help message"
-    )
+    ) + _telegram_help_custom_commands_block()
 
 
 def _telegram_sort_tests_by_id(tests, limit=20):
@@ -1701,6 +1927,28 @@ def telegram_webhook():
             send_telegram_chat_message(chat_id, 'Test not found or not visible to your account.')
             return jsonify({'ok': True})
         send_telegram_chat_message(chat_id, _telegram_join_test_for_user(linked_user, test))
+        return jsonify({'ok': True})
+
+    command_head = _telegram_extract_command_head(text)
+    custom_template = TelegramCommandTemplate.query.filter_by(command=command_head, is_active=True).first()
+    if custom_template is not None:
+        command_args = _extract_telegram_command_args(text)
+        if not _custom_command_args_allowed(custom_template, command_args):
+            send_telegram_chat_message(chat_id, _custom_command_args_error_message(custom_template))
+            return jsonify({'ok': True})
+
+        if _custom_command_rate_limited(custom_template, chat_id):
+            rate_limit_message = _custom_command_rate_limit_message(custom_template, chat_id)
+            send_telegram_chat_message(chat_id, rate_limit_message)
+            return jsonify({'ok': True})
+
+        rendered_reply = _render_custom_telegram_reply(custom_template, linked_user, text, chat_id)
+        _record_custom_command_invocation(custom_template, chat_id)
+        db.session.commit()
+        if rendered_reply:
+            send_telegram_chat_message(chat_id, rendered_reply)
+        else:
+            send_telegram_chat_message(chat_id, 'Command received, but this command has no reply text configured.')
         return jsonify({'ok': True})
 
     send_telegram_chat_message(chat_id, _telegram_help_message())
@@ -2829,6 +3077,124 @@ def edit_notification_template(template_id):
 
     templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
     return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=template)
+
+
+def _render_telegram_command_templates_page(form, editing_template=None):
+    templates = TelegramCommandTemplate.query.order_by(TelegramCommandTemplate.command.asc()).all()
+    return render_template(
+        'admin/telegram_command_templates.html',
+        form=form,
+        templates=templates,
+        editing_template=editing_template,
+        reserved_commands=sorted(TELEGRAM_RESERVED_COMMANDS),
+        reserved_prefixes=list(TELEGRAM_RESERVED_PREFIXES),
+    )
+
+
+@main_bp.route('/admin/telegram-command-templates', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def telegram_command_templates():
+    form = TelegramCommandTemplateForm()
+    if form.validate_on_submit():
+        normalized_command, validation_error = _validate_custom_telegram_command(form.command.data)
+        if validation_error:
+            flash(validation_error, 'danger')
+            return _render_telegram_command_templates_page(form)
+
+        option_errors = _validate_custom_telegram_command_options(form)
+        if option_errors:
+            for err in option_errors:
+                flash(err, 'danger')
+            return _render_telegram_command_templates_page(form)
+
+        existing = TelegramCommandTemplate.query.filter_by(command=normalized_command).first()
+        if existing is not None:
+            flash('A command template with that command already exists.', 'danger')
+            return _render_telegram_command_templates_page(form)
+
+        rate_limit_window_seconds = int(form.rate_limit_window_seconds.data) if form.rate_limit_window_seconds.data not in (None, '') else None
+        rate_limit_max_calls = int(form.rate_limit_max_calls.data) if form.rate_limit_max_calls.data not in (None, '') else None
+
+        template = TelegramCommandTemplate(
+            command=normalized_command,
+            category=(form.category.data or '').strip() or None,
+            description=form.description.data,
+            args_policy=str(form.args_policy.data or 'any').strip().lower(),
+            args_regex=(form.args_regex.data or '').strip() or None,
+            args_help_text=(form.args_help_text.data or '').strip() or None,
+            rate_limit_window_seconds=rate_limit_window_seconds,
+            rate_limit_max_calls=rate_limit_max_calls,
+            rate_limit_message=(form.rate_limit_message.data or '').strip() or None,
+            reply_text=form.reply_text.data,
+            is_active=bool(form.is_active.data),
+        )
+        db.session.add(template)
+        db.session.commit()
+        flash('Telegram command template created.', 'success')
+        return redirect(url_for('main.telegram_command_templates'))
+
+    return _render_telegram_command_templates_page(form)
+
+
+@main_bp.route('/admin/telegram-command-templates/<int:template_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_telegram_command_template(template_id):
+    template = TelegramCommandTemplate.query.get_or_404(template_id)
+    form = TelegramCommandTemplateForm(obj=template)
+    form.submit.label.text = 'Save Changes'
+
+    if form.validate_on_submit():
+        normalized_command, validation_error = _validate_custom_telegram_command(form.command.data)
+        if validation_error:
+            flash(validation_error, 'danger')
+            return _render_telegram_command_templates_page(form, editing_template=template)
+
+        option_errors = _validate_custom_telegram_command_options(form)
+        if option_errors:
+            for err in option_errors:
+                flash(err, 'danger')
+            return _render_telegram_command_templates_page(form, editing_template=template)
+
+        duplicate = TelegramCommandTemplate.query.filter(
+            TelegramCommandTemplate.command == normalized_command,
+            TelegramCommandTemplate.id != template.id,
+        ).first()
+        if duplicate is not None:
+            flash('A command template with that command already exists.', 'danger')
+            return _render_telegram_command_templates_page(form, editing_template=template)
+
+        rate_limit_window_seconds = int(form.rate_limit_window_seconds.data) if form.rate_limit_window_seconds.data not in (None, '') else None
+        rate_limit_max_calls = int(form.rate_limit_max_calls.data) if form.rate_limit_max_calls.data not in (None, '') else None
+
+        template.command = normalized_command
+        template.category = (form.category.data or '').strip() or None
+        template.description = form.description.data
+        template.args_policy = str(form.args_policy.data or 'any').strip().lower()
+        template.args_regex = (form.args_regex.data or '').strip() or None
+        template.args_help_text = (form.args_help_text.data or '').strip() or None
+        template.rate_limit_window_seconds = rate_limit_window_seconds
+        template.rate_limit_max_calls = rate_limit_max_calls
+        template.rate_limit_message = (form.rate_limit_message.data or '').strip() or None
+        template.reply_text = form.reply_text.data
+        template.is_active = bool(form.is_active.data)
+        db.session.commit()
+        flash('Telegram command template updated.', 'success')
+        return redirect(url_for('main.telegram_command_templates'))
+
+    return _render_telegram_command_templates_page(form, editing_template=template)
+
+
+@main_bp.route('/admin/telegram-command-templates/<int:template_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_telegram_command_template(template_id):
+    template = TelegramCommandTemplate.query.get_or_404(template_id)
+    db.session.delete(template)
+    db.session.commit()
+    flash('Telegram command template deleted.', 'success')
+    return redirect(url_for('main.telegram_command_templates'))
 
 
 @main_bp.route('/admin/notification-config', methods=['GET', 'POST'])

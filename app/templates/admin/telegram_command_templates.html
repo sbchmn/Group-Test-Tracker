@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Telegram Command Templates{% endblock %}
+
+{% block content %}
+<h3>{% if editing_template %}Edit Telegram Command Template{% else %}Telegram Command Templates{% endif %}</h3>
+<p class="text-muted">Create custom bot commands and replies. Built-in commands stay reserved and cannot be overridden.</p>
+
+<div class="alert alert-info" role="alert">
+    <div><strong>Reserved built-in commands:</strong> {{ reserved_commands | join(', ') }}</div>
+    <div class="mt-1"><strong>Reserved prefixes:</strong> {{ reserved_prefixes | join(', ') }}</div>
+    <div class="mt-1">Use slash-command format like <code>/pricecheck</code>. Command names are case-insensitive and stored in lowercase.</div>
+    <div class="mt-1">Reply placeholders: <code>{{ '{{ username }}' }}</code>, <code>{{ '{{ first_name }}' }}</code>, <code>{{ '{{ tg_username }}' }}</code>, <code>{{ '{{ command }}' }}</code>, <code>{{ '{{ args }}' }}</code>, <code>{{ '{{ message_text }}' }}</code>, <code>{{ '{{ chat_id }}' }}</code>.</div>
+    <div class="mt-1">Rate limit placeholders: <code>{{ '{{ command }}' }}</code>, <code>{{ '{{ chat_id }}' }}</code>.</div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.command.label(class="form-label") }}
+                {{ form.command(class="form-control", placeholder="/pricecheck") }}
+            </div>
+            <div class="mb-3">
+                {{ form.category.label(class="form-label") }}
+                {{ form.category(class="form-control", placeholder="payments") }}
+                <div class="form-text">Optional grouping label shown in /help output and command list.</div>
+            </div>
+            <div class="mb-3">
+                {{ form.description.label(class="form-label") }}
+                {{ form.description(class="form-control", rows=2, placeholder="Shown in /help custom commands section") }}
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.args_policy.label(class="form-label") }}
+                    {{ form.args_policy(class="form-select") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.args_regex.label(class="form-label") }}
+                    {{ form.args_regex(class="form-control", placeholder="^[0-9]{4}$") }}
+                    <div class="form-text">Used only when Arguments Policy is regex.</div>
+                </div>
+            </div>
+            <div class="mb-3">
+                {{ form.args_help_text.label(class="form-label") }}
+                {{ form.args_help_text(class="form-control", rows=2, placeholder="Usage: /pricecheck 1234") }}
+                <div class="form-text">Optional custom message when args fail policy checks.</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    {{ form.rate_limit_window_seconds.label(class="form-label") }}
+                    {{ form.rate_limit_window_seconds(class="form-control", step="1", placeholder="60") }}
+                </div>
+                <div class="col-md-4 mb-3">
+                    {{ form.rate_limit_max_calls.label(class="form-label") }}
+                    {{ form.rate_limit_max_calls(class="form-control", step="1", placeholder="3") }}
+                </div>
+                <div class="col-md-4 mb-3">
+                    {{ form.rate_limit_message.label(class="form-label") }}
+                    {{ form.rate_limit_message(class="form-control", rows=2, placeholder="Please wait before using {{ command }} again.") }}
+                </div>
+            </div>
+            <div class="form-check mb-3">
+                {{ form.allow_non_private(class="form-check-input") }}
+                {{ form.allow_non_private.label(class="form-check-label") }}
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.allowed_chat_ids.label(class="form-label") }}
+                    {{ form.allowed_chat_ids(class="form-control", placeholder="-1001234567890,-1009876543210") }}
+                    <div class="form-text">Optional. If set, command only runs for these chat IDs.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.allowed_thread_ids.label(class="form-label") }}
+                    {{ form.allowed_thread_ids(class="form-control", placeholder="2,14") }}
+                    <div class="form-text">Optional. If set, command only runs in these topic thread IDs.</div>
+                </div>
+            </div>
+            <div class="mb-3">
+                {{ form.reply_text.label(class="form-label") }}
+                {{ form.reply_text(class="form-control", rows=5, placeholder="Hi {{ first_name }}, current info: ...") }}
+            </div>
+            <div class="form-check mb-3">
+                {{ form.is_active(class="form-check-input") }}
+                {{ form.is_active.label(class="form-check-label") }}
+            </div>
+            <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+            {% if editing_template %}
+                <a href="{{ url_for('main.telegram_command_templates') }}" class="btn btn-secondary">Cancel</a>
+            {% else %}
+                <a href="{{ url_for('main.telegram_config') }}" class="btn btn-secondary">Back to Telegram Config</a>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Saved Telegram Command Templates</div>
+    <div class="card-body p-0">
+        {% if templates %}
+            <div class="table-responsive">
+                <table class="table table-striped mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Command</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Args Policy</th>
+                            <th>Rate Limit</th>
+                            <th>Scope</th>
+                            <th>Status</th>
+                            <th>Reply Preview</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for template in templates %}
+                            <tr>
+                                <td><code>{{ template.command }}</code></td>
+                                <td>{{ template.category or '-' }}</td>
+                                <td>{{ template.description or '-' }}</td>
+                                <td>
+                                    {{ template.args_policy or 'any' }}
+                                    {% if template.args_policy == 'regex' and template.args_regex %}
+                                        <div class="small text-muted">{{ template.args_regex }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if template.rate_limit_window_seconds and template.rate_limit_max_calls %}
+                                        {{ template.rate_limit_max_calls }} / {{ template.rate_limit_window_seconds }}s
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if template.allow_non_private %}
+                                        <span class="badge bg-info text-dark">Groups/Channels Allowed</span>
+                                    {% else %}
+                                        <span class="badge bg-light text-dark">Private Only</span>
+                                    {% endif %}
+                                    <div class="small text-muted mt-1">Chats: {{ template.allowed_chat_ids or 'any' }}</div>
+                                    <div class="small text-muted">Threads: {{ template.allowed_thread_ids or 'any' }}</div>
+                                </td>
+                                <td>
+                                    {% if template.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small text-muted" style="max-width: 360px; white-space: pre-wrap;">{{ (template.reply_text or '')[:240] }}{% if (template.reply_text or '')|length > 240 %}...{% endif %}</td>
+                                <td class="text-end">
+                                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.edit_telegram_command_template', template_id=template.id) }}">Edit</a>
+                                    <form method="POST" action="{{ url_for('main.delete_telegram_command_template', template_id=template.id) }}" class="d-inline" onsubmit="return confirm('Delete this command template?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="p-3 text-muted">No custom Telegram command templates yet.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

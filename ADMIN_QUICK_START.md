@@ -29,13 +29,17 @@ DATABASE_URL=sqlite:///group_tests.db
 ## 2) Initial Admin Configuration (After Login)
 
 1. Open Admin -> Notification Config.
-2. Enter Mailjet and/or Telegram values.
-3. Set Telegram bot username and status chat target.
-4. Optionally set webhook URL override and allowed source IP CIDRs.
-5. Set digest mode/window.
-6. Set Service Base URL for links in templates.
-7. Use Register Telegram Webhook to publish webhook settings to Telegram.
-8. Save.
+2. Enter Mailjet values.
+3. Optionally enable debug logs.
+4. Save.
+
+1. Open Admin -> Telegram Config.
+2. Enter Telegram bot token and username.
+3. Set status chat target and digest mode/window.
+4. Optionally set webhook URL override, webhook secret, and allowed source IP CIDRs.
+5. Set Service Base URL for links in templates.
+6. Use Register Telegram Webhook to publish webhook settings to Telegram.
+7. Save.
 
 1. Open Admin -> Manage Templates.
 2. Create or edit templates for:
@@ -50,6 +54,14 @@ DATABASE_URL=sqlite:///group_tests.db
 2. Review Telegram Status Message Templates.
 3. Customize digest, new-test, and user status response text using placeholders.
 4. Save and test from Telegram.
+
+1. Open Admin -> Telegram Commands.
+2. Create custom slash commands (for example `/pricecheck`) with reply text.
+3. Optionally set category, args policy (any/none/required/regex), and args help text.
+4. Optionally set rate-limit window + max calls and a custom throttle message.
+5. Optionally allow non-private use and restrict each command by chat IDs and topic thread IDs.
+6. Enable/disable templates as needed.
+7. Use optional placeholders such as `{{ username }}` and `{{ args }}`.
 
 Common Telegram template placeholders:
 - test_id
@@ -159,6 +171,7 @@ Telegram account-linking notes:
 - Both list commands include per-test clickable `/status_<test_id>` hints and `/join_<test_id>` when that recruiting test can still be joined.
 - `/testing` returns sign-up and login links for Group Test Manager.
 - `/status <test_id>` returns their current status for a specific test, including denied records. For closed tests where they are marked paid, it returns the results URL.
+- Active admin-created custom commands also appear in `/help` under Custom commands.
 
 ## 9) Troubleshooting Quick Hits
 
@@ -170,11 +183,12 @@ Storage upload fails:
 
 Notifications fail:
 1. Verify Notification Config keys.
-2. Verify recipient email and Telegram linking status.
-3. Enable notification debug logs.
-4. Review notification log in Notification Config page.
-5. Re-run Register Telegram Webhook after changing bot token or base URL.
-6. For status channel posts, verify chat target format and optional thread suffix.
+2. Verify Telegram Config keys.
+3. Verify recipient email and Telegram linking status.
+4. Enable notification debug logs.
+5. Review notification log in Notification Config page.
+6. Re-run Register Telegram Webhook after changing bot token or base URL.
+7. For status channel posts, verify chat target format and optional thread suffix.
 
 Migrations fail:
 1. Activate venv.
@@ -191,6 +205,8 @@ python -m unittest
 - Action Queue
 - Manage Users
 - Notification Config
+- Telegram Config
+- Telegram Commands
 - Storage Config
 - Public Results
 

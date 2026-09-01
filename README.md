@@ -38,6 +38,8 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 	- [Manage Payment Options](#manage-payment-options)
 	- [Notification Templates](#notification-templates)
 	- [Notification Config](#notification-config)
+	- [Telegram Config](#telegram-config)
+	- [Telegram Command Templates](#telegram-command-templates)
 	- [Send Notifications to Test Participants](#send-notifications-to-test-participants)
 	- [Export Test Data](#export-test-data)
 - [Object Storage and Result Image Upload How-To](#object-storage-and-result-image-upload-how-to)
@@ -70,6 +72,7 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 - Payment option matrix with method-aware payment links, destinations, and QR payload previews.
 - Telegram bot account linking, webhook processing, status channel posts, digest mode, and Telegram password reset delivery for linked users.
 - Editable Telegram status message templates with variables for channel updates and user status replies.
+- Admin-managed custom Telegram command templates with variable-based replies.
 - Notification templates/configuration for email/Telegram.
 - Excel export for test backups/reporting.
 
@@ -337,23 +340,62 @@ If the user was previously denied for that test, the record is reactivated and a
 
 1. Open Admin -> Notification Config.
 2. Configure Mailjet keys/sender email.
-3. Configure Telegram bot token and bot username.
-4. Configure Telegram webhook URL override (optional) and allowed source IP CIDRs (optional).
-5. Configure Telegram status chat target. Thread targets are supported using chatId_threadId format.
-6. Configure digest mode and digest window.
-7. Edit Telegram status message templates (linked from Notification Templates) and variables for:
+3. Optionally enable debug logs.
+4. Save.
+
+### Telegram Config
+
+1. Open Admin -> Telegram Config.
+2. Configure Telegram bot token and bot username.
+3. Configure Telegram webhook URL override (optional), webhook secret, and allowed source IP CIDRs (optional).
+4. Configure Telegram status chat target. Thread targets are supported using chatId_threadId format.
+5. Configure digest mode and digest window.
+6. Edit Telegram status message templates (linked from Notification Templates) and variables for:
 - digest header
 - digest line item
 - digest participants line
 - new-test channel post
 - user /status no-request reply
 - user /status denied reply
+- user /status completed+paid results reply
 - user /status approved reply
 - user /status pending reply
-8. Set service base URL (used for fully qualified links in templates and Telegram message links).
-9. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage bot webhook from the UI.
-10. Optionally enable debug logs.
-11. Save.
+7. Set service base URL (used for fully qualified links in templates and Telegram message links).
+8. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage bot webhook from the UI.
+9. Save.
+
+### Telegram Command Templates
+
+1. Open Admin -> Telegram Commands.
+2. Add a command in slash format (for example `/pricecheck`).
+3. Add optional category and description (both shown in `/help` under custom commands).
+4. Set argument policy:
+- `any`: accept any args or none
+- `none`: reject commands that include args
+- `required`: require args after command
+- `regex`: require args that match your regex pattern
+5. Optionally set per-command rate limits by entering both:
+- rate limit window (seconds)
+- max calls in that window
+6. Optionally allow command execution in groups/channels and scope it using:
+- allowed chat IDs (comma-separated)
+- allowed topic thread IDs (comma-separated)
+7. Optionally customize argument failure and rate-limit messages.
+8. Add reply text and optional placeholders:
+- `{{ username }}`
+- `{{ first_name }}`
+- `{{ tg_username }}`
+- `{{ command }}`
+- `{{ args }}`
+- `{{ message_text }}`
+- `{{ chat_id }}`
+9. Save as active.
+
+Notes:
+- Built-in commands remain reserved and cannot be overridden (`/start`, `/help`, `/tests`, `/mytests`, `/testing`, `/status`, `/join`).
+- Reserved prefixes `/status_` and `/join_` are blocked to preserve clickable test actions.
+- Rate-limit message placeholders support `{{ command }}` and `{{ chat_id }}`.
+- If allowlists are set, the command only runs when both chat and thread restrictions match.
 
 ### Send Notifications to Test Participants
 

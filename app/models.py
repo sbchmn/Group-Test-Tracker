@@ -165,6 +165,44 @@ class NotificationTemplate(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class TelegramCommandTemplate(db.Model):
+    __tablename__ = 'telegram_command_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    command = db.Column(db.String(40), nullable=False, unique=True, index=True)
+    category = db.Column(db.String(80), nullable=True, index=True)
+    description = db.Column(db.Text, nullable=True)
+    reply_text = db.Column(db.Text, nullable=False)
+    args_policy = db.Column(db.String(20), nullable=False, default='any')
+    args_regex = db.Column(db.String(500), nullable=True)
+    args_help_text = db.Column(db.Text, nullable=True)
+    rate_limit_window_seconds = db.Column(db.Integer, nullable=True)
+    rate_limit_max_calls = db.Column(db.Integer, nullable=True)
+    rate_limit_message = db.Column(db.Text, nullable=True)
+    allow_non_private = db.Column(db.Boolean, default=False, nullable=False)
+    allowed_chat_ids = db.Column(db.Text, nullable=True)
+    allowed_thread_ids = db.Column(db.Text, nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    invocations = db.relationship(
+        'TelegramCommandInvocation',
+        backref='template',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
+
+
+class TelegramCommandInvocation(db.Model):
+    __tablename__ = 'telegram_command_invocations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    command_template_id = db.Column(db.Integer, db.ForeignKey('telegram_command_templates.id', ondelete='CASCADE'), nullable=False, index=True)
+    chat_id = db.Column(db.String(80), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class NotificationConfig(db.Model):
     __tablename__ = 'notification_configs'
 

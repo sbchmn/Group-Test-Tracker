@@ -29,6 +29,7 @@ class SchemaMigrationTests(unittest.TestCase):
             inspector = inspect(db.engine)
             columns = [column["name"] for column in inspector.get_columns("users")]
             participation_columns = [column["name"] for column in inspector.get_columns("participations")]
+            telegram_command_columns = [column["name"] for column in inspector.get_columns("telegram_command_templates")]
             table_names = set(inspector.get_table_names())
 
             self.assertIn("tg_username", columns)
@@ -49,6 +50,11 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("telegram_webhook_updates", table_names)
             self.assertIn("telegram_status_digest_events", table_names)
             self.assertIn("user_digest_events", table_names)
+            self.assertIn("telegram_command_templates", table_names)
+            self.assertIn("telegram_command_invocations", table_names)
+            self.assertIn("allow_non_private", telegram_command_columns)
+            self.assertIn("allowed_chat_ids", telegram_command_columns)
+            self.assertIn("allowed_thread_ids", telegram_command_columns)
 
     def test_latest_migration_includes_lab_name_column(self):
         migration_dir = Path(__file__).resolve().parent.parent / "migrations" / "versions"
@@ -72,6 +78,13 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("digest_hourly_minute_utc", migration_text)
         self.assertIn("digest_daily_hour_utc", migration_text)
         self.assertIn("user_digest_events", migration_text)
+        self.assertIn("telegram_command_templates", migration_text)
+        self.assertIn("telegram_command_invocations", migration_text)
+        self.assertIn("args_policy", migration_text)
+        self.assertIn("rate_limit_window_seconds", migration_text)
+        self.assertIn("allow_non_private", migration_text)
+        self.assertIn("allowed_chat_ids", migration_text)
+        self.assertIn("allowed_thread_ids", migration_text)
 
 
 if __name__ == "__main__":

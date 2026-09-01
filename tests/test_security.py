@@ -900,7 +900,7 @@ class SecurityTests(unittest.TestCase):
 
         self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
         with patch("app.routes.register_telegram_webhook", return_value=(True, {"description": "Webhook was set"})) as mock_register:
-            response = self.client.post("/admin/notification-config/telegram-webhook/register", follow_redirects=True)
+            response = self.client.post("/admin/telegram-config/webhook/register", follow_redirects=True)
 
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
@@ -917,7 +917,7 @@ class SecurityTests(unittest.TestCase):
             db.session.commit()
 
         self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
-        response = self.client.post("/admin/notification-config/telegram-webhook/register", follow_redirects=True)
+        response = self.client.post("/admin/telegram-config/webhook/register", follow_redirects=True)
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Telegram bot token is required before webhook registration.", response.get_data(as_text=True))
@@ -933,12 +933,28 @@ class SecurityTests(unittest.TestCase):
 
         self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
         with patch("app.routes.unregister_telegram_webhook", return_value=(True, {"description": "Webhook was deleted"})) as mock_unregister:
-            response = self.client.post("/admin/notification-config/telegram-webhook/unregister", follow_redirects=True)
+            response = self.client.post("/admin/telegram-config/webhook/unregister", follow_redirects=True)
 
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Telegram webhook unregistered successfully.", body)
         self.assertTrue(mock_unregister.called)
+
+    def test_legacy_notification_config_webhook_routes_are_not_available(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        register_response = self.client.post("/admin/notification-config/telegram-webhook/register", follow_redirects=False)
+        unregister_response = self.client.post("/admin/notification-config/telegram-webhook/unregister", follow_redirects=False)
+
+        self.assertEqual(register_response.status_code, 404)
+        self.assertEqual(unregister_response.status_code, 404)
 
     def test_notification_config_preserves_telegram_token_when_masked_value_submitted(self):
         from app.routes import mask_secret
@@ -953,18 +969,15 @@ class SecurityTests(unittest.TestCase):
 
         self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
 
-        response_get = self.client.get("/admin/notification-config")
+        response_get = self.client.get("/admin/telegram-config")
         self.assertEqual(response_get.status_code, 200)
         body = response_get.get_data(as_text=True)
         self.assertIn("1234", body)
         self.assertIn("REALTOKEN"[-6:], body)
 
         response_post = self.client.post(
-            "/admin/notification-config",
+            "/admin/telegram-config",
             data={
-                "mailjet_api_key": "",
-                "mailjet_secret_key": "",
-                "mailjet_sender_email": "",
                 "telegram_bot_token": mask_secret("123456:REALTOKEN"),
                 "telegram_bot_username": "",
                 "telegram_webhook_url": "",
@@ -974,7 +987,6 @@ class SecurityTests(unittest.TestCase):
                 "telegram_digest_enabled": "",
                 "telegram_digest_window_minutes": "10",
                 "service_base_url": "",
-                "notification_debug_enabled": "",
             },
             follow_redirects=True,
         )
@@ -996,11 +1008,8 @@ class SecurityTests(unittest.TestCase):
         self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
 
         response_post = self.client.post(
-            "/admin/notification-config",
+            "/admin/telegram-config",
             data={
-                "mailjet_api_key": "",
-                "mailjet_secret_key": "",
-                "mailjet_sender_email": "",
                 "telegram_bot_token": "",
                 "telegram_bot_username": "",
                 "telegram_webhook_url": "",
@@ -1019,7 +1028,6 @@ class SecurityTests(unittest.TestCase):
                 "telegram_status_user_approved_template": "Approved {{ amount_owed }}",
                 "telegram_status_user_pending_template": "Pending {{ test_id }}",
                 "service_base_url": "",
-                "notification_debug_enabled": "",
             },
             follow_redirects=True,
         )

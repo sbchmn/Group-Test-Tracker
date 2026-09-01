@@ -4,7 +4,17 @@
 
 {% block content %}
 <h3>Notification Configuration</h3>
-<p class="text-muted">Store the credentials needed for Mailjet and Telegram.</p>
+<p class="text-muted">Store Mailjet credentials and debug logging settings for notifications.</p>
+
+<div class="card mb-4">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <strong>Telegram Configuration</strong>
+            <div class="text-muted small">Telegram bot token, webhook controls, status chat, digest settings, and Telegram status templates are managed on a dedicated page.</div>
+        </div>
+        <a class="btn btn-outline-primary" href="{{ url_for('main.telegram_config') }}">Open Telegram Config</a>
+    </div>
+</div>
 
 <div class="card mb-4">
     <div class="card-body">
@@ -22,92 +32,6 @@
                 {{ form.mailjet_sender_email.label(class="form-label") }}
                 {{ form.mailjet_sender_email(class="form-control") }}
             </div>
-            <div class="mb-3">
-                {{ form.telegram_bot_token.label(class="form-label") }}
-                {{ form.telegram_bot_token(class="form-control") }}
-            </div>
-            <div class="mb-3">
-                {{ form.telegram_bot_username.label(class="form-label") }}
-                {{ form.telegram_bot_username(class="form-control", placeholder="your_bot_username") }}
-            </div>
-            <div class="mb-3">
-                {{ form.telegram_webhook_url.label(class="form-label") }}
-                {{ form.telegram_webhook_url(class="form-control", placeholder="https://your-domain.example/telegram/webhook") }}
-                <div class="form-text">Leave blank to auto-build from Service Base URL or current host.</div>
-            </div>
-            <div class="mb-3">
-                {{ form.telegram_webhook_secret.label(class="form-label") }}
-                {{ form.telegram_webhook_secret(class="form-control") }}
-                {% if webhook_secret_mask %}
-                    <div class="form-text">Existing secret: {{ webhook_secret_mask }} (leave blank to keep current value).</div>
-                {% endif %}
-            </div>
-            <div class="mb-3">
-                {{ form.telegram_webhook_allowed_ips.label(class="form-label") }}
-                {{ form.telegram_webhook_allowed_ips(class="form-control", placeholder="149.154.160.0/20,91.108.4.0/22") }}
-                <div class="form-text">Optional. Restrict webhook requests to these source CIDRs. Leave blank to allow any IP.</div>
-            </div>
-            <div class="mb-3">
-                {{ form.telegram_status_chat_id.label(class="form-label") }}
-                {{ form.telegram_status_chat_id(class="form-control", placeholder="-1001234567890 or @channelname") }}
-            </div>
-            <div class="row">
-                <div class="col-md-6 mb-3 form-check mt-4">
-                    {{ form.telegram_digest_enabled(class="form-check-input") }}
-                    {{ form.telegram_digest_enabled.label(class="form-check-label") }}
-                </div>
-                <div class="col-md-6 mb-3">
-                    {{ form.telegram_digest_window_minutes.label(class="form-label") }}
-                    {{ form.telegram_digest_window_minutes(class="form-control", step="1") }}
-                </div>
-            </div>
-            <div class="card mb-3" id="telegram-status-templates">
-                <div class="card-header">Telegram Status Message Templates</div>
-                <div class="card-body">
-                    <p class="small text-muted mb-2">Editable placeholders include: {{ '{{ test_id }}' }}, {{ '{{ test_title }}' }}, {{ '{{ old_status }}' }}, {{ '{{ old_status_label }}' }}, {{ '{{ new_status }}' }}, {{ '{{ new_status_label }}' }}, {{ '{{ new_status_phrase }}' }}, {{ '{{ status }}' }}, {{ '{{ status_label }}' }}, {{ '{{ status_phrase }}' }}, {{ '{{ test_url }}' }}, {{ '{{ mentions }}' }}, {{ '{{ denied_reason }}' }}, {{ '{{ order_status }}' }}, {{ '{{ amount_owed }}' }}, {{ '{{ amount_paid }}' }}, {{ '{{ results_url }}' }}.</p>
-                    <div class="mb-3">
-                        {{ form.telegram_status_digest_header_template.label(class="form-label") }}
-                        {{ form.telegram_status_digest_header_template(class="form-control", rows="2", placeholder="Group test status updates") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_digest_line_template.label(class="form-label") }}
-                        {{ form.telegram_status_digest_line_template(class="form-control", rows="2", placeholder="{{ test_title }} is now {{ new_status_phrase }}") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_digest_participants_template.label(class="form-label") }}
-                        {{ form.telegram_status_digest_participants_template(class="form-control", rows="2", placeholder="Participants: {{ mentions }}") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_new_test_template.label(class="form-label") }}
-                        {{ form.telegram_status_new_test_template(class="form-control", rows="3", placeholder="New group test created\n\n- #{{ test_id }} {{ test_title }}\n- Status: {{ status_label }}\n- Link: {{ test_url }}") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_user_no_request_template.label(class="form-label") }}
-                        {{ form.telegram_status_user_no_request_template(class="form-control", rows="2", placeholder="You have no request for #{{ test_id }} {{ test_title }}.") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_user_denied_template.label(class="form-label") }}
-                        {{ form.telegram_status_user_denied_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Denied. {{ denied_reason }}") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_user_results_template.label(class="form-label") }}
-                        {{ form.telegram_status_user_results_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Results are available: {{ results_url }}") }}
-                    </div>
-                    <div class="mb-3">
-                        {{ form.telegram_status_user_approved_template.label(class="form-label") }}
-                        {{ form.telegram_status_user_approved_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Approved. Order status: {{ order_status }}. Amount owed: ${{ amount_owed }}. Paid: ${{ amount_paid }}.") }}
-                    </div>
-                    <div class="mb-0">
-                        {{ form.telegram_status_user_pending_template.label(class="form-label") }}
-                        {{ form.telegram_status_user_pending_template(class="form-control", rows="2", placeholder="#{{ test_id }} {{ test_title }}: Pending admin review.") }}
-                    </div>
-                </div>
-            </div>
-            <div class="mb-3">
-                {{ form.service_base_url.label(class="form-label") }}
-                {{ form.service_base_url(class="form-control", placeholder="https://your-domain.example") }}
-                <div class="form-text">Used to build fully qualified links like {{ '{{ test_link }}' }} in notification templates.</div>
-            </div>
             <div class="form-check mb-3">
                 {{ form.notification_debug_enabled(class="form-check-input") }}
                 {{ form.notification_debug_enabled.label(class="form-check-label") }}
@@ -115,38 +39,6 @@
             <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
             <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Back</a>
         </form>
-
-        <hr>
-        <div>
-            <div class="fw-semibold mb-1">Telegram Webhook Actions</div>
-            <div class="small text-muted mb-1">Save configuration first, then use these buttons.</div>
-            <div class="small text-muted mb-2">Effective webhook URL: {{ effective_telegram_webhook_url }}</div>
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <form method="POST" action="{{ url_for('main.register_telegram_webhook_action') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-outline-primary">Register Webhook</button>
-                </form>
-                <form method="POST" action="{{ url_for('main.unregister_telegram_webhook_action') }}" onsubmit="return confirm('Unregister Telegram webhook?');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-outline-danger">Unregister Webhook</button>
-                </form>
-            </div>
-
-            <div class="small text-muted mb-1">Manual API Script (PowerShell)</div>
-            <pre class="small bg-light p-2 border rounded mb-0" style="white-space: pre-wrap;">$BotToken = "&lt;telegram_bot_token&gt;"
-$WebhookUrl = "{{ effective_telegram_webhook_url }}"
-$Secret = "&lt;telegram_webhook_secret_optional&gt;"
-
-Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$BotToken/setWebhook" -ContentType "application/json" -Body (@{
-  url = $WebhookUrl
-  secret_token = $Secret
-  drop_pending_updates = $false
-} | ConvertTo-Json)
-
-Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$BotToken/deleteWebhook" -ContentType "application/json" -Body (@{
-  drop_pending_updates = $false
-} | ConvertTo-Json)</pre>
-        </div>
     </div>
 </div>
 

@@ -29,13 +29,17 @@ DATABASE_URL=sqlite:///group_tests.db
 ## 2) Initial Admin Configuration (After Login)
 
 1. Open Admin -> Notification Config.
-2. Enter Mailjet and/or Telegram values.
-3. Set Telegram bot username and status chat target.
-4. Optionally set webhook URL override and allowed source IP CIDRs.
-5. Set digest mode/window.
-6. Set Service Base URL for links in templates.
-7. Use Register Telegram Webhook to publish webhook settings to Telegram.
-8. Save.
+2. Enter Mailjet values.
+3. Optionally enable debug logs.
+4. Save.
+
+1. Open Admin -> Telegram Config.
+2. Enter Telegram bot token and username.
+3. Set status chat target and digest mode/window.
+4. Optionally set webhook URL override, webhook secret, and allowed source IP CIDRs.
+5. Set Service Base URL for links in templates.
+6. Use Register Telegram Webhook to publish webhook settings to Telegram.
+7. Save.
 
 1. Open Admin -> Manage Templates.
 2. Create or edit templates for:
@@ -170,11 +174,12 @@ Storage upload fails:
 
 Notifications fail:
 1. Verify Notification Config keys.
-2. Verify recipient email and Telegram linking status.
-3. Enable notification debug logs.
-4. Review notification log in Notification Config page.
-5. Re-run Register Telegram Webhook after changing bot token or base URL.
-6. For status channel posts, verify chat target format and optional thread suffix.
+2. Verify Telegram Config keys.
+3. Verify recipient email and Telegram linking status.
+4. Enable notification debug logs.
+5. Review notification log in Notification Config page.
+6. Re-run Register Telegram Webhook after changing bot token or base URL.
+7. For status channel posts, verify chat target format and optional thread suffix.
 
 Migrations fail:
 1. Activate venv.
@@ -191,6 +196,7 @@ python -m unittest
 - Action Queue
 - Manage Users
 - Notification Config
+- Telegram Config
 - Storage Config
 - Public Results
 

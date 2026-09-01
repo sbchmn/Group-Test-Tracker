@@ -357,8 +357,8 @@
 - Added Telegram webhook API helper functions in `app/notifications.py` for `setWebhook` and `deleteWebhook` requests.
 - Added Notification Config field `telegram_webhook_url` (optional override) with automatic fallback to `service_base_url` or current host + `/telegram/webhook`.
 - Added admin POST routes:
-	- `/admin/notification-config/telegram-webhook/register`
-	- `/admin/notification-config/telegram-webhook/unregister`
+	- `/admin/telegram-config/webhook/register`
+	- `/admin/telegram-config/webhook/unregister`
 - Added UI controls on Notification Configuration page with Register/Unregister buttons and a PowerShell manual script snippet.
 - Added guard rails and user feedback for missing bot token and non-HTTPS URL.
 - Added focused security tests for register success, missing-token failure, and unregister success.
@@ -639,3 +639,79 @@
 ### Validation Results
 - Narrow `/testing` validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_channel_post tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply tests.test_security.SecurityTests.test_telegram_webhook_group_message_does_not_overwrite_private_chat_link` (4 tests, OK).
 - Focused thread-routing validation passed: `py -3 -m unittest tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_originating_message_thread tests.test_security.SecurityTests.test_telegram_webhook_testing_command_replies_in_channel_post tests.test_security.SecurityTests.test_telegram_webhook_ignores_group_messages_without_reply` (4 tests, OK).
+
+## Phase 1: Dedicated Telegram Config Page
+
+### Target Files and Modules
+- `app/routes.py`
+- `app/templates/admin/notification_config.html`
+- `app/templates/admin/telegram_config.html`
+- `app/templates/admin/notification_templates.html`
+- `app/templates/base.html`
+- `tests/test_security.py`
+- `README.md`
+- `ADMIN_QUICK_START.md`
+
+### Intended Behavior Changes
+- Split admin configuration responsibilities so Notification Config remains focused on Mailjet/debug settings.
+- Move Telegram bot credentials, webhook settings/actions, status channel target, digest controls, status templates, and service base URL into a dedicated Telegram Config page.
+- Keep runtime Telegram behavior and config keys unchanged to avoid migration and compatibility risk.
+- Preserve existing webhook action endpoints while introducing Telegram Config-native webhook routes.
+
+### Implemented Changes
+- Refactored forms in routes:
+	- `NotificationConfigForm` now contains Mailjet + notification debug fields only.
+	- Added `TelegramConfigForm` for all Telegram-related fields and templates.
+- Refactored `/admin/notification-config` route to persist only Mailjet/debug keys.
+- Added `/admin/telegram-config` route with full Telegram settings persistence, webhook-secret masking behavior, and effective webhook URL context.
+- Added Telegram-config-native webhook action routes:
+	- `/admin/telegram-config/webhook/register`
+	- `/admin/telegram-config/webhook/unregister`
+	while preserving legacy endpoints as aliases for backward compatibility.
+- Updated webhook action redirects to return to Telegram Config.
+- Simplified Notification Config template and added CTA to open Telegram Config.
+- Added new `admin/telegram_config.html` containing Telegram fields, template editor, webhook action buttons, and manual PowerShell script.
+- Updated Notification Templates deep-link button to target Telegram Config status-template anchor.
+- Added Telegram Config entry in admin navigation.
+- Updated security tests to post Telegram persistence cases to `/admin/telegram-config`.
+- Updated README and admin quick-start docs to reflect the route/page split.
+
+### Security / Reliability / Optimization Notes
+- Security: Telegram token masking preservation remains enforced on Telegram Config POST, preventing masked placeholders from being stored as credentials.
+- Security: Existing admin-only protection remains on all config and webhook action routes.
+- Reliability: Legacy webhook action endpoints are retained, minimizing regression risk for existing scripts/bookmarks.
+- Reliability: Telegram and Mailjet settings ownership is now explicit per page, reducing operator misconfiguration risk.
+- Optimization: No additional DB schema changes or heavy query paths were introduced; route behavior remains lightweight map-based config persistence.
+
+### Validation Results
+- Focused regression validation passed: `python -m unittest tests.test_security` (38 tests, OK).
+
+## Phase 2: Telegram Webhook Endpoint Cutover
+
+### Target Files and Modules
+- `app/routes.py`
+- `tests/test_security.py`
+- `PROJECT_MAP.md`
+
+### Intended Behavior Changes
+- Remove legacy Notification Config webhook action URLs now that Telegram has a dedicated admin page.
+- Enforce a single Telegram control-plane endpoint family under `/admin/telegram-config/...`.
+- Keep cutover explicit and test-covered so stale old URLs fail predictably.
+
+### Implemented Changes
+- Removed route aliases for:
+	- `/admin/notification-config/telegram-webhook/register`
+	- `/admin/notification-config/telegram-webhook/unregister`
+- Retained canonical Telegram webhook actions at:
+	- `/admin/telegram-config/webhook/register`
+	- `/admin/telegram-config/webhook/unregister`
+- Added regression test asserting both legacy notification-config webhook endpoints now return 404.
+- Updated Notification Config save activity-log label to `configuration: notification settings updated` to match page scope.
+
+### Security / Reliability / Optimization Notes
+- Security: Removing stale endpoints reduces accidental invocation surface and keeps all Telegram webhook actions behind one explicit admin route family.
+- Reliability: Canonical endpoints remain unchanged from Phase 1, and tests now guard against route regression/reintroduction.
+- Optimization: No schema or runtime query overhead introduced; this is a routing-surface reduction.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_security` (39 tests, OK).

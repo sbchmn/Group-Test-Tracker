@@ -238,6 +238,11 @@ class NotificationConfigForm(FlaskForm):
     mailjet_api_key = StringField('Mailjet API Key', validators=[Optional()])
     mailjet_secret_key = StringField('Mailjet Secret Key', validators=[Optional()])
     mailjet_sender_email = StringField('Mailjet Sender Email', validators=[Optional(), Email()])
+    notification_debug_enabled = BooleanField('Enable debug-level notification logs')
+    submit = SubmitField('Save Configuration')
+
+
+class TelegramConfigForm(FlaskForm):
     telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
     telegram_bot_username = StringField('Telegram Bot Username', validators=[Optional(), Length(max=80)])
     telegram_webhook_url = StringField('Telegram Webhook URL (optional override)', validators=[Optional(), URL(require_tld=False), Length(max=500)])
@@ -256,8 +261,7 @@ class NotificationConfigForm(FlaskForm):
     telegram_status_user_approved_template = TextAreaField('Telegram /status Approved Template', validators=[Optional(), Length(max=2000)])
     telegram_status_user_pending_template = TextAreaField('Telegram /status Pending Template', validators=[Optional(), Length(max=2000)])
     service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
-    notification_debug_enabled = BooleanField('Enable debug-level notification logs')
-    submit = SubmitField('Save Configuration')
+    submit = SubmitField('Save Telegram Configuration')
 
 
 class StorageConfigForm(FlaskForm):
@@ -2833,30 +2837,66 @@ def edit_notification_template(template_id):
 def notification_config():
     form = NotificationConfigForm()
     configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
-    existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
     existing_mailjet_api_key = str(configs.get('mailjet_api_key') or '').strip()
     existing_mailjet_secret_key = str(configs.get('mailjet_secret_key') or '').strip()
-    existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
 
     if form.validate_on_submit():
-        webhook_secret = (form.telegram_webhook_secret.data or '').strip()
-
         submitted_mailjet_api_key = (form.mailjet_api_key.data or '').strip()
         submitted_mailjet_secret_key = (form.mailjet_secret_key.data or '').strip()
-        submitted_telegram_bot_token = (form.telegram_bot_token.data or '').strip()
 
         # Protect against masked placeholders being re-saved as real credentials.
         if submitted_mailjet_api_key == mask_secret(existing_mailjet_api_key):
             submitted_mailjet_api_key = existing_mailjet_api_key
         if submitted_mailjet_secret_key == mask_secret(existing_mailjet_secret_key):
             submitted_mailjet_secret_key = existing_mailjet_secret_key
-        if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
-            submitted_telegram_bot_token = existing_telegram_bot_token
 
         for key, value in {
             'mailjet_api_key': submitted_mailjet_api_key,
             'mailjet_secret_key': submitted_mailjet_secret_key,
             'mailjet_sender_email': form.mailjet_sender_email.data,
+            'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
+        }.items():
+            config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+            config.value = value or None
+            db.session.add(config)
+
+        db.session.commit()
+        append_notification_log('configuration: notification settings updated')
+        flash('Notification configuration saved.', 'success')
+        return redirect(url_for('main.notification_config'))
+
+    if not form.is_submitted():
+        form.mailjet_api_key.data = mask_secret(configs.get('mailjet_api_key'))
+        form.mailjet_secret_key.data = mask_secret(configs.get('mailjet_secret_key'))
+        form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
+        form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
+
+    log_contents = read_notification_log()
+    return render_template(
+        'admin/notification_config.html',
+        form=form,
+        log_contents=log_contents,
+    )
+
+
+@main_bp.route('/admin/telegram-config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def telegram_config():
+    form = TelegramConfigForm()
+    configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+    existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
+    existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
+
+    if form.validate_on_submit():
+        webhook_secret = (form.telegram_webhook_secret.data or '').strip()
+        submitted_telegram_bot_token = (form.telegram_bot_token.data or '').strip()
+
+        # Protect against masked placeholders being re-saved as real credentials.
+        if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
+            submitted_telegram_bot_token = existing_telegram_bot_token
+
+        for key, value in {
             'telegram_bot_token': submitted_telegram_bot_token,
             'telegram_bot_username': form.telegram_bot_username.data,
             'telegram_webhook_url': form.telegram_webhook_url.data,
@@ -2874,7 +2914,6 @@ def notification_config():
             'telegram_status_user_approved_template': form.telegram_status_user_approved_template.data,
             'telegram_status_user_pending_template': form.telegram_status_user_pending_template.data,
             'service_base_url': form.service_base_url.data,
-            'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
         }.items():
             config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
             config.value = value or None
@@ -2890,14 +2929,11 @@ def notification_config():
             db.session.add(config)
 
         db.session.commit()
-        append_notification_log('configuration: credentials updated')
-        flash('Notification configuration saved.', 'success')
-        return redirect(url_for('main.notification_config'))
+        append_notification_log('configuration: telegram settings updated')
+        flash('Telegram configuration saved.', 'success')
+        return redirect(url_for('main.telegram_config'))
 
     if not form.is_submitted():
-        form.mailjet_api_key.data = mask_secret(configs.get('mailjet_api_key'))
-        form.mailjet_secret_key.data = mask_secret(configs.get('mailjet_secret_key'))
-        form.mailjet_sender_email.data = configs.get('mailjet_sender_email')
         form.telegram_bot_token.data = mask_secret(configs.get('telegram_bot_token'))
         form.telegram_bot_username.data = configs.get('telegram_bot_username')
         form.telegram_webhook_url.data = configs.get('telegram_webhook_url')
@@ -2919,18 +2955,16 @@ def notification_config():
         form.telegram_status_user_approved_template.data = configs.get('telegram_status_user_approved_template')
         form.telegram_status_user_pending_template.data = configs.get('telegram_status_user_pending_template')
         form.service_base_url.data = configs.get('service_base_url')
-        form.notification_debug_enabled.data = str(configs.get('notification_debug_enabled', 'false')).lower() == 'true'
-    log_contents = read_notification_log()
+
     return render_template(
-        'admin/notification_config.html',
+        'admin/telegram_config.html',
         form=form,
-        log_contents=log_contents,
         webhook_secret_mask=mask_secret(existing_webhook_secret),
         effective_telegram_webhook_url=_resolve_telegram_webhook_url(configs),
     )
 
 
-@main_bp.route('/admin/notification-config/telegram-webhook/register', methods=['POST'])
+@main_bp.route('/admin/telegram-config/webhook/register', methods=['POST'])
 @login_required
 @admin_required
 def register_telegram_webhook_action():
@@ -2938,12 +2972,12 @@ def register_telegram_webhook_action():
     bot_token = str(configs.get('telegram_bot_token') or '').strip()
     if not bot_token:
         flash('Telegram bot token is required before webhook registration.', 'danger')
-        return redirect(url_for('main.notification_config'))
+        return redirect(url_for('main.telegram_config'))
 
     webhook_url = _resolve_telegram_webhook_url(configs)
     if not webhook_url.lower().startswith('https://'):
         flash('Webhook URL must use https:// for Telegram to accept it.', 'danger')
-        return redirect(url_for('main.notification_config'))
+        return redirect(url_for('main.telegram_config'))
 
     secret = str(configs.get('telegram_webhook_secret') or '').strip() or None
     ok, response = register_telegram_webhook(webhook_url, secret_token=secret, drop_pending_updates=False)
@@ -2957,10 +2991,10 @@ def register_telegram_webhook_action():
             flash('Telegram webhook registration failed: bot token appears invalid. Re-enter the full token from BotFather and save configuration, then retry.', 'danger')
         else:
             flash(f'Telegram webhook registration failed: {description or "Unknown error"}', 'danger')
-    return redirect(url_for('main.notification_config'))
+    return redirect(url_for('main.telegram_config'))
 
 
-@main_bp.route('/admin/notification-config/telegram-webhook/unregister', methods=['POST'])
+@main_bp.route('/admin/telegram-config/webhook/unregister', methods=['POST'])
 @login_required
 @admin_required
 def unregister_telegram_webhook_action():
@@ -2968,7 +3002,7 @@ def unregister_telegram_webhook_action():
     bot_token = str(configs.get('telegram_bot_token') or '').strip()
     if not bot_token:
         flash('Telegram bot token is required before webhook removal.', 'danger')
-        return redirect(url_for('main.notification_config'))
+        return redirect(url_for('main.telegram_config'))
 
     ok, response = unregister_telegram_webhook(drop_pending_updates=False)
     description = str((response or {}).get('description') or '')
@@ -2978,7 +3012,7 @@ def unregister_telegram_webhook_action():
     else:
         append_notification_log(f'telegram: webhook unregister failed detail={description}')
         flash(f'Telegram webhook removal failed: {description or "Unknown error"}', 'danger')
-    return redirect(url_for('main.notification_config'))
+    return redirect(url_for('main.telegram_config'))
 
 
 @main_bp.route('/admin/payment-options', methods=['GET', 'POST'])

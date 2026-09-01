@@ -38,6 +38,7 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 	- [Manage Payment Options](#manage-payment-options)
 	- [Notification Templates](#notification-templates)
 	- [Notification Config](#notification-config)
+	- [Telegram Config](#telegram-config)
 	- [Send Notifications to Test Participants](#send-notifications-to-test-participants)
 	- [Export Test Data](#export-test-data)
 - [Object Storage and Result Image Upload How-To](#object-storage-and-result-image-upload-how-to)
@@ -337,23 +338,29 @@ If the user was previously denied for that test, the record is reactivated and a
 
 1. Open Admin -> Notification Config.
 2. Configure Mailjet keys/sender email.
-3. Configure Telegram bot token and bot username.
-4. Configure Telegram webhook URL override (optional) and allowed source IP CIDRs (optional).
-5. Configure Telegram status chat target. Thread targets are supported using chatId_threadId format.
-6. Configure digest mode and digest window.
-7. Edit Telegram status message templates (linked from Notification Templates) and variables for:
+3. Optionally enable debug logs.
+4. Save.
+
+### Telegram Config
+
+1. Open Admin -> Telegram Config.
+2. Configure Telegram bot token and bot username.
+3. Configure Telegram webhook URL override (optional), webhook secret, and allowed source IP CIDRs (optional).
+4. Configure Telegram status chat target. Thread targets are supported using chatId_threadId format.
+5. Configure digest mode and digest window.
+6. Edit Telegram status message templates (linked from Notification Templates) and variables for:
 - digest header
 - digest line item
 - digest participants line
 - new-test channel post
 - user /status no-request reply
 - user /status denied reply
+- user /status completed+paid results reply
 - user /status approved reply
 - user /status pending reply
-8. Set service base URL (used for fully qualified links in templates and Telegram message links).
-9. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage bot webhook from the UI.
-10. Optionally enable debug logs.
-11. Save.
+7. Set service base URL (used for fully qualified links in templates and Telegram message links).
+8. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage bot webhook from the UI.
+9. Save.
 
 ### Send Notifications to Test Participants
 

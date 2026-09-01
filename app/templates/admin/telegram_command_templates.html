@@ -61,6 +61,22 @@
                     {{ form.rate_limit_message(class="form-control", rows=2, placeholder="Please wait before using {{ command }} again.") }}
                 </div>
             </div>
+            <div class="form-check mb-3">
+                {{ form.allow_non_private(class="form-check-input") }}
+                {{ form.allow_non_private.label(class="form-check-label") }}
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.allowed_chat_ids.label(class="form-label") }}
+                    {{ form.allowed_chat_ids(class="form-control", placeholder="-1001234567890,-1009876543210") }}
+                    <div class="form-text">Optional. If set, command only runs for these chat IDs.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.allowed_thread_ids.label(class="form-label") }}
+                    {{ form.allowed_thread_ids(class="form-control", placeholder="2,14") }}
+                    <div class="form-text">Optional. If set, command only runs in these topic thread IDs.</div>
+                </div>
+            </div>
             <div class="mb-3">
                 {{ form.reply_text.label(class="form-label") }}
                 {{ form.reply_text(class="form-control", rows=5, placeholder="Hi {{ first_name }}, current info: ...") }}
@@ -92,6 +108,7 @@
                             <th>Description</th>
                             <th>Args Policy</th>
                             <th>Rate Limit</th>
+                            <th>Scope</th>
                             <th>Status</th>
                             <th>Reply Preview</th>
                             <th class="text-end">Actions</th>
@@ -115,6 +132,15 @@
                                     {% else %}
                                         -
                                     {% endif %}
+                                </td>
+                                <td>
+                                    {% if template.allow_non_private %}
+                                        <span class="badge bg-info text-dark">Groups/Channels Allowed</span>
+                                    {% else %}
+                                        <span class="badge bg-light text-dark">Private Only</span>
+                                    {% endif %}
+                                    <div class="small text-muted mt-1">Chats: {{ template.allowed_chat_ids or 'any' }}</div>
+                                    <div class="small text-muted">Threads: {{ template.allowed_thread_ids or 'any' }}</div>
                                 </td>
                                 <td>
                                     {% if template.is_active %}

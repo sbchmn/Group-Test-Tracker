@@ -377,8 +377,11 @@ If the user was previously denied for that test, the record is reactivated and a
 5. Optionally set per-command rate limits by entering both:
 - rate limit window (seconds)
 - max calls in that window
-6. Optionally customize argument failure and rate-limit messages.
-7. Add reply text and optional placeholders:
+6. Optionally allow command execution in groups/channels and scope it using:
+- allowed chat IDs (comma-separated)
+- allowed topic thread IDs (comma-separated)
+7. Optionally customize argument failure and rate-limit messages.
+8. Add reply text and optional placeholders:
 - `{{ username }}`
 - `{{ first_name }}`
 - `{{ tg_username }}`
@@ -386,12 +389,13 @@ If the user was previously denied for that test, the record is reactivated and a
 - `{{ args }}`
 - `{{ message_text }}`
 - `{{ chat_id }}`
-8. Save as active.
+9. Save as active.
 
 Notes:
 - Built-in commands remain reserved and cannot be overridden (`/start`, `/help`, `/tests`, `/mytests`, `/testing`, `/status`, `/join`).
 - Reserved prefixes `/status_` and `/join_` are blocked to preserve clickable test actions.
 - Rate-limit message placeholders support `{{ command }}` and `{{ chat_id }}`.
+- If allowlists are set, the command only runs when both chat and thread restrictions match.
 
 ### Send Notifications to Test Participants
 

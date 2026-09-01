@@ -287,6 +287,9 @@ class TelegramCommandTemplateForm(FlaskForm):
     rate_limit_window_seconds = FloatField('Rate Limit Window (seconds)', validators=[Optional(), NumberRange(min=1, max=3600)])
     rate_limit_max_calls = FloatField('Rate Limit Max Calls', validators=[Optional(), NumberRange(min=1, max=1000)])
     rate_limit_message = TextAreaField('Rate Limit Message', validators=[Optional(), Length(max=2000)])
+    allow_non_private = BooleanField('Allow in groups/channels', default=False)
+    allowed_chat_ids = StringField('Allowed Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     reply_text = TextAreaField('Reply Text', validators=[DataRequired(), Length(max=4000)])
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Command Template')
@@ -1407,6 +1410,27 @@ def _extract_telegram_command_args(message_text):
     return parts[1].strip()
 
 
+def _parse_csv_tokens(raw_value):
+    raw_text = str(raw_value or '').strip()
+    if not raw_text:
+        return []
+    return [token.strip() for token in raw_text.split(',') if token and token.strip()]
+
+
+def _normalize_allowed_chat_ids(raw_value):
+    return _parse_csv_tokens(raw_value)
+
+
+def _normalize_allowed_thread_ids(raw_value):
+    normalized = []
+    for token in _parse_csv_tokens(raw_value):
+        try:
+            normalized.append(str(int(token)))
+        except (TypeError, ValueError):
+            return None
+    return normalized
+
+
 def _validate_custom_telegram_command_options(form):
     errors = []
     args_policy = str(form.args_policy.data or 'any').strip().lower()
@@ -1437,6 +1461,14 @@ def _validate_custom_telegram_command_options(form):
                 errors.append('Rate-limit values must be positive integers.')
         except (TypeError, ValueError):
             errors.append('Rate-limit values must be positive integers.')
+
+    allowed_threads = _normalize_allowed_thread_ids(form.allowed_thread_ids.data)
+    if allowed_threads is None:
+        errors.append('Allowed thread IDs must be integers separated by commas.')
+
+    allowed_chats = _normalize_allowed_chat_ids(form.allowed_chat_ids.data)
+    if any(' ' in token for token in allowed_chats):
+        errors.append('Allowed chat IDs must be comma-separated values without spaces inside each ID.')
 
     return errors
 
@@ -1504,6 +1536,63 @@ def _custom_command_args_allowed(template, args_text):
             return re.fullmatch(pattern, args_text or '') is not None
         except re.error:
             return False
+    return True
+
+
+def _custom_command_chat_scope_allowed(template, chat_id, chat_type, message_thread_id):
+    chat_type = str(chat_type or '').strip().lower()
+    chat_id = str(chat_id or '').strip()
+    thread_value = None
+    if message_thread_id is not None and str(message_thread_id).strip() != '':
+        try:
+            thread_value = str(int(message_thread_id))
+        except (TypeError, ValueError):
+            return False
+
+    if chat_type != 'private' and not bool(template.allow_non_private):
+        return False
+
+    allowed_chats = _normalize_allowed_chat_ids(template.allowed_chat_ids)
+    if allowed_chats and chat_id not in allowed_chats:
+        return False
+
+    allowed_threads = _normalize_allowed_thread_ids(template.allowed_thread_ids)
+    if allowed_threads is None:
+        return False
+    if allowed_threads:
+        if thread_value is None or thread_value not in allowed_threads:
+            return False
+
+    return True
+
+
+def _process_custom_command_template(template, linked_user, message_text, chat_id, chat_type, message_thread_id=None, suppress_scope_denied_reply=False):
+    if template is None:
+        return False
+
+    if not _custom_command_chat_scope_allowed(template, chat_id, chat_type, message_thread_id):
+        if suppress_scope_denied_reply:
+            return False
+        send_telegram_chat_message(chat_id, 'This command is not enabled in this chat or thread.', message_thread_id=message_thread_id)
+        return True
+
+    command_args = _extract_telegram_command_args(message_text)
+    if not _custom_command_args_allowed(template, command_args):
+        send_telegram_chat_message(chat_id, _custom_command_args_error_message(template), message_thread_id=message_thread_id)
+        return True
+
+    if _custom_command_rate_limited(template, chat_id):
+        rate_limit_message = _custom_command_rate_limit_message(template, chat_id)
+        send_telegram_chat_message(chat_id, rate_limit_message, message_thread_id=message_thread_id)
+        return True
+
+    rendered_reply = _render_custom_telegram_reply(template, linked_user, message_text, chat_id)
+    _record_custom_command_invocation(template, chat_id)
+    db.session.commit()
+    if rendered_reply:
+        send_telegram_chat_message(chat_id, rendered_reply, message_thread_id=message_thread_id)
+    else:
+        send_telegram_chat_message(chat_id, 'Command received, but this command has no reply text configured.', message_thread_id=message_thread_id)
     return True
 
 
@@ -1807,6 +1896,8 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     lower = text.lower()
+    command_head = _telegram_extract_command_head(text)
+    custom_template = TelegramCommandTemplate.query.filter_by(command=command_head, is_active=True).first()
     if lower == '/testing':
         send_telegram_chat_message(
             chat_id,
@@ -1817,6 +1908,21 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if chat_type and chat_type != 'private':
+        non_private_user = None
+        if telegram_user_id:
+            non_private_user = User.query.filter_by(telegram_user_id=telegram_user_id).first()
+        if _process_custom_command_template(
+            custom_template,
+            non_private_user,
+            text,
+            chat_id,
+            chat_type,
+            message_thread_id=message_thread_id,
+            suppress_scope_denied_reply=True,
+        ):
+            db.session.commit()
+            return jsonify({'ok': True})
+
         append_notification_log(
             f"telegram: ignoring non-private bot command/update from chat {chat_id} ({chat_type})",
             debug=True,
@@ -1929,26 +2035,14 @@ def telegram_webhook():
         send_telegram_chat_message(chat_id, _telegram_join_test_for_user(linked_user, test))
         return jsonify({'ok': True})
 
-    command_head = _telegram_extract_command_head(text)
-    custom_template = TelegramCommandTemplate.query.filter_by(command=command_head, is_active=True).first()
-    if custom_template is not None:
-        command_args = _extract_telegram_command_args(text)
-        if not _custom_command_args_allowed(custom_template, command_args):
-            send_telegram_chat_message(chat_id, _custom_command_args_error_message(custom_template))
-            return jsonify({'ok': True})
-
-        if _custom_command_rate_limited(custom_template, chat_id):
-            rate_limit_message = _custom_command_rate_limit_message(custom_template, chat_id)
-            send_telegram_chat_message(chat_id, rate_limit_message)
-            return jsonify({'ok': True})
-
-        rendered_reply = _render_custom_telegram_reply(custom_template, linked_user, text, chat_id)
-        _record_custom_command_invocation(custom_template, chat_id)
-        db.session.commit()
-        if rendered_reply:
-            send_telegram_chat_message(chat_id, rendered_reply)
-        else:
-            send_telegram_chat_message(chat_id, 'Command received, but this command has no reply text configured.')
+    if _process_custom_command_template(
+        custom_template,
+        linked_user,
+        text,
+        chat_id,
+        chat_type,
+        message_thread_id=message_thread_id,
+    ):
         return jsonify({'ok': True})
 
     send_telegram_chat_message(chat_id, _telegram_help_message())
@@ -3115,6 +3209,8 @@ def telegram_command_templates():
 
         rate_limit_window_seconds = int(form.rate_limit_window_seconds.data) if form.rate_limit_window_seconds.data not in (None, '') else None
         rate_limit_max_calls = int(form.rate_limit_max_calls.data) if form.rate_limit_max_calls.data not in (None, '') else None
+        allowed_chat_ids = _normalize_allowed_chat_ids(form.allowed_chat_ids.data)
+        allowed_thread_ids = _normalize_allowed_thread_ids(form.allowed_thread_ids.data) or []
 
         template = TelegramCommandTemplate(
             command=normalized_command,
@@ -3126,6 +3222,9 @@ def telegram_command_templates():
             rate_limit_window_seconds=rate_limit_window_seconds,
             rate_limit_max_calls=rate_limit_max_calls,
             rate_limit_message=(form.rate_limit_message.data or '').strip() or None,
+            allow_non_private=bool(form.allow_non_private.data),
+            allowed_chat_ids=','.join(allowed_chat_ids) if allowed_chat_ids else None,
+            allowed_thread_ids=','.join(allowed_thread_ids) if allowed_thread_ids else None,
             reply_text=form.reply_text.data,
             is_active=bool(form.is_active.data),
         )
@@ -3167,6 +3266,8 @@ def edit_telegram_command_template(template_id):
 
         rate_limit_window_seconds = int(form.rate_limit_window_seconds.data) if form.rate_limit_window_seconds.data not in (None, '') else None
         rate_limit_max_calls = int(form.rate_limit_max_calls.data) if form.rate_limit_max_calls.data not in (None, '') else None
+        allowed_chat_ids = _normalize_allowed_chat_ids(form.allowed_chat_ids.data)
+        allowed_thread_ids = _normalize_allowed_thread_ids(form.allowed_thread_ids.data) or []
 
         template.command = normalized_command
         template.category = (form.category.data or '').strip() or None
@@ -3177,6 +3278,9 @@ def edit_telegram_command_template(template_id):
         template.rate_limit_window_seconds = rate_limit_window_seconds
         template.rate_limit_max_calls = rate_limit_max_calls
         template.rate_limit_message = (form.rate_limit_message.data or '').strip() or None
+        template.allow_non_private = bool(form.allow_non_private.data)
+        template.allowed_chat_ids = ','.join(allowed_chat_ids) if allowed_chat_ids else None
+        template.allowed_thread_ids = ','.join(allowed_thread_ids) if allowed_thread_ids else None
         template.reply_text = form.reply_text.data
         template.is_active = bool(form.is_active.data)
         db.session.commit()

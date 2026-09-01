@@ -792,10 +792,54 @@
 
 ### Security / Reliability / Optimization Notes
 - Security: Commands remain restricted to non-reserved names; built-in and clickable status/join prefixes cannot be overridden.
-- Security: Runtime command execution continues only for linked private users.
+- Security: Runtime command execution defaults to linked private users unless command-level non-private scope is explicitly enabled.
 - Reliability: Regex patterns are validated at save time to prevent runtime regex crashes.
 - Reliability: Rate limiting uses persisted invocation records, ensuring deterministic behavior across requests.
 - Optimization: Rate-limit checks use indexed filters (`command_template_id`, `chat_id`, `created_at`) to keep lookup cost bounded.
 
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_security tests.test_schema_migration` (47 tests, OK).
+
+## Phase 5: Command Chat/Thread Scope Controls
+
+### Target Files and Modules
+- `app/models.py`
+- `app/routes.py`
+- `app/templates/admin/telegram_command_templates.html`
+- `migrations/versions/c9f1e2a4b7d6_add_telegram_command_scope_controls.py`
+- `tests/test_security.py`
+- `tests/test_schema_migration.py`
+- `README.md`
+- `ADMIN_QUICK_START.md`
+
+### Intended Behavior Changes
+- Let each custom Telegram command opt into non-private execution.
+- Allow per-command restriction to explicit Telegram chat IDs.
+- Allow optional per-command restriction to explicit topic thread IDs.
+- Preserve existing behavior where non-private bot traffic is ignored unless explicitly allowed for a custom command.
+
+### Implemented Changes
+- Added new command-template fields:
+	- `allow_non_private`
+	- `allowed_chat_ids`
+	- `allowed_thread_ids`
+- Added additive Alembic migration `c9f1e2a4b7d6_add_telegram_command_scope_controls.py`.
+- Extended Telegram command template form/UI with non-private toggle and allowlist fields.
+- Added save-time parsing/validation for allowed thread ID formats.
+- Added shared command-scope evaluation helper and webhook command execution helper.
+- Updated webhook flow so non-private chats can execute only command templates that explicitly allow and match configured scope.
+- Added regression tests for:
+	- scope-field persistence,
+	- allowed group+thread execution,
+	- disallowed thread suppression,
+	- schema presence for new fields.
+
+### Security / Reliability / Optimization Notes
+- Security: Default remains fail-closed for non-private traffic; only explicitly scoped commands execute in groups/channels.
+- Security: Scoped non-private commands still cannot override built-in command names/prefixes.
+- Reliability: Invalid thread allowlist values are rejected at save-time.
+- Reliability: Non-matching scope is suppressed in non-private chats to avoid accidental chat noise.
+- Optimization: Scope matching is lightweight string/int comparison against stored comma lists.
+
+### Validation Results
+- Focused validation passed: `python -m unittest tests.test_security tests.test_schema_migration` (50 tests, OK).

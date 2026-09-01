@@ -147,3 +147,7 @@
 [2026-09-01 17:26:41] telegram: webhook unregistered
 [2026-09-01 17:26:49] configuration: telegram settings updated
 [2026-09-01 17:26:50] configuration: telegram settings updated
+[2026-09-01 17:42:11] telegram: webhook registered url=https://group-tests.example/telegram/webhook
+[2026-09-01 17:42:12] telegram: webhook unregistered
+[2026-09-01 17:42:20] configuration: telegram settings updated
+[2026-09-01 17:42:20] configuration: telegram settings updated

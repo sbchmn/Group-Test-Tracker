@@ -702,6 +702,106 @@ class SecurityTests(unittest.TestCase):
             invocations = TelegramCommandInvocation.query.all()
             self.assertEqual(len(invocations), 1)
 
+    def test_admin_can_persist_custom_command_chat_thread_scope_controls(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="adminscope", email="adminscope@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "adminscope", "password": "secret"}, follow_redirects=True)
+        response = self.client.post(
+            "/admin/telegram-command-templates",
+            data={
+                "command": "/groupinfo",
+                "category": "ops",
+                "description": "Scoped group command",
+                "args_policy": "none",
+                "args_regex": "",
+                "args_help_text": "",
+                "rate_limit_window_seconds": "",
+                "rate_limit_max_calls": "",
+                "rate_limit_message": "",
+                "allow_non_private": "y",
+                "allowed_chat_ids": "-100123,-100456",
+                "allowed_thread_ids": "2,14",
+                "reply_text": "Scoped",
+                "is_active": "y",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            template = TelegramCommandTemplate.query.filter_by(command="/groupinfo").first()
+            self.assertIsNotNone(template)
+            self.assertTrue(template.allow_non_private)
+            self.assertEqual(template.allowed_chat_ids, "-100123,-100456")
+            self.assertEqual(template.allowed_thread_ids, "2,14")
+
+    def test_telegram_webhook_custom_command_allows_configured_group_and_thread(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(
+                TelegramCommandTemplate(
+                    command="/groupinfo",
+                    allow_non_private=True,
+                    allowed_chat_ids="-100333",
+                    allowed_thread_ids="42",
+                    reply_text="Group command OK",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -100333, "type": "supergroup"},
+                        "message_thread_id": 42,
+                        "text": "/groupinfo",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        self.assertIn("Group command OK", mock_send.call_args.args[1])
+        self.assertEqual(mock_send.call_args.kwargs.get("message_thread_id"), 42)
+
+    def test_telegram_webhook_custom_command_ignores_disallowed_group_thread_scope(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(
+                TelegramCommandTemplate(
+                    command="/groupinfo",
+                    allow_non_private=True,
+                    allowed_chat_ids="-100333",
+                    allowed_thread_ids="42",
+                    reply_text="Group command OK",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -100333, "type": "supergroup"},
+                        "message_thread_id": 99,
+                        "text": "/groupinfo",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
+
     def test_telegram_start_rejects_user_id_already_linked_elsewhere(self):
         with self.app.app_context():
             db.create_all()

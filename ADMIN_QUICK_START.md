@@ -59,8 +59,9 @@ DATABASE_URL=sqlite:///group_tests.db
 2. Create custom slash commands (for example `/pricecheck`) with reply text.
 3. Optionally set category, args policy (any/none/required/regex), and args help text.
 4. Optionally set rate-limit window + max calls and a custom throttle message.
-5. Enable/disable templates as needed.
-6. Use optional placeholders such as `{{ username }}` and `{{ args }}`.
+5. Optionally allow non-private use and restrict each command by chat IDs and topic thread IDs.
+6. Enable/disable templates as needed.
+7. Use optional placeholders such as `{{ username }}` and `{{ args }}`.
 
 Common Telegram template placeholders:
 - test_id

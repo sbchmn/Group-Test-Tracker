@@ -227,6 +227,9 @@ class PublicResultsView(discord.ui.View):
                 button = discord.ui.Button(label='Next', style=discord.ButtonStyle.primary)
                 button.callback = self._tags_page_callback(page + 1)
                 self.add_item(button)
+            close = discord.ui.Button(label='Close', style=discord.ButtonStyle.danger)
+            close.callback = self._close_callback()
+            self.add_item(close)
             return
 
         _, tag_id, page, total_pages, items = self.state
@@ -243,6 +246,9 @@ class PublicResultsView(discord.ui.View):
             button = discord.ui.Button(label='Next', style=discord.ButtonStyle.primary)
             button.callback = self._results_page_callback(tag_id, page + 1)
             self.add_item(button)
+        close = discord.ui.Button(label='Close', style=discord.ButtonStyle.danger)
+        close.callback = self._close_callback()
+        self.add_item(close)
 
     def _render_callback(self, tag_id, page):
         async def callback(button_interaction):
@@ -262,6 +268,12 @@ class PublicResultsView(discord.ui.View):
 
     def _results_page_callback(self, tag_id, page):
         return self._render_callback(tag_id, page)
+
+    def _close_callback(self):
+        async def callback(button_interaction):
+            await button_interaction.response.defer()
+            await button_interaction.delete_original_response()
+        return callback
 
 
 def _visible_tests_for_user(user):

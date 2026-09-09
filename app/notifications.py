@@ -575,6 +575,14 @@ def answer_telegram_callback_query(callback_query_id):
     return ok
 
 
+def delete_telegram_message(chat_id, message_id):
+    ok, _ = _telegram_api_post('deleteMessage', {
+        'chat_id': str(chat_id or ''),
+        'message_id': int(message_id),
+    })
+    return ok
+
+
 def edit_telegram_message(chat_id, message_id, body, reply_markup=None):
     payload = {
         'chat_id': str(chat_id or ''),

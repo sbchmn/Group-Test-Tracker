@@ -775,6 +775,20 @@
 - Focused security and notification suites passed with the Python 3.12 interpreter.
 - Full unittest discovery completed without reported failures.
 
+## Public Results Pagination and Close Controls
+
+### Implemented Changes
+- Fixed tag pagination to count and slice one distinct, alphabetically ordered tag set.
+- Added Telegram `Close` callback buttons that delete the current bot message.
+- Added Discord `Close` buttons that delete the ephemeral Public Results response.
+
+### Validation Results
+- 13-tag pagination regression passed: page 1 contains 10 tags and page 2 contains 3.
+- Telegram Close/delete regression passed.
+- Existing Public Results private/group/callback tests passed.
+- Full unittest discovery completed without reported failures.
+- Changed modules compiled successfully.
+
 ## Telegram Public Results Dispatch Fix
 
 ### Implemented Changes

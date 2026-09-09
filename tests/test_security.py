@@ -856,6 +856,34 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual([item.title for item in results], ["Newer COA", "Older COA"])
         self.assertEqual((result_page, result_pages), (1, 1))
 
+    def test_public_results_tag_pagination_has_all_tags_on_final_page(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="pagination-admin", email="pagination-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            for index in range(13):
+                tag = Tag(name=f"Tag {index + 1:02d}", normalized_name=f"tag-{index + 1:02d}")
+                db.session.add(tag)
+                db.session.flush()
+                db.session.add(PublicResult(
+                    title=f"COA {index + 1}",
+                    results_link=f"https://coa.example/{index + 1}",
+                    created_by=admin.id,
+                    tags=[tag],
+                ))
+            db.session.commit()
+
+            first_tags, first_page, total_pages = public_result_tag_page(1)
+            second_tags, second_page, _ = public_result_tag_page(2)
+
+        self.assertEqual(total_pages, 2)
+        self.assertEqual((first_page, second_page), (1, 2))
+        self.assertEqual(len(first_tags), 10)
+        self.assertEqual(len(second_tags), 3)
+        self.assertEqual([tag.name for tag in second_tags], ["Tag 11", "Tag 12", "Tag 13"])
+
     def test_telegram_public_results_requires_linked_private_user_and_sends_coa_buttons(self):
         with self.app.app_context():
             db.create_all()
@@ -1002,6 +1030,28 @@ class SecurityTests(unittest.TestCase):
         mock_edit.assert_called_once()
         self.assertIn("Callback COA", mock_edit.call_args.args[2])
         self.assertEqual(mock_edit.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["url"], "https://coa.example/callback")
+
+    def test_telegram_public_results_close_deletes_message(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="builtin_publicresults_enabled", value="true"))
+            db.session.commit()
+
+        with patch("app.routes.answer_telegram_callback_query") as mock_answer, patch("app.routes.delete_telegram_message", return_value=True) as mock_delete:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "close-1",
+                        "data": "pr:close",
+                        "message": {"message_id": 55, "chat": {"id": 755, "type": "private"}},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_answer.assert_called_once_with("close-1")
+        mock_delete.assert_called_once_with("755", 55)
 
     def test_public_results_empty_state(self):
         with self.app.app_context():

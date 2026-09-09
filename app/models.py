@@ -181,6 +181,8 @@ class TelegramCommandTemplate(db.Model):
     category = db.Column(db.String(80), nullable=True, index=True)
     description = db.Column(db.Text, nullable=True)
     reply_text = db.Column(db.Text, nullable=False)
+    response_image_key = db.Column(db.String(500), nullable=True)
+    allow_admin_bot_updates = db.Column(db.Boolean, default=False, nullable=False)
     args_policy = db.Column(db.String(20), nullable=False, default='any')
     args_regex = db.Column(db.String(500), nullable=True)
     args_help_text = db.Column(db.Text, nullable=True)
@@ -199,6 +201,21 @@ class TelegramCommandTemplate(db.Model):
         backref='template',
         lazy='dynamic',
         cascade='all, delete-orphan'
+    )
+
+
+class BotCommandMessage(db.Model):
+    __tablename__ = 'bot_command_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    command_template_id = db.Column(db.Integer, db.ForeignKey('telegram_command_templates.id', ondelete='CASCADE'), nullable=False, index=True)
+    provider = db.Column(db.String(30), nullable=False, index=True)
+    chat_id = db.Column(db.String(120), nullable=False, index=True)
+    message_id = db.Column(db.String(120), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('provider', 'chat_id', 'message_id', name='_bot_command_provider_message_uc'),
     )
 
 

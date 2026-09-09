@@ -7,7 +7,7 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.models import BotCommandMessage, GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
 from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
 
 
@@ -993,6 +993,57 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_send.assert_not_called()
+
+    def test_telegram_linked_admin_reply_replaces_command_response_exactly(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(
+                username="command-admin",
+                email="command-admin@example.com",
+                is_admin=True,
+                telegram_user_id="9001",
+                telegram_chat_id="-1009001",
+            )
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            template = TelegramCommandTemplate(
+                command="/groupbuy",
+                reply_text="Old text",
+                response_image_key="bot-commands/old.jpg",
+                allow_admin_bot_updates=True,
+                is_active=True,
+            )
+            db.session.add(template)
+            db.session.flush()
+            db.session.add(BotCommandMessage(
+                command_template_id=template.id,
+                provider="telegram",
+                chat_id="-1009001",
+                message_id="77",
+            ))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send, patch("app.routes.delete_result_image") as mock_delete:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -1009001, "type": "supergroup"},
+                        "from": {"id": 9001, "username": "command-admin"},
+                        "text": "Updated text only",
+                        "reply_to_message": {"message_id": 77, "from": {"is_bot": True}},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Command response updated", mock_send.call_args.args[1])
+        mock_delete.assert_called_once_with("bot-commands/old.jpg")
+        with self.app.app_context():
+            refreshed = TelegramCommandTemplate.query.filter_by(command="/groupbuy").first()
+            self.assertEqual(refreshed.reply_text, "Updated text only")
+            self.assertIsNone(refreshed.response_image_key)
 
     def test_telegram_public_results_callback_edits_to_coa_links(self):
         with self.app.app_context():

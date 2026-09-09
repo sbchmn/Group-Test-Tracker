@@ -14,7 +14,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
 from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
-    FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField
+    FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField, FileField
 )
 from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
@@ -38,6 +38,7 @@ from .models import (
     Participation,
     NotificationTemplate,
     TelegramCommandTemplate,
+    BotCommandMessage,
     TelegramCommandInvocation,
     NotificationConfig,
     Tag,
@@ -66,6 +67,8 @@ from .notifications import (
     edit_telegram_message,
     register_telegram_webhook,
     unregister_telegram_webhook,
+    send_telegram_command_response,
+    download_telegram_photo,
 )
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
 from .storage import (
@@ -331,7 +334,10 @@ class TelegramCommandTemplateForm(FlaskForm):
     allow_non_private = BooleanField('Allow in groups/channels', default=False)
     allowed_chat_ids = StringField('Allowed Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
-    reply_text = TextAreaField('Reply Text', validators=[DataRequired(), Length(max=4000)])
+    reply_text = TextAreaField('Reply Text', validators=[Optional(), Length(max=4000)])
+    response_image = FileField('Response Image', validators=[Optional()])
+    remove_response_image = BooleanField('Remove existing response image')
+    allow_admin_bot_updates = BooleanField('Allow linked admins to update this command by replying to its bot message')
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Command Template')
 
@@ -1731,11 +1737,25 @@ def _process_custom_command_template(template, linked_user, message_text, chat_i
 
     rendered_reply = _render_custom_telegram_reply(template, linked_user, message_text, chat_id)
     _record_custom_command_invocation(template, chat_id)
-    db.session.commit()
-    if rendered_reply:
+    if template.response_image_key or template.allow_admin_bot_updates:
+        message_id = send_telegram_command_response(
+            chat_id,
+            rendered_reply,
+            image_key=template.response_image_key,
+            message_thread_id=message_thread_id,
+        )
+        if message_id:
+            db.session.add(BotCommandMessage(
+                command_template_id=template.id,
+                provider='telegram',
+                chat_id=str(chat_id),
+                message_id=str(message_id),
+            ))
+    elif rendered_reply:
         send_telegram_chat_message(chat_id, rendered_reply, message_thread_id=message_thread_id)
     else:
         send_telegram_chat_message(chat_id, 'Command received, but this command has no reply text configured.', message_thread_id=message_thread_id)
+    db.session.commit()
     return True
 
 
@@ -1855,6 +1875,60 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
         send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
     else:
         edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
+    return True
+
+
+def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+    reply_to_message = message.get('reply_to_message') or {}
+    replied_message_id = reply_to_message.get('message_id')
+    if not replied_message_id or not telegram_user_id:
+        return False
+
+    admin_user = User.query.filter_by(
+        telegram_user_id=str(telegram_user_id),
+        is_admin=True,
+    ).first()
+    if admin_user is None:
+        return False
+
+    ownership = BotCommandMessage.query.filter_by(
+        provider='telegram',
+        chat_id=str(chat_id),
+        message_id=str(replied_message_id),
+    ).first()
+    if ownership is None:
+        return False
+
+    template = TelegramCommandTemplate.query.get(ownership.command_template_id)
+    if template is None or not template.allow_admin_bot_updates:
+        return False
+
+    new_text = str(message.get('caption') or message.get('text') or '').strip()
+    photo_sizes = message.get('photo') or []
+    photo = photo_sizes[-1] if photo_sizes else None
+    if not new_text and not photo:
+        send_telegram_chat_message(chat_id, 'Reply with text, an image, or both to replace this command response.')
+        return True
+
+    new_image_key = None
+    old_image_key = template.response_image_key
+    try:
+        if photo and photo.get('file_id'):
+            uploaded_file = download_telegram_photo(photo['file_id'])
+            if uploaded_file is None:
+                raise StorageUploadError('Telegram image download failed.')
+            new_image_key = upload_result_image(uploaded_file, 'bot-commands')
+        template.reply_text = new_text
+        template.response_image_key = new_image_key
+        db.session.commit()
+        if old_image_key and old_image_key != new_image_key:
+            delete_result_image(old_image_key)
+    except (StorageConfigurationError, StorageUploadError) as exc:
+        db.session.rollback()
+        send_telegram_chat_message(chat_id, str(exc))
+        return True
+
+    send_telegram_chat_message(chat_id, 'Command response updated.')
     return True
 
 
@@ -2138,6 +2212,13 @@ def telegram_webhook():
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     if not chat_id or not text:
+        if _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+            db.session.commit()
+            return jsonify({'ok': True})
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    if _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -3667,6 +3748,27 @@ def _render_telegram_command_templates_page(form, editing_template=None):
     )
 
 
+def _apply_command_response_media(form, template):
+    uploaded_key = None
+    file_storage = form.response_image.data
+    if file_storage and getattr(file_storage, 'filename', ''):
+        uploaded_key = upload_result_image(file_storage, 'bot-commands')
+
+    previous_key = template.response_image_key
+    if uploaded_key:
+        template.response_image_key = uploaded_key
+        if previous_key and previous_key != uploaded_key:
+            delete_result_image(previous_key)
+    elif form.remove_response_image.data:
+        template.response_image_key = None
+        if previous_key:
+            delete_result_image(previous_key)
+
+    template.reply_text = (form.reply_text.data or '').strip()
+    if not template.reply_text and not template.response_image_key:
+        raise StorageUploadError('A command must have text, an image, or both.')
+
+
 @main_bp.route('/admin/telegram-command-templates', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -3707,9 +3809,15 @@ def telegram_command_templates():
             allow_non_private=bool(form.allow_non_private.data),
             allowed_chat_ids=','.join(allowed_chat_ids) if allowed_chat_ids else None,
             allowed_thread_ids=','.join(allowed_thread_ids) if allowed_thread_ids else None,
-            reply_text=form.reply_text.data,
+            reply_text=(form.reply_text.data or '').strip(),
+            allow_admin_bot_updates=bool(form.allow_admin_bot_updates.data),
             is_active=bool(form.is_active.data),
         )
+        try:
+            _apply_command_response_media(form, template)
+        except (StorageConfigurationError, StorageUploadError) as exc:
+            flash(str(exc), 'danger')
+            return _render_telegram_command_templates_page(form)
         db.session.add(template)
         db.session.commit()
         flash('Telegram command template created.', 'success')
@@ -3763,7 +3871,12 @@ def edit_telegram_command_template(template_id):
         template.allow_non_private = bool(form.allow_non_private.data)
         template.allowed_chat_ids = ','.join(allowed_chat_ids) if allowed_chat_ids else None
         template.allowed_thread_ids = ','.join(allowed_thread_ids) if allowed_thread_ids else None
-        template.reply_text = form.reply_text.data
+        try:
+            _apply_command_response_media(form, template)
+        except (StorageConfigurationError, StorageUploadError) as exc:
+            flash(str(exc), 'danger')
+            return _render_telegram_command_templates_page(form, editing_template=template)
+        template.allow_admin_bot_updates = bool(form.allow_admin_bot_updates.data)
         template.is_active = bool(form.is_active.data)
         db.session.commit()
         flash('Telegram command template updated.', 'success')

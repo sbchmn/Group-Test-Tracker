@@ -142,6 +142,28 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(command_response.status_code, 302)
         self.assertIn("/admin/telegram-command-templates", command_response.headers.get("Location", ""))
 
+        builtin_response = self.client.get("/admin/settings/commands/builtins")
+        self.assertEqual(builtin_response.status_code, 200)
+        self.assertIn("Enable /publicresults", builtin_response.get_data(as_text=True))
+        disabled_response = self.client.post(
+            "/admin/settings/commands/builtins",
+            data={
+                "tests_enabled": "y",
+                "mytests_enabled": "y",
+                "status_enabled": "y",
+                "join_enabled": "y",
+                "publicresults_enabled": "",
+                "publicresults_allow_non_private": "",
+                "publicresults_allowed_chat_ids": "",
+                "publicresults_allowed_thread_ids": "",
+                "submit": "Save Built-in Command Settings",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(disabled_response.status_code, 302)
+        with self.app.app_context():
+            self.assertEqual(NotificationConfig.query.filter_by(key="builtin_publicresults_enabled").first().value, "false")
+
     def test_create_user_does_not_flash_generated_password(self):
         with self.app.app_context():
             db.create_all()
@@ -833,7 +855,10 @@ class SecurityTests(unittest.TestCase):
             db.session.add(tag)
             db.session.flush()
             db.session.add(PublicResult(title="Group Channel COA", results_link="https://coa.example/group", created_by=admin.id, tags=[tag]))
-            db.session.add(TelegramCommandTemplate(command="/publicresults", allow_non_private=True, allowed_chat_ids="-100777", is_active=True, reply_text="unused"))
+            db.session.add_all([
+                NotificationConfig(key="builtin_publicresults_allow_non_private", value="true"),
+                NotificationConfig(key="builtin_publicresults_allowed_chat_ids", value="-100777"),
+            ])
             db.session.commit()
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:

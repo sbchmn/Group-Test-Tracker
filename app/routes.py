@@ -335,6 +335,18 @@ class TelegramCommandTemplateForm(FlaskForm):
     submit = SubmitField('Save Command Template')
 
 
+class BuiltinCommandConfigForm(FlaskForm):
+    tests_enabled = BooleanField('Enable /tests', default=True)
+    mytests_enabled = BooleanField('Enable /mytests', default=True)
+    status_enabled = BooleanField('Enable /status', default=True)
+    join_enabled = BooleanField('Enable /join', default=True)
+    publicresults_enabled = BooleanField('Enable /publicresults', default=True)
+    publicresults_allow_non_private = BooleanField('Allow /publicresults in groups/channels', default=False)
+    publicresults_allowed_chat_ids = StringField('Allowed Chat/Guild IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    publicresults_allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submit = SubmitField('Save Built-in Command Settings')
+
+
 class BotStatusTemplateForm(FlaskForm):
     telegram_status_digest_header_template = TextAreaField('Status Digest Header', validators=[Optional(), Length(max=2000)])
     telegram_status_digest_line_template = TextAreaField('Status Digest Line', validators=[Optional(), Length(max=2000)])
@@ -1471,6 +1483,7 @@ TELEGRAM_RESERVED_COMMANDS = {
     '/testing',
     '/status',
     '/join',
+    '/publicresults',
 }
 
 TELEGRAM_RESERVED_PREFIXES = (
@@ -1730,6 +1743,7 @@ def _telegram_help_custom_commands_block():
     commands = (
         TelegramCommandTemplate.query
         .filter_by(is_active=True)
+        .filter(~TelegramCommandTemplate.command.in_(TELEGRAM_RESERVED_COMMANDS))
         .order_by(TelegramCommandTemplate.command.asc())
         .all()
     )
@@ -1801,10 +1815,10 @@ def _public_results_telegram_view(tag_id=None, page=1):
     return body, _public_results_telegram_result_keyboard(results, tag.id, page, total_pages)
 
 
-def _process_public_results_telegram(template, linked_user, chat_id, chat_type, message_thread_id=None, tag_id=None, page=1, message_id=None):
-    if template is None or template.command != '/publicresults' or not template.is_active:
+def _process_public_results_telegram(linked_user, chat_id, chat_type, message_thread_id=None, tag_id=None, page=1, message_id=None):
+    if not _builtin_publicresults_enabled():
         return False
-    if not _custom_command_chat_scope_allowed(template, chat_id, chat_type, message_thread_id):
+    if not _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id):
         return False
     if chat_type == 'private' and linked_user is None:
         return False
@@ -2049,7 +2063,6 @@ def telegram_webhook():
         callback_chat_type = str(callback_chat.get('type') or '').strip().lower()
         callback_data = str(callback_query.get('data') or '').strip()
         callback_message_id = callback_message.get('message_id')
-        callback_template = TelegramCommandTemplate.query.filter_by(command='/publicresults', is_active=True).first()
         callback_user = None
         callback_telegram_user_id = str(callback_from.get('id') or '').strip()
         if callback_chat_type == 'private' and callback_telegram_user_id:
@@ -2063,12 +2076,12 @@ def telegram_webhook():
             try:
                 if parts[1] == 'tags' and len(parts) == 3:
                     handled = _process_public_results_telegram(
-                        callback_template, callback_user, callback_chat_id, callback_chat_type,
+                        callback_user, callback_chat_id, callback_chat_type,
                         tag_id=None, page=int(parts[2]), message_id=callback_message_id,
                     )
                 elif parts[1] == 'results' and len(parts) == 4:
                     handled = _process_public_results_telegram(
-                        callback_template, callback_user, callback_chat_id, callback_chat_type,
+                        callback_user, callback_chat_id, callback_chat_type,
                         tag_id=int(parts[2]), page=int(parts[3]), message_id=callback_message_id,
                     )
             except (TypeError, ValueError):
@@ -2115,7 +2128,6 @@ def telegram_webhook():
         if telegram_user_id:
             non_private_user = User.query.filter_by(telegram_user_id=telegram_user_id).first()
         if _process_public_results_telegram(
-            custom_template,
             non_private_user,
             chat_id,
             chat_type,
@@ -2202,6 +2214,9 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower == '/tests':
+        if not _builtin_enabled('tests'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         tests = _telegram_user_visible_tests(linked_user)
         if not tests:
             send_telegram_chat_message(chat_id, 'No eligible tests found right now.')
@@ -2211,6 +2226,9 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower == '/mytests':
+        if not _builtin_enabled('mytests'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         participations = _telegram_user_interacting_tests(linked_user)
         if not participations:
             send_telegram_chat_message(chat_id, 'You have no group test requests or approvals yet.')
@@ -2223,7 +2241,6 @@ def telegram_webhook():
 
     if lower == '/publicresults':
         if _process_public_results_telegram(
-            custom_template,
             linked_user,
             chat_id,
             chat_type,
@@ -2233,6 +2250,9 @@ def telegram_webhook():
             return jsonify({'ok': True})
 
     if lower.startswith('/status'):
+        if not _builtin_enabled('status'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         test_id = _telegram_extract_command_test_id(text, 'status')
         if test_id is None:
             send_telegram_chat_message(chat_id, 'Usage: /status <test_id> or /status_<test_id>')
@@ -2248,6 +2268,9 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower.startswith('/join'):
+        if not _builtin_enabled('join'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         test_id = _telegram_extract_command_test_id(text, 'join')
         if test_id is None:
             send_telegram_chat_message(chat_id, 'Usage: /join <test_id> or /join_<test_id>')
@@ -3369,6 +3392,36 @@ def _save_notification_config_values(values):
         db.session.add(config)
 
 
+def _builtin_config_value(key, default=None):
+    config = NotificationConfig.query.filter_by(key=key).first()
+    return config.value if config is not None else default
+
+
+def _builtin_publicresults_enabled():
+    return _builtin_enabled('publicresults')
+
+
+def _builtin_enabled(command_name):
+    return str(_builtin_config_value(f'builtin_{command_name}_enabled', 'true')).lower() == 'true'
+
+
+def _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id=None):
+    chat_type = str(chat_type or '').strip().lower()
+    if chat_type == 'private':
+        return True
+    if str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() != 'true':
+        return False
+    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_publicresults_allowed_chat_ids', ''))
+    if allowed_chats and str(chat_id or '').strip() not in allowed_chats:
+        return False
+    allowed_threads = _normalize_allowed_thread_ids(_builtin_config_value('builtin_publicresults_allowed_thread_ids', ''))
+    if allowed_threads is None:
+        return False
+    if allowed_threads and str(message_thread_id or '').strip() not in allowed_threads:
+        return False
+    return True
+
+
 @main_bp.route('/admin/settings/bots', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -3454,6 +3507,42 @@ def bot_integrations():
 @admin_required
 def bot_commands():
     return redirect(url_for('main.telegram_command_templates'))
+
+
+@main_bp.route('/admin/settings/commands/builtins', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def builtin_command_settings():
+    form = BuiltinCommandConfigForm()
+    if form.validate_on_submit():
+        allowed_threads = _normalize_allowed_thread_ids(form.publicresults_allowed_thread_ids.data)
+        if allowed_threads is None:
+            flash('Allowed thread IDs must be integers separated by commas.', 'danger')
+            return render_template('admin/builtin_command_settings.html', form=form)
+        _save_notification_config_values({
+            'builtin_tests_enabled': 'true' if form.tests_enabled.data else 'false',
+            'builtin_mytests_enabled': 'true' if form.mytests_enabled.data else 'false',
+            'builtin_status_enabled': 'true' if form.status_enabled.data else 'false',
+            'builtin_join_enabled': 'true' if form.join_enabled.data else 'false',
+            'builtin_publicresults_enabled': 'true' if form.publicresults_enabled.data else 'false',
+            'builtin_publicresults_allow_non_private': 'true' if form.publicresults_allow_non_private.data else 'false',
+            'builtin_publicresults_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.publicresults_allowed_chat_ids.data)),
+            'builtin_publicresults_allowed_thread_ids': ','.join(allowed_threads or []),
+        })
+        db.session.commit()
+        flash('Built-in command settings saved.', 'success')
+        return redirect(url_for('main.builtin_command_settings'))
+
+    if not form.is_submitted():
+        form.tests_enabled.data = _builtin_enabled('tests')
+        form.mytests_enabled.data = _builtin_enabled('mytests')
+        form.status_enabled.data = _builtin_enabled('status')
+        form.join_enabled.data = _builtin_enabled('join')
+        form.publicresults_enabled.data = _builtin_publicresults_enabled()
+        form.publicresults_allow_non_private.data = str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true'
+        form.publicresults_allowed_chat_ids.data = _builtin_config_value('builtin_publicresults_allowed_chat_ids', '')
+        form.publicresults_allowed_thread_ids.data = _builtin_config_value('builtin_publicresults_allowed_thread_ids', '')
+    return render_template('admin/builtin_command_settings.html', form=form)
 
 @main_bp.route('/admin/notification-templates', methods=['GET', 'POST'])
 @login_required

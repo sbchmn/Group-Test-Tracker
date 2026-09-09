@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Built-in Bot Commands{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
+    <div>
+        <h3 class="mb-1">Built-in Bot Commands</h3>
+        <p class="text-muted mb-0">Enable or disable commands implemented by the application. Generic reply templates cannot override them.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('main.admin_settings') }}">Back to Settings</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="fw-semibold mb-2">Always-available core commands</div>
+        <p class="text-muted small mb-0"><code>/help</code>, <code>/start</code>, <code>/tests</code>, <code>/mytests</code>, <code>/status</code>, and <code>/join</code> are part of the bot account-linking and participation workflow.</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="fw-semibold mb-2">Participation commands</div>
+            {% for field in [form.tests_enabled, form.mytests_enabled, form.status_enabled, form.join_enabled] %}
+                <div class="form-check mb-2">
+                    {{ field(class="form-check-input") }}
+                    {{ field.label(class="form-check-label") }}
+                </div>
+            {% endfor %}
+            <hr>
+            <div class="form-check mb-3">
+                {{ form.publicresults_enabled(class="form-check-input") }}
+                {{ form.publicresults_enabled.label(class="form-check-label") }}
+            </div>
+            <p class="small text-muted">/publicresults lists Public Result tags and COA links. It never exposes Group Test results.</p>
+            <div class="form-check mb-3">
+                {{ form.publicresults_allow_non_private(class="form-check-input") }}
+                {{ form.publicresults_allow_non_private.label(class="form-check-label") }}
+            </div>
+            <div class="mb-3">
+                {{ form.publicresults_allowed_chat_ids.label(class="form-label") }}
+                {{ form.publicresults_allowed_chat_ids(class="form-control", placeholder="Telegram chat IDs or Discord guild IDs") }}
+                <div class="form-text">Leave blank to allow any group/channel when non-private use is enabled.</div>
+            </div>
+            <div class="mb-3">
+                {{ form.publicresults_allowed_thread_ids.label(class="form-label") }}
+                {{ form.publicresults_allowed_thread_ids(class="form-control", placeholder="2,14") }}
+            </div>
+            <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('main.bot_commands') }}" class="btn btn-outline-secondary">Back to Command Registry</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

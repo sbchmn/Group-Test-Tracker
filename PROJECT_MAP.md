@@ -774,6 +774,26 @@
 ### Validation Results
 - Focused security and notification suites passed with the Python 3.12 interpreter.
 - Full unittest discovery completed without reported failures.
+
+## Built-in Bot Command Controls
+
+### Implemented Changes
+- Added `/admin/settings/commands/builtins` for enabling/disabling built-in command workflows.
+- Reserved `/publicresults` from generic bot command templates.
+- Registered Discord `/publicresults` as a native application command rather than a dynamic template command.
+- Moved `/publicresults` scope configuration to built-in settings while preserving private-link and group/channel rules.
+- Added enable flags for `/tests`, `/mytests`, `/status`, `/join`, and `/publicresults`.
+- Excluded legacy `/publicresults` template rows from generic Telegram/Discord help and dynamic command registration.
+
+### Security / Reliability / Optimization Notes
+- Security: Built-in commands cannot be overridden by generic reply templates, and public-result scope is centrally enforced per provider.
+- Reliability: Disabling `/publicresults` applies to both Telegram handling and Discord command execution.
+- Optimization: Built-in behavior no longer depends on a fake generic template record or duplicated reply configuration.
+
+### Validation Results
+- Built-in settings and public-results integration tests passed.
+- Full unittest discovery completed without reported failures.
+- Routes and Discord bot module compiled successfully.
 - `git diff --check` passed.
 
 ## Application Version and Payment UX

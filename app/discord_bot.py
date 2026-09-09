@@ -36,6 +36,10 @@ def _config_value(key, default=None):
         return item.value
 
 
+def _builtin_enabled(command_name):
+    return str(_config_value(f'builtin_{command_name}_enabled', 'true')).lower() == 'true'
+
+
 def _normalize_command_name(command_name):
     command_name = str(command_name or "").strip().lower().lstrip("/")
     command_name = command_name.replace(" ", "-")
@@ -106,7 +110,7 @@ def _build_help_text():
         "/join <test id> - request to join a recruiting test",
     ]
     with APP.app_context():
-        custom_commands = TelegramCommandTemplate.query.filter_by(is_active=True).order_by(TelegramCommandTemplate.command.asc()).all()
+        custom_commands = TelegramCommandTemplate.query.filter_by(is_active=True).filter(TelegramCommandTemplate.command != '/publicresults').order_by(TelegramCommandTemplate.command.asc()).all()
         if custom_commands:
             base_lines.append("")
             base_lines.append("Custom commands:")
@@ -176,34 +180,35 @@ def _public_results_discord_page(tag_id=None, page=1):
     ]
 
 
-def _run_discord_public_results(template_id, user_id, channel_id, guild_id):
-    allowed, message = _discord_public_results_access(template_id, user_id, channel_id, guild_id)
+def _run_discord_public_results(user_id, channel_id, guild_id):
+    allowed, message = _discord_public_results_access(user_id, channel_id, guild_id)
     if not allowed:
         return message, None
     body, state, items = _public_results_discord_page()
     return body, (*state, items)
 
 
-def _discord_public_results_access(template_id, user_id, channel_id, guild_id):
-    template = db.session.get(TelegramCommandTemplate, template_id)
-    if template is None or not template.is_active:
-        return False, 'This command is no longer active.'
-    interaction = type('CommandScope', (), {
-        'channel_id': channel_id,
-        'guild_id': guild_id,
-    })()
-    allowed, message = _check_custom_command_scope(template, interaction)
-    if not allowed:
-        return False, message
+def _discord_public_results_access(user_id, channel_id, guild_id):
+    enabled = str((NotificationConfig.query.filter_by(key='builtin_publicresults_enabled').first() or type('Config', (), {'value': 'true'})()).value).lower() == 'true'
+    if not enabled:
+        return False, 'This command is currently disabled.'
+    allow_non_private = str((NotificationConfig.query.filter_by(key='builtin_publicresults_allow_non_private').first() or type('Config', (), {'value': 'false'})()).value).lower() == 'true'
+    if guild_id is not None and not allow_non_private:
+        return False, 'This command is limited to direct messages only.'
+    allowed_chats = {entry.strip() for entry in str((NotificationConfig.query.filter_by(key='builtin_publicresults_allowed_chat_ids').first() or type('Config', (), {'value': ''})()).value or '').split(',') if entry.strip()}
+    if allowed_chats and str(channel_id) not in allowed_chats and str(guild_id) not in allowed_chats:
+        return False, 'This command is not enabled in this Discord server or channel.'
+    allowed_threads = {entry.strip() for entry in str((NotificationConfig.query.filter_by(key='builtin_publicresults_allowed_thread_ids').first() or type('Config', (), {'value': ''})()).value or '').split(',') if entry.strip()}
+    if allowed_threads:
+        return False, 'This command is not enabled in this Discord thread.'
     if guild_id is None and _get_user_by_discord_id(user_id) is None:
         return False, 'Your Discord account is not linked yet. Run /start <token> from your profile.'
     return True, None
 
 
 class PublicResultsView(discord.ui.View):
-    def __init__(self, template_id, state, items, timeout=900):
+    def __init__(self, state, timeout=900):
         super().__init__(timeout=timeout)
-        self.template_id = template_id
         self.state = state
         self._build_buttons()
 
@@ -226,8 +231,7 @@ class PublicResultsView(discord.ui.View):
 
         _, tag_id, page, total_pages, items = self.state
         for title, result_link in items:
-            button = discord.ui.Button(label=f'COA: {title}'[:80], style=discord.ButtonStyle.link, url=result_link)
-            self.add_item(button)
+            self.add_item(discord.ui.Button(label=f'COA: {title}'[:80], style=discord.ButtonStyle.link, url=result_link))
         back = discord.ui.Button(label='Back to Tags', style=discord.ButtonStyle.secondary)
         back.callback = self._tags_page_callback(1)
         self.add_item(back)
@@ -242,27 +246,12 @@ class PublicResultsView(discord.ui.View):
 
     def _render_callback(self, tag_id, page):
         async def callback(button_interaction):
-            allowed, message = await _run_db(
-                _discord_public_results_access,
-                self.template_id,
-                button_interaction.user.id,
-                button_interaction.channel_id,
-                button_interaction.guild_id,
-            )
+            allowed, message = await _run_db(_discord_public_results_access, button_interaction.user.id, button_interaction.channel_id, button_interaction.guild_id)
             if not allowed:
                 await button_interaction.response.send_message(message, ephemeral=True)
                 return
             body, state, items = await _run_db(_public_results_discord_page, tag_id, page)
-            if state[0] == 'tags':
-                view_state = (*state, items)
-            elif state[0] == 'results':
-                view_state = (*state, items)
-            else:
-                view_state = state
-            await button_interaction.response.edit_message(
-                content=body,
-                view=PublicResultsView(self.template_id, view_state),
-            )
+            await button_interaction.response.edit_message(content=body, view=PublicResultsView((*state, items) if state[0] in {'tags', 'results'} else state))
         return callback
 
     def _tag_callback(self, tag_id):
@@ -554,6 +543,9 @@ class DiscordBot(commands.Bot):
 
         @self.tree.command(name="tests", description="List visible tests")
         async def tests_command(interaction: discord.Interaction):
+            if not await _run_db(_builtin_enabled, 'tests'):
+                await interaction.response.send_message('This command is currently disabled.', ephemeral=True)
+                return
             await interaction.response.defer(ephemeral=True)
             text = await _run_db(
                 _linked_user_response,
@@ -564,6 +556,9 @@ class DiscordBot(commands.Bot):
 
         @self.tree.command(name="mytests", description="List your participation requests")
         async def mytests_command(interaction: discord.Interaction):
+            if not await _run_db(_builtin_enabled, 'mytests'):
+                await interaction.response.send_message('This command is currently disabled.', ephemeral=True)
+                return
             await interaction.response.defer(ephemeral=True)
             text = await _run_db(
                 _linked_user_response,
@@ -575,6 +570,9 @@ class DiscordBot(commands.Bot):
         @self.tree.command(name="status", description="Check a test status")
         @app_commands.describe(test_id="Test ID")
         async def status_command(interaction: discord.Interaction, test_id: int):
+            if not await _run_db(_builtin_enabled, 'status'):
+                await interaction.response.send_message('This command is currently disabled.', ephemeral=True)
+                return
             await interaction.response.defer(ephemeral=True)
             text = await _run_db(
                 _linked_user_response,
@@ -587,6 +585,9 @@ class DiscordBot(commands.Bot):
         @self.tree.command(name="join", description="Request to join a recruiting test")
         @app_commands.describe(test_id="Test ID")
         async def join_command(interaction: discord.Interaction, test_id: int):
+            if not await _run_db(_builtin_enabled, 'join'):
+                await interaction.response.send_message('This command is currently disabled.', ephemeral=True)
+                return
             await interaction.response.defer(ephemeral=True)
             text = await _run_db(
                 _linked_user_response,
@@ -596,11 +597,23 @@ class DiscordBot(commands.Bot):
             )
             await interaction.edit_original_response(content=text)
 
+        @self.tree.command(name="publicresults", description="Browse public result tags and COA links")
+        async def publicresults_command(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            text, view_state = await _run_db(
+                _run_discord_public_results,
+                interaction.user.id,
+                interaction.channel_id,
+                interaction.guild_id,
+            )
+            view = PublicResultsView(view_state) if view_state else None
+            await interaction.edit_original_response(content=text, view=view)
+
     def _register_dynamic_commands(self):
         with APP.app_context():
             templates = TelegramCommandTemplate.query.filter_by(is_active=True).order_by(TelegramCommandTemplate.command.asc()).all()
 
-        reserved_names = {"help", "start", "tests", "mytests", "status", "join"}
+        reserved_names = {"help", "start", "tests", "mytests", "status", "join", "publicresults"}
 
         for template in templates:
             command_name = _normalize_command_name(template.command)
@@ -611,17 +624,6 @@ class DiscordBot(commands.Bot):
             def _make_dynamic_command(template):
                 async def dynamic_command(interaction: discord.Interaction, args: str | None = None):
                     await interaction.response.defer(ephemeral=True)
-                    if template.command == '/publicresults':
-                        text, view_state = await _run_db(
-                            _run_discord_public_results,
-                            template.id,
-                            interaction.user.id,
-                            interaction.channel_id,
-                            interaction.guild_id,
-                        )
-                        view = PublicResultsView(template.id, view_state) if view_state else None
-                        await interaction.edit_original_response(content=text, view=view)
-                        return
                     text = await _run_db(
                         _run_dynamic_command,
                         template.id,

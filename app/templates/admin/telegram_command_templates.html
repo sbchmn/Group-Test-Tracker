@@ -6,6 +6,8 @@
 <h3>{% if editing_template %}Edit Bot Command{% else %}Bot Command Registry{% endif %}</h3>
 <p class="text-muted">Create shared bot commands and replies. Provider-specific command bindings can use this registry without duplicating business rules.</p>
 
+<div class="mb-3"><a class="btn btn-outline-secondary" href="{{ url_for('main.builtin_command_settings') }}">Configure Built-in Commands</a></div>
+
 <div class="alert alert-info" role="alert">
     <div><strong>Reserved built-in commands:</strong> {{ reserved_commands | join(', ') }}</div>
     <div class="mt-1"><strong>Reserved prefixes:</strong> {{ reserved_prefixes | join(', ') }}</div>

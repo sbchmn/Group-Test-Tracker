@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Bot Integrations{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
+    <div>
+        <h3 class="mb-1">Bot Integrations</h3>
+        <p class="text-muted mb-0">Configure each provider's transport and delivery settings from one directory.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('main.admin_settings') }}">Back to Settings</a>
+</div>
+
+<div class="alert alert-info" role="alert">
+    <strong>Shared command behavior:</strong> Manage command names, authorization, arguments, rate limits, and reply content in the <a href="{{ url_for('main.bot_commands') }}">Bot Command Registry</a>. Provider pages contain transport-specific settings only.
+</div>
+
+<form method="POST" novalidate>
+    {{ form.hidden_tag() }}
+    <div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <h5 class="card-title"><i class="bi bi-telegram"></i> Telegram</h5>
+                    <span class="badge text-bg-{{ 'success' if integration_status.telegram else 'secondary' }}">{{ 'Configured' if integration_status.telegram else 'Needs setup' }}</span>
+                </div>
+                <p class="card-text text-muted">Bot credentials, private webhook security, status chat routing, and digest delivery.</p>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.telegram_config') }}">Configure Telegram</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <h5 class="card-title"><i class="bi bi-discord"></i> Discord</h5>
+                    <span class="badge text-bg-{{ 'success' if integration_status.discord else 'secondary' }}">{{ 'Configured' if integration_status.discord else 'Needs setup' }}</span>
+                </div>
+                <p class="card-text text-muted">Bot token, application and guild identifiers, status channel, and optional webhook delivery.</p>
+                <div class="mb-3">
+                    {{ form.discord_bot_token.label(class="form-label") }}
+                    {{ form.discord_bot_token(class="form-control") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.discord_application_id.label(class="form-label") }}
+                    {{ form.discord_application_id(class="form-control") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.discord_guild_id.label(class="form-label") }}
+                    {{ form.discord_guild_id(class="form-control") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.discord_status_channel_id.label(class="form-label") }}
+                    {{ form.discord_status_channel_id(class="form-control", placeholder="123456789012345678") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.discord_webhook_url.label(class="form-label") }}
+                    {{ form.discord_webhook_url(class="form-control", placeholder="https://discord.com/api/webhooks/...") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.discord_webhook_username.label(class="form-label") }}
+                    {{ form.discord_webhook_username(class="form-control", placeholder="Group Test Manager") }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <h5 class="card-title"><i class="bi bi-broadcast"></i> Root</h5>
+                    <span class="badge text-bg-{{ 'success' if integration_status.root else 'secondary' }}">{{ 'Configured' if integration_status.root else 'Needs setup' }}</span>
+                </div>
+                <p class="card-text text-muted">Configure the outbound webhook used for Root notifications.</p>
+                <div class="mb-3">
+                    {{ form.root_webhook_url.label(class="form-label") }}
+                    {{ form.root_webhook_url(class="form-control", placeholder="https://root.example/webhook") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.root_webhook_name.label(class="form-label") }}
+                    {{ form.root_webhook_name(class="form-control", placeholder="Group Test Manager") }}
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-4">
+        <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('main.admin_settings') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

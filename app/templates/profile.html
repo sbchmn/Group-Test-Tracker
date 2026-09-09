@@ -29,6 +29,12 @@
                         <div class="form-text">Optional display username. Delivery uses linked Telegram chat, not username alone.</div>
                     </div>
 
+                    <div class="mb-3">
+                        {{ form.discord_username.label(class="form-label") }}
+                        {{ form.discord_username(class="form-control") }}
+                        <div class="form-text">Optional Discord display name. Delivery uses linked Discord user ID, not display name alone.</div>
+                    </div>
+
                     <div class="alert alert-light border">
                         <div class="fw-semibold mb-1">Telegram Link Status</div>
                         {% if telegram_chat_id %}
@@ -57,6 +63,26 @@
                             <input type="text" class="form-control form-control-sm mb-2" value="{{ telegram_start_command }}" readonly>
                             <label class="form-label small mb-1">Token</label>
                             <input type="text" class="form-control form-control-sm" value="{{ telegram_link_token }}" readonly>
+                        {% endif %}
+                    </div>
+
+                    <div class="alert alert-light border">
+                        <div class="fw-semibold mb-1">Discord Link Status</div>
+                        {% if discord_user_id %}
+                            <div class="small text-success mb-2">Linked Discord user ID: {{ discord_user_id }}</div>
+                        {% else %}
+                            <div class="small text-warning mb-2">Not linked yet. Generate a link, open Discord, then run the start command.</div>
+                        {% endif %}
+
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <button type="submit" formaction="{{ url_for('main.create_discord_link_token') }}" formmethod="post" class="btn btn-sm btn-outline-primary">Generate Discord Link</button>
+                        </div>
+
+                        {% if discord_link_token %}
+                            <label class="form-label small mb-1">Start Command</label>
+                            <input type="text" class="form-control form-control-sm mb-2" value="{{ discord_start_command }}" readonly>
+                            <label class="form-label small mb-1">Token</label>
+                            <input type="text" class="form-control form-control-sm" value="{{ discord_link_token }}" readonly>
                         {% endif %}
                     </div>
 

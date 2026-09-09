@@ -41,8 +41,10 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(256), nullable=False)
     tg_username = db.Column(db.String(80), nullable=True, index=True)
+    discord_username = db.Column(db.String(80), nullable=True, index=True)
     telegram_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
     telegram_chat_id = db.Column(db.String(80), nullable=True, index=True)
+    discord_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     receive_group_test_notifications = db.Column(db.Boolean, default=True, nullable=False)
@@ -68,6 +70,12 @@ class User(UserMixin, db.Model):
     )
     telegram_link_tokens = db.relationship(
         'TelegramLinkToken',
+        backref='user',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
+    discord_link_tokens = db.relationship(
+        'DiscordLinkToken',
         backref='user',
         lazy='dynamic',
         cascade='all, delete-orphan'
@@ -203,6 +211,15 @@ class TelegramCommandInvocation(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+class DiscordCommandInvocation(db.Model):
+    __tablename__ = 'discord_command_invocations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    command_template_id = db.Column(db.Integer, db.ForeignKey('telegram_command_templates.id', ondelete='CASCADE'), nullable=False, index=True)
+    channel_id = db.Column(db.String(80), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class NotificationConfig(db.Model):
     __tablename__ = 'notification_configs'
 
@@ -213,6 +230,21 @@ class NotificationConfig(db.Model):
 
 class TelegramLinkToken(db.Model):
     __tablename__ = 'telegram_link_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    token = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def is_active(self):
+        return self.used_at is None and self.expires_at >= datetime.utcnow()
+
+
+class DiscordLinkToken(db.Model):
+    __tablename__ = 'discord_link_tokens'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)

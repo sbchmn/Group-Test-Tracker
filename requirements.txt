@@ -15,5 +15,6 @@ openpyxl>=3.1.2  # For .xlsx export / backup feature (matches original spreadshe
 email-validator>=1.1.0
 boto3>=1.35.0
 Pillow>=10.4.0
+discord.py>=2.4.0
 # For production email/notifications later: flask-mail
 # Add boto3 if implementing DO Spaces file uploads for results/COAs

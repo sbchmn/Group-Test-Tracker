@@ -7,25 +7,108 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.models import GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
 
 
 class SecurityTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "test.db"
+        self.log_path = Path(self.temp_dir.name) / "notification.log"
         self.app = create_app({
             "TESTING": True,
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{self.db_path}",
+            "NOTIFICATION_LOG_PATH": str(self.log_path),
         })
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_webhook_secret", value="test-webhook-secret"))
+            db.session.commit()
+
+        original_post = self.client.post
+
+        def authenticated_post(*args, **kwargs):
+            if args and args[0] == "/telegram/webhook":
+                headers = dict(kwargs.get("headers") or {})
+                headers.setdefault("X-Telegram-Bot-Api-Secret-Token", "test-webhook-secret")
+                kwargs["headers"] = headers
+            return original_post(*args, **kwargs)
+
+        self.client.post = authenticated_post
 
     def tearDown(self):
         with self.app.app_context():
             db.session.remove()
             db.engine.dispose()
         self.temp_dir.cleanup()
+
+    def test_admin_settings_hub_requires_admin_and_groups_configuration_links(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="settings-admin", email="settings-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            member = User(username="settings-member", email="settings-member@example.com")
+            member.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.commit()
+
+        anonymous_response = self.client.get("/admin/settings", follow_redirects=False)
+        self.assertEqual(anonymous_response.status_code, 302)
+        self.assertIn("/login", anonymous_response.headers.get("Location", ""))
+
+        self.client.post("/login", data={"username": "settings-member", "password": "secret"}, follow_redirects=True)
+        member_response = self.client.get("/admin/settings", follow_redirects=False)
+        self.assertEqual(member_response.status_code, 302)
+        self.assertIn("/dashboard", member_response.headers.get("Location", ""))
+
+        self.client.get("/logout", follow_redirects=True)
+        self.client.post("/login", data={"username": "settings-admin", "password": "secret"}, follow_redirects=True)
+        admin_response = self.client.get("/admin/settings")
+        self.assertEqual(admin_response.status_code, 200)
+        page = admin_response.get_data(as_text=True)
+        self.assertIn("Admin Settings", page)
+        self.assertIn("/admin/notification-config", page)
+        self.assertIn("/admin/settings/bots", page)
+        self.assertIn("/admin/settings/commands", page)
+        self.assertIn("/admin/payment-options", page)
+        self.assertIn("/admin/storage-config", page)
+
+        bot_response = self.client.get("/admin/settings/bots")
+        self.assertEqual(bot_response.status_code, 200)
+        bot_page = bot_response.get_data(as_text=True)
+        self.assertIn("Bot Integrations", bot_page)
+        self.assertIn("/admin/telegram-config", bot_page)
+        self.assertIn("Discord Bot Token", bot_page)
+        self.assertIn("Root Webhook URL", bot_page)
+
+        save_response = self.client.post(
+            "/admin/settings/bots",
+            data={
+                "discord_bot_token": "discord-token",
+                "discord_application_id": "app-123",
+                "discord_guild_id": "guild-123",
+                "discord_status_channel_id": "channel-123",
+                "discord_webhook_url": "https://discord.example/webhook",
+                "discord_webhook_username": "Tracker Bot",
+                "root_webhook_url": "https://root.example/webhook",
+                "root_webhook_name": "Root Bot",
+                "submit": "Save Bot Integrations",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(save_response.status_code, 302)
+        with self.app.app_context():
+            values = {item.key: item.value for item in NotificationConfig.query.all()}
+        self.assertEqual(values["discord_bot_token"], "discord-token")
+        self.assertEqual(values["discord_status_channel_id"], "channel-123")
+        self.assertEqual(values["root_webhook_url"], "https://root.example/webhook")
+
+        command_response = self.client.get("/admin/settings/commands", follow_redirects=False)
+        self.assertEqual(command_response.status_code, 302)
+        self.assertIn("/admin/telegram-command-templates", command_response.headers.get("Location", ""))
 
     def test_create_user_does_not_flash_generated_password(self):
         with self.app.app_context():
@@ -304,6 +387,17 @@ class SecurityTests(unittest.TestCase):
             headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_telegram_webhook_requires_configured_secret(self):
+        with self.app.app_context():
+            NotificationConfig.query.filter_by(key="telegram_webhook_secret").delete()
+            db.session.commit()
+
+        response = self.client.post(
+            "/telegram/webhook",
+            json={"message": {"chat": {"id": 1001}, "text": "/help"}},
+        )
+        self.assertEqual(response.status_code, 503)
 
     def test_telegram_webhook_start_links_chat_id(self):
         with self.app.app_context():
@@ -605,6 +699,172 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         mock_send.assert_called_once()
         self.assertIn("Usage: /pricecheck <code>", mock_send.call_args.args[1])
+
+    def test_public_results_query_excludes_group_tests_and_orders_results(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="public-admin", email="public-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            public_tag = Tag(name="Alpha", normalized_name="alpha")
+            db.session.add(public_tag)
+            db.session.flush()
+            older = PublicResult(
+                title="Older COA",
+                results_link="https://coa.example/older",
+                created_by=admin.id,
+                tags=[public_tag],
+            )
+            newer = PublicResult(
+                title="Newer COA",
+                results_link="https://coa.example/newer",
+                created_by=admin.id,
+                tags=[public_tag],
+            )
+            group_test = GroupTest(title="Private Group Test", created_by=admin.id)
+            db.session.add_all([older, newer, group_test])
+            db.session.commit()
+
+            tags, tag_page, tag_pages = public_result_tag_page()
+            tag, results, result_page, result_pages = public_results_for_tag_page(public_tag.id)
+
+        self.assertEqual([item.name for item in tags], ["Alpha"])
+        self.assertEqual((tag_page, tag_pages), (1, 1))
+        self.assertEqual(tag.name, "Alpha")
+        self.assertEqual([item.title for item in results], ["Newer COA", "Older COA"])
+        self.assertEqual((result_page, result_pages), (1, 1))
+
+    def test_telegram_public_results_requires_linked_private_user_and_sends_coa_buttons(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="public-tg", email="public-tg@example.com", telegram_chat_id="711", telegram_user_id="811")
+            user.set_password("secret")
+            admin = User(username="public-tg-admin", email="public-tg-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add_all([user, admin])
+            db.session.flush()
+            tag = Tag(name="Alpha", normalized_name="alpha")
+            db.session.add(tag)
+            db.session.flush()
+            db.session.add(PublicResult(title="Alpha COA", results_link="https://coa.example/alpha", created_by=admin.id, tags=[tag]))
+            db.session.add(TelegramCommandTemplate(command="/publicresults", allow_non_private=False, is_active=True, reply_text="unused"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 711, "type": "private"},
+                        "from": {"id": 811, "username": "public-tg"},
+                        "text": "/publicresults",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        body = mock_send.call_args.args[1]
+        markup = mock_send.call_args.kwargs["reply_markup"]
+        self.assertIn("Public Result Tags", body)
+        self.assertEqual(markup["inline_keyboard"][0][0]["text"], "Alpha")
+        self.assertNotIn("Private Group Test", body)
+
+        with self.app.app_context():
+            unlinked = User(username="unlinked-tg", email="unlinked-tg@example.com")
+            unlinked.set_password("secret")
+            db.session.add(unlinked)
+            db.session.commit()
+        with patch("app.routes.send_telegram_chat_message") as unlinked_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": 712, "type": "private"},
+                        "from": {"id": 812, "username": "unlinked-tg"},
+                        "text": "/publicresults",
+                    }
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("not linked", unlinked_send.call_args.args[1].lower())
+
+    def test_telegram_public_results_allows_scoped_group_user_without_link(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="group-public-admin", email="group-public-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            tag = Tag(name="Group Alpha", normalized_name="group-alpha")
+            db.session.add(tag)
+            db.session.flush()
+            db.session.add(PublicResult(title="Group Channel COA", results_link="https://coa.example/group", created_by=admin.id, tags=[tag]))
+            db.session.add(TelegramCommandTemplate(command="/publicresults", allow_non_private=True, allowed_chat_ids="-100777", is_active=True, reply_text="unused"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -100777, "type": "supergroup"},
+                        "from": {"id": 99977, "username": "unlinked-member"},
+                        "text": "/publicresults",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["text"], "Group Alpha")
+
+    def test_telegram_public_results_callback_edits_to_coa_links(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="callback-admin", email="callback-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            user = User(username="callback-user", email="callback-user@example.com", telegram_chat_id="733", telegram_user_id="833")
+            user.set_password("secret")
+            db.session.add_all([admin, user])
+            db.session.flush()
+            tag = Tag(name="Callback", normalized_name="callback")
+            db.session.add(tag)
+            db.session.flush()
+            result = PublicResult(title="Callback COA", results_link="https://coa.example/callback", created_by=admin.id, tags=[tag])
+            db.session.add(result)
+            db.session.add(TelegramCommandTemplate(command="/publicresults", is_active=True, reply_text="unused"))
+            db.session.commit()
+            tag_id = tag.id
+
+        with patch("app.routes.answer_telegram_callback_query") as mock_answer, patch("app.routes.edit_telegram_message") as mock_edit:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "callback-1",
+                        "from": {"id": 833},
+                        "data": f"pr:results:{tag_id}:1",
+                        "message": {"message_id": 44, "chat": {"id": 733, "type": "private"}},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_answer.assert_called_once_with("callback-1")
+        mock_edit.assert_called_once()
+        self.assertIn("Callback COA", mock_edit.call_args.args[2])
+        self.assertEqual(mock_edit.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["url"], "https://coa.example/callback")
+
+    def test_public_results_empty_state(self):
+        with self.app.app_context():
+            db.create_all()
+            from app.routes import _public_results_telegram_view
+            body, keyboard = _public_results_telegram_view()
+
+        self.assertEqual(body, "No Public Results Available.")
+        self.assertIsNone(keyboard)
 
     def test_telegram_webhook_custom_command_regex_arguments(self):
         with self.app.app_context():

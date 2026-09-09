@@ -219,6 +219,51 @@
 - Add the channel status layer and direct Telegram action suite after the base delivery path works, using the same chat-linking foundation and the existing approval workflow.
 - Keep the bot modular so the channel features and direct actions can be layered on without reworking the Telegram account-linking foundation.
 
+## Multi-Bot Workstream
+
+### Target Files and Modules
+- app/models.py
+- app/routes.py
+- app/notifications.py
+- app/templates/admin/notification_config.html
+- app/templates/admin/telegram_config.html
+- likely new Discord and Root config templates
+- likely new background dispatcher module or task runner
+- migrations/versions/<new_revision>.py if provider-specific config is persisted
+- tests/test_notifications.py
+- tests/test_security.py
+
+### Intended Behavior Changes
+- Add Discord and Root as separate bot integrations rather than coupling them to Telegram.
+- Keep bot delivery modular so each provider can be enabled, disabled, and configured independently.
+- Avoid adding synchronous bot network work to the main web request path where possible.
+- Prefer a shared delivery interface that can route to provider-specific adapters without duplicating business rules.
+- Reuse existing notification/event selection logic so the web app continues to decide what should be sent, while bot adapters only handle transport.
+
+### Implemented This Pass
+- Added a shared queued webhook dispatcher in `app/bot_dispatch.py` using a small thread pool so bot webhook delivery can happen off the request thread.
+- Added Discord and Root delivery helpers in `app/notifications.py` that queue outbound webhook payloads instead of performing the transport inline.
+- Extended `send_notification_message()` so `discord` and `root` are valid delivery channels.
+- Added Discord and Root webhook URL/display-name fields to the existing Notification Configuration admin form and persistence path.
+- Added regression tests covering queued Discord and Root routing in `tests/test_notifications.py`.
+
+### Risks and Assumptions
+- The current notification path is synchronous, so adding bot sends directly in request handlers would increase request latency.
+- A separate queue/worker path is the safer route if bot traffic is expected to grow.
+- Discord and Root may have different message/thread models, so transport adapters should not assume Telegram semantics.
+- If a background worker is not introduced, bot work should be kept out of hot paths and guarded by tight timeouts.
+
+### Validation Plan
+- Inspect the current notification dispatch points and identify which are on web request hot paths.
+- Add focused tests for provider selection and fallback behavior before changing transport details.
+- If a queue or background dispatcher is added, validate it with a narrow notification test slice before broadening scope.
+
+### Validation Results
+- Focused notification slice passed after the bot transport change: `python -m unittest tests.test_notifications`.
+- Static diagnostics on touched Python files reported no errors.
+- Isolated test log output in `tests/test_security.py` so webhook/config tests no longer pollute the shared `instance/notification.log`.
+- Focused webhook security slice still passed after test-log isolation: `python -m unittest tests.test_security.SecurityTests.test_admin_can_register_telegram_webhook_from_config_page tests.test_security.SecurityTests.test_admin_can_unregister_telegram_webhook_from_config_page tests.test_security.SecurityTests.test_register_telegram_webhook_requires_bot_token`.
+
 ### Implementation Status (In Progress)
 - Added Telegram webhook endpoint scaffolding in the Flask app with secret-token validation and JSON request checks.
 - Added Telegram bot command handling for `/start`, `/help`, `/tests`, `/status <id>`, and `/join <id>`.
@@ -713,8 +758,84 @@
 - Reliability: Canonical endpoints remain unchanged from Phase 1, and tests now guard against route regression/reintroduction.
 - Optimization: No schema or runtime query overhead introduced; this is a routing-surface reduction.
 
+## Reliability Callouts 1-3 Fixes
+
+### Implemented Changes
+- Telegram webhook requests now fail closed with `503` when no webhook secret is configured, and always require a matching `X-Telegram-Bot-Api-Secret-Token` header.
+- Password reset rendering now selects `email_body` or `telegram_body` according to the selected delivery channel.
+- Discord and Root webhook notifications now use bounded synchronous delivery through the shared HTTP helper, returning failure when transport fails so email fallback can run.
+- Added regression coverage for missing webhook secrets, channel-specific password-reset templates, and successful webhook delivery.
+
+### Security / Reliability / Optimization Notes
+- Security: An unconfigured Telegram webhook cannot be used as an unauthenticated command endpoint.
+- Reliability: Notification success now reflects the provider response instead of only in-memory queue submission.
+- Optimization: Delivery retains the existing 10-second timeout and shared JSON transport helper; no durable queue was introduced in this phase.
+
+### Validation Results
+- Focused security and notification suites passed with the Python 3.12 interpreter.
+- Full unittest discovery completed without reported failures.
+- `git diff --check` passed.
+
+## Discord API Compliance Hardening
+
+### Target Files and Modules
+- app/notifications.py
+- tests/test_notifications.py
+- PROJECT_MAP.md
+
+### Intended Behavior Changes
+- Align Discord transport behavior with official Discord API documentation for authentication, endpoint usage, and Create Message payload constraints.
+- Add bounded retry behavior for HTTP 429 responses using Retry-After/retry_after guidance.
+- Prevent accidental broad mentions in Discord status and DM messages when message text contains user-provided content.
+
+### Implemented Changes
+- Verified official docs from raw source files in discord/discord-api-docs:
+	- developers/reference.mdx (Authentication, Base URL, API versioning)
+	- developers/resources/user.mdx (Create DM endpoint and recipient_id)
+	- developers/resources/message.mdx (Create Message constraints, content limit)
+	- developers/topics/rate-limits.mdx (429 behavior and Retry-After/retry_after)
+	- developers/platform/interactions.mdx (Gateway vs HTTP interactions requirements)
+- Updated Discord REST sender in app/notifications.py:
+	- Added bounded 429 retry support honoring Retry-After/retry_after for short waits.
+	- Added safe payload builder with allowed_mentions parse disabled.
+	- Added message chunking to keep content within Discord's 2000-character message limit.
+	- Kept API v10 endpoint usage and Bot authorization header behavior unchanged.
+- Added focused tests in tests/test_notifications.py:
+	- Verifies allowed_mentions parse is disabled in Discord payloads.
+	- Verifies 429 retry path succeeds when a retry-after window is provided.
+
+### Security / Reliability / Optimization Notes
+- Security: Explicit allowed_mentions restrictions reduce risk of unintentional @everyone/@role mentions from templated or user-originated text.
+- Reliability: Short, bounded 429 retries improve successful delivery without indefinite retry loops.
+- Optimization: Retry count and maximum wait are capped by app config to avoid prolonged blocking in request paths.
+
+### Validation Results
+- Focused validation passed: py -3 -m unittest tests.test_notifications -q (38 tests, OK).
+
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_security` (39 tests, OK).
+
+## Discord Native Interaction Hardening
+
+### Current Implementation
+- Discord uses a gateway bot with native application slash commands, ephemeral responses, and optional guild-scoped command synchronization.
+- Profile-generated one-time tokens link a Discord snowflake to the application user; links now reject identity movement and consume tokens under a row lock.
+- Core and dynamic commands defer first, run synchronous SQLAlchemy work through the existing worker helper, and edit the original interaction response.
+- Dynamic command collisions with native command names are skipped, and application-command failures receive a safe ephemeral error response.
+
+### Security / Reliability / Optimization Notes
+- Security: Discord user IDs are the delivery/link identity; display names are informational only. Existing links cannot be silently replaced by another Discord account.
+- Reliability: Interaction acknowledgements are sent before database work, avoiding Discord's initial-response timeout and gateway event-loop blockage.
+- Optimization: Database work runs in worker threads while Discord interaction I/O remains asynchronous.
+
+### Remaining Discord Work
+- Dynamic commands currently reuse `TelegramCommandTemplate` and Telegram-named scope fields. A Discord-native command-template model/admin surface should be introduced before expanding custom command features.
+- Add dedicated Discord tests for token ownership conflicts, interaction deferral, command authorization, command synchronization, and dynamic-command rate limits.
+- Add explicit Discord configuration/invite guidance and validate guild/channel IDs before bot startup.
+
+### Validation Results
+- `app/discord_bot.py` compiles successfully.
+- Editor diagnostics report no errors for the edited Discord module.
 
 ## Phase 3: Telegram Custom Command Templates
 
@@ -843,3 +964,59 @@
 
 ### Validation Results
 - Focused validation passed: `python -m unittest tests.test_security tests.test_schema_migration` (50 tests, OK).
+
+## Admin Settings Hub
+
+### Implemented Changes
+- Added `/admin/settings` as the single entry point for admin configuration.
+- Grouped existing destinations into Notifications, Bot Integrations, Bot Commands, Message Templates, Payments, and Storage.
+- Reduced the Admin navigation menu to one Settings item for configuration pages.
+- Kept Create Test, Action Queue, Public Results, and Manage Users in the operational Admin menu; Public Results remains a direct operational workflow.
+- Preserved existing configuration routes and keys so this navigation change does not duplicate persistence logic or break existing links.
+- Added `/admin/settings/bots` as the canonical provider directory for Telegram, Discord, and Root integrations.
+- Added `/admin/settings/commands` as the provider-neutral entry point for the existing shared command registry.
+- Added provider anchors and neutral labels without duplicating the existing configuration POST handlers.
+- Moved Discord and Root editable fields into the Bot Integrations form; Notification Config now contains only email delivery and diagnostics.
+- Added a shared `_save_notification_config_values` helper so provider and email forms persist through one path.
+
+### Security / Reliability / Optimization Notes
+- Security: The Settings hub and all linked pages retain the existing admin-only protection.
+- Reliability: Existing routes remain canonical, avoiding a migration of configuration data during the navigation change.
+- Optimization: The hub performs one configuration lookup for setup-status badges and reuses existing forms/pages.
+- Optimization: Provider status and form hydration reuse the existing key/value configuration store without a schema migration.
+
+### Validation Results
+- Settings hub regression passed for anonymous, non-admin, and admin users.
+- Bot Integrations and Bot Commands navigation regression passed.
+- Bot Integrations persistence regression passed for Discord and Root settings.
+- Full security suite passed.
+- Route compilation passed; no template diagnostics were reported for the new hub or updated navigation.
+
+## Cross-Platform Public Results Bot Command
+
+### Intended Behavior
+- Enable `/publicresults` through the shared Bot Command Registry.
+- Show Public Result tags alphabetically, paged 10 per page.
+- Show results for a selected tag newest-first by creation date, paged 10 per page.
+- Provide only the external COA link; do not expose Group Test results or add a website-result link.
+- Require linked users in private Telegram/Discord interactions.
+- Permit unlinked group/channel use only when the command's existing non-private and chat/guild/thread scope controls allow it.
+
+### Implemented Changes
+- Added shared public-results query logic in `app/public_results_bot.py` using only `PublicResult` tag relationships.
+- Added Telegram inline keyboards for tag selection, pagination, back navigation, and COA URL buttons.
+- Added Telegram callback-query handling with scope revalidation and message editing.
+- Added Discord native `discord.ui.View` buttons with ephemeral response editing and COA link buttons.
+- Added the empty state `No Public Results Available.`.
+- Added Bot Command Registry guidance explaining `/publicresults` setup and private/group scope behavior.
+
+### Security / Reliability / Optimization Notes
+- Security: Group Test records are excluded at the query boundary; private interactions require an account link; group/channel interactions still require configured command scope.
+- Security: Callback interactions re-check command scope instead of trusting the original button message.
+- Reliability: Both providers cap each page at 10 tags/results and provide back/pagination controls where applicable.
+- Optimization: Queries are indexed through the existing tag association and result ordering fields; no duplicate result dataset or provider-specific persistence was added.
+
+### Validation Results
+- Five focused public-results tests passed for ordering/exclusion, private linking, scoped group use, callback editing, COA URLs, and empty state.
+- Security and notification suites passed.
+- All feature modules compiled successfully.

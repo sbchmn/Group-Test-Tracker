@@ -52,12 +52,7 @@
                                 <li><a class="dropdown-item" href="{{ url_for('main.manage_public_results') }}">Public Results</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('main.manage_users') }}">Manage Users</a></li>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item" href="{{ url_for('main.notification_templates') }}">Manage Templates</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('main.notification_config') }}">Notification Config</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('main.telegram_config') }}">Telegram Config</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('main.telegram_command_templates') }}">Telegram Commands</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('main.payment_options') }}">Payment Options</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('main.storage_config') }}">Storage Config</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('main.admin_settings') }}"><i class="bi bi-sliders"></i> Settings</a></li>
                             </ul>
                         </li>
                         {% endif %}

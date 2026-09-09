@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlencode
@@ -11,6 +12,7 @@ from flask import current_app
 
 from . import db
 from .models import NotificationConfig, NotificationTemplate, User, UserDigestEvent
+from .bot_dispatch import post_json
 
 
 def _get_config(key, default=None):
@@ -157,6 +159,17 @@ def send_notification_message(user, channel, subject, body):
             f"telegram: falling back to email for {getattr(user, 'username', 'unknown')}"
         )
         return send_mailjet_message(user, subject, body)
+    if channel == "discord":
+        sent = send_discord_message(user, body)
+        if sent:
+            return True
+
+        append_notification_log(
+            f"discord: falling back to email for {getattr(user, 'username', 'unknown')}"
+        )
+        return send_mailjet_message(user, subject, body)
+    if channel == "root":
+        return send_root_message(body)
     return send_mailjet_message(user, subject, body)
 
 
@@ -240,7 +253,7 @@ def send_mailjet_message(user, subject, body):
         return False
 
 
-def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id=None):
+def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id=None, reply_markup=None):
     bot_token = str(_get_config("telegram_bot_token") or "").strip()
     chat_id = str(chat_id or "").strip()
     if not bot_token or not chat_id:
@@ -251,6 +264,8 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id
         payload["parse_mode"] = parse_mode
     if message_thread_id is not None:
         payload["message_thread_id"] = int(message_thread_id)
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     payload_json = json.dumps(payload, ensure_ascii=False)
     safe_token = quote(bot_token, safe="")
     url = f"https://api.telegram.org/bot{safe_token}/sendMessage"
@@ -303,6 +318,159 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id
         return False
 
 
+def _discord_api_post(method_name, payload):
+    bot_token = str(_get_config("discord_bot_token") or "").strip()
+    if not bot_token:
+        return False, {"description": "Discord bot token is not configured."}
+
+    safe_token = quote(bot_token, safe="")
+    url = f"https://discord.com/api/v10/{method_name.lstrip('/')}"
+    debug_url = url.replace(bot_token, safe_token)
+    max_rate_limit_retries = int(current_app.config.get("DISCORD_RATE_LIMIT_RETRIES", 1))
+    max_retry_wait_seconds = float(current_app.config.get("DISCORD_RATE_LIMIT_MAX_WAIT_SECONDS", 2.0))
+    attempt = 0
+
+    while True:
+        request = Request(
+            url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bot {bot_token}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, context=None) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+            try:
+                parsed_response = json.loads(response_body) if response_body else {}
+            except ValueError:
+                parsed_response = {}
+
+            if isinstance(parsed_response, dict):
+                append_notification_log(
+                    f"discord: response for {method_name}: {json.dumps(parsed_response, ensure_ascii=False)}",
+                    debug=True,
+                )
+            elif response_body:
+                append_notification_log(f"discord: response for {method_name}: {response_body}", debug=True)
+
+            status_code = getattr(response, "status", None)
+            if status_code is None:
+                try:
+                    status_code = response.getcode()
+                except Exception:
+                    status_code = 200
+            try:
+                status_code_int = int(status_code or 0)
+            except (TypeError, ValueError):
+                status_code_int = 200
+            ok = 200 <= status_code_int < 300
+            return ok, parsed_response if isinstance(parsed_response, dict) else {"description": response_body}
+        except HTTPError as exc:
+            error_body = ""
+            try:
+                error_body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                error_body = ""
+
+            if int(getattr(exc, "code", 0) or 0) == 429 and attempt < max_rate_limit_retries:
+                retry_after = None
+                header_retry_after = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
+                if header_retry_after:
+                    try:
+                        retry_after = float(header_retry_after)
+                    except (TypeError, ValueError):
+                        retry_after = None
+
+                if retry_after is None and error_body:
+                    try:
+                        parsed_error = json.loads(error_body)
+                    except ValueError:
+                        parsed_error = {}
+                    if isinstance(parsed_error, dict) and parsed_error.get("retry_after") is not None:
+                        try:
+                            retry_after = float(parsed_error.get("retry_after"))
+                        except (TypeError, ValueError):
+                            retry_after = None
+
+                if retry_after is not None and retry_after <= max_retry_wait_seconds:
+                    attempt += 1
+                    append_notification_log(
+                        f"discord: rate limited on {method_name}, retrying in {retry_after:.2f}s (attempt {attempt}/{max_rate_limit_retries})"
+                    )
+                    time.sleep(max(retry_after, 0.0))
+                    continue
+
+            detail = error_body or str(exc)
+            append_notification_log(f"discord: failed for {method_name}: {detail}")
+            append_notification_log(f"discord: request url={debug_url} detail={detail}", debug=True)
+            return False, {"description": detail}
+        except (URLError, TimeoutError, ValueError) as exc:
+            detail = str(exc)
+            append_notification_log(f"discord: failed for {method_name}: {detail}")
+            append_notification_log(f"discord: request url={debug_url} detail={detail}", debug=True)
+            return False, {"description": detail}
+
+
+def _build_discord_message_payloads(body, limit=2000):
+    # Discord Create Message limits content to 2000 characters.
+    text = str(body or "")
+    if not text.strip():
+        return []
+
+    payloads = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            chunk = remaining
+            remaining = ""
+        else:
+            split_index = remaining.rfind("\n", 0, limit)
+            if split_index < 1:
+                split_index = limit
+            chunk = remaining[:split_index]
+            remaining = remaining[split_index:]
+            if remaining.startswith("\n"):
+                remaining = remaining[1:]
+
+        payloads.append({
+            "content": chunk,
+            # Prevent accidental mentions from user-generated strings.
+            "allowed_mentions": {"parse": []},
+        })
+
+    return payloads
+
+
+def _send_discord_dm_message(discord_user_id, body):
+    discord_user_id = str(discord_user_id or "").strip()
+    if not discord_user_id:
+        return False
+
+    channel_ok, channel_response = _discord_api_post("users/@me/channels", {"recipient_id": discord_user_id})
+    if not channel_ok:
+        return False
+
+    channel_id = str(channel_response.get("id") or "").strip()
+    if not channel_id:
+        return False
+
+    payloads = _build_discord_message_payloads(body)
+    if not payloads:
+        return False
+
+    for payload in payloads:
+        message_ok, _ = _discord_api_post(f"channels/{channel_id}/messages", payload)
+        if not message_ok:
+            return False
+
+    append_notification_log(f"discord: sent to user {discord_user_id}")
+    return True
+
+
 def send_telegram_message(user, body):
     append_notification_log(f"telegram: queued for {getattr(user, 'username', 'unknown')}")
     chat_id = str(_get_user_attr(user, "telegram_chat_id", None) or "").strip()
@@ -316,6 +484,15 @@ def send_telegram_message(user, body):
         chat_id = f"@{chat_id}"
 
     return _send_telegram_bot_message(chat_id, body)
+
+
+def send_discord_message(user, body):
+    append_notification_log(f"discord: queued for {getattr(user, 'username', 'unknown')}")
+    discord_user_id = str(_get_user_attr(user, "discord_user_id", None) or "").strip()
+    if discord_user_id:
+        return _send_discord_dm_message(discord_user_id, body)
+
+    return _send_discord_webhook_message(body)
 
 
 def _parse_telegram_channel_target(raw_target):
@@ -335,7 +512,7 @@ def _parse_telegram_channel_target(raw_target):
     return base_chat_id, int(suffix)
 
 
-def send_telegram_status_channel_message(body, parse_mode=None):
+def send_telegram_status_channel_message(body, parse_mode=None, buttons=None):
     configured_target = str(_get_config("telegram_status_chat_id") or "").strip()
     if not configured_target:
         return False
@@ -346,16 +523,104 @@ def send_telegram_status_channel_message(body, parse_mode=None):
         body,
         parse_mode=parse_mode,
         message_thread_id=message_thread_id,
+        reply_markup={'inline_keyboard': [[
+            {'text': str(button['label'])[:64], 'url': str(button['url'])}
+            for button in (buttons or [])
+            if button.get('label') and button.get('url')
+        ]]} if buttons else None,
     )
 
 
-def send_telegram_chat_message(chat_id, body, parse_mode=None, message_thread_id=None):
+def send_discord_status_channel_message(body, buttons=None):
+    configured_channel_id = str(_get_config("discord_status_channel_id") or "").strip()
+    if not configured_channel_id:
+        return False
+
+    append_notification_log(f"discord: queued status channel message to {configured_channel_id}")
+    payloads = _build_discord_message_payloads(body)
+    if not payloads:
+        return False
+
+    if buttons:
+        components = [{
+            'type': 1,
+            'components': [
+                {'type': 2, 'style': 5, 'label': str(button['label'])[:80], 'url': str(button['url'])}
+                for button in buttons
+                if button.get('label') and button.get('url')
+            ],
+        }]
+        if components[0]['components']:
+            payloads[-1]['components'] = components
+
+    for payload in payloads:
+        message_ok, _ = _discord_api_post(f"channels/{configured_channel_id}/messages", payload)
+        if not message_ok:
+            return False
+    return True
+
+
+def send_telegram_chat_message(chat_id, body, parse_mode=None, message_thread_id=None, reply_markup=None):
     return _send_telegram_bot_message(
         chat_id,
         body,
         parse_mode=parse_mode,
         message_thread_id=message_thread_id,
+        reply_markup=reply_markup,
     )
+
+
+def answer_telegram_callback_query(callback_query_id):
+    ok, _ = _telegram_api_post('answerCallbackQuery', {'callback_query_id': str(callback_query_id or '')})
+    return ok
+
+
+def edit_telegram_message(chat_id, message_id, body, reply_markup=None):
+    payload = {
+        'chat_id': str(chat_id or ''),
+        'message_id': int(message_id),
+        'text': body,
+    }
+    if reply_markup is not None:
+        payload['reply_markup'] = reply_markup
+    ok, _ = _telegram_api_post('editMessageText', payload)
+    return ok
+
+
+def _queue_bot_webhook_message(provider_name, webhook_url, payload):
+    webhook_url = str(webhook_url or "").strip()
+    if not webhook_url:
+        return False
+
+    delivered, response_body = post_json(webhook_url, payload, timeout=10)
+    if delivered:
+        append_notification_log(f"{provider_name}: delivered webhook message")
+        return True
+
+    append_notification_log(
+        f"{provider_name}: webhook delivery failed: {response_body}",
+    )
+    return False
+
+
+def _send_discord_webhook_message(body):
+    webhook_url = _get_config("discord_webhook_url")
+    username = str(_get_config("discord_webhook_username") or "Group Test Manager").strip() or "Group Test Manager"
+    payload = {
+        "content": str(body or ""),
+        "username": username,
+    }
+    return _queue_bot_webhook_message("discord", webhook_url, payload)
+
+
+def send_root_message(body):
+    webhook_url = _get_config("root_webhook_url")
+    sender_name = str(_get_config("root_webhook_name") or "Group Test Manager").strip() or "Group Test Manager"
+    payload = {
+        "text": str(body or ""),
+        "sender": sender_name,
+    }
+    return _queue_bot_webhook_message("root", webhook_url, payload)
 
 
 def _telegram_api_post(method_name, payload):
@@ -407,14 +672,18 @@ def unregister_telegram_webhook(drop_pending_updates=False):
 
 def send_password_reset(user, new_password):
     template = NotificationTemplate.query.filter_by(is_default_password_reset=True, is_active=True).first()
+    channel = user.notification_channel or "email"
     if template is None:
         body = f"Your new password is: {new_password}"
         subject = "Password Reset"
     else:
-        body = render_notification_template(template.telegram_body or template.email_body or "", {"new_password": new_password, "username": user.username})
+        template_body = template.telegram_body if channel == "telegram" else template.email_body
+        body = render_notification_template(
+            template_body or "",
+            {"new_password": new_password, "username": user.username},
+        )
         subject = template.email_subject or "Password Reset"
 
-    channel = user.notification_channel or "email"
     return send_notification_message(user, channel, subject, body)
 
 

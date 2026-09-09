@@ -1,15 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Telegram Command Templates{% endblock %}
+{% block title %}Bot Command Templates{% endblock %}
 
 {% block content %}
-<h3>{% if editing_template %}Edit Telegram Command Template{% else %}Telegram Command Templates{% endif %}</h3>
-<p class="text-muted">Create custom bot commands and replies. Built-in commands stay reserved and cannot be overridden.</p>
+<h3>{% if editing_template %}Edit Bot Command{% else %}Bot Command Registry{% endif %}</h3>
+<p class="text-muted">Create shared bot commands and replies. Provider-specific command bindings can use this registry without duplicating business rules.</p>
+
+<div class="mb-3"><a class="btn btn-outline-secondary" href="{{ url_for('main.builtin_command_settings') }}">Configure Built-in Commands</a></div>
 
 <div class="alert alert-info" role="alert">
     <div><strong>Reserved built-in commands:</strong> {{ reserved_commands | join(', ') }}</div>
     <div class="mt-1"><strong>Reserved prefixes:</strong> {{ reserved_prefixes | join(', ') }}</div>
     <div class="mt-1">Use slash-command format like <code>/pricecheck</code>. Command names are case-insensitive and stored in lowercase.</div>
+    <div class="mt-1"><strong>/publicresults:</strong> creates a shared tag browser with pagination and COA link buttons for Public Results only. In private chats, users must be linked; group/channel use requires the non-private and scope controls below.</div>
     <div class="mt-1">Reply placeholders: <code>{{ '{{ username }}' }}</code>, <code>{{ '{{ first_name }}' }}</code>, <code>{{ '{{ tg_username }}' }}</code>, <code>{{ '{{ command }}' }}</code>, <code>{{ '{{ args }}' }}</code>, <code>{{ '{{ message_text }}' }}</code>, <code>{{ '{{ chat_id }}' }}</code>.</div>
     <div class="mt-1">Rate limit placeholders: <code>{{ '{{ command }}' }}</code>, <code>{{ '{{ chat_id }}' }}</code>.</div>
 </div>
@@ -89,7 +92,7 @@
             {% if editing_template %}
                 <a href="{{ url_for('main.telegram_command_templates') }}" class="btn btn-secondary">Cancel</a>
             {% else %}
-                <a href="{{ url_for('main.telegram_config') }}" class="btn btn-secondary">Back to Telegram Config</a>
+                <a href="{{ url_for('main.admin_settings') }}" class="btn btn-secondary">Back to Admin Settings</a>
             {% endif %}
         </form>
     </div>

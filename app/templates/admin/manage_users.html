@@ -19,7 +19,8 @@
                 <tr>
                     <th>Username</th>
                     <th>Email</th>
-                    <th>TG</th>
+                    <th>Telegram</th>
+                    <th>Discord</th>
                     <th>Role</th>
                     <th>Status</th>
                     <th>Notify</th>
@@ -32,7 +33,14 @@
                 <tr class="{% if not user.is_active %}table-secondary{% endif %}">
                     <td><strong>{{ user.username }}</strong></td>
                     <td>{{ user.email }}</td>
-                    <td>{{ user.tg_username or '—' }}</td>
+                    <td>
+                        {{ user.tg_username or '—' }}
+                        {% if user.telegram_chat_id %}<span class="badge bg-success">Linked</span>{% endif %}
+                    </td>
+                    <td>
+                        {{ user.discord_username or '—' }}
+                        {% if user.discord_user_id %}<span class="badge bg-success">Linked</span>{% endif %}
+                    </td>
                     <td>
                         {% if user.is_admin %}
                             <span class="badge bg-danger">Admin</span>

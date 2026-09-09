@@ -44,6 +44,7 @@ from .models import (
     PublicResult,
     DashboardHiddenGroupTest,
     TelegramLinkToken,
+    DiscordLinkToken,
     TelegramWebhookUpdate,
     TelegramStatusDigestEvent,
     UserDigestEvent,
@@ -58,10 +59,14 @@ from .notifications import (
     render_notification_template,
     send_notification_message,
     send_telegram_status_channel_message,
+    send_discord_status_channel_message,
     send_telegram_chat_message,
+    answer_telegram_callback_query,
+    edit_telegram_message,
     register_telegram_webhook,
     unregister_telegram_webhook,
 )
+from .public_results_bot import public_result_tag_page, public_results_for_tag_page
 from .storage import (
     StorageConfigurationError,
     StorageUploadError,
@@ -70,8 +75,19 @@ from .storage import (
     get_storage_settings,
     upload_result_image,
 )
+from .version import APP_NAME, APP_RELEASE, APP_VERSION
 
 main_bp = Blueprint('main', __name__)
+
+
+@main_bp.route('/version')
+def version_info():
+    return render_template(
+        'version.html',
+        app_name=APP_NAME,
+        app_version=APP_VERSION,
+        app_release=APP_RELEASE,
+    )
 
 
 # ==================== FORMS ====================
@@ -89,6 +105,7 @@ class RegisterForm(FlaskForm):
     password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
     tg_username = StringField('Telegram Username (optional)', validators=[Optional(), Length(max=80)])
+    discord_username = StringField('Discord Username (optional)', validators=[Optional(), Length(max=80)])
     submit = SubmitField('Register')
 
 
@@ -199,10 +216,11 @@ class UserForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
     email = StringField('Email', validators=[DataRequired(), Email()])
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
+    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
     is_admin = BooleanField('Administrator')
     is_active = BooleanField('Active', default=True)
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
@@ -215,8 +233,9 @@ class ProfileForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
     email = StringField('Email', validators=[DataRequired(), Email()])
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
+    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
@@ -243,6 +262,27 @@ class NotificationConfigForm(FlaskForm):
     mailjet_sender_email = StringField('Mailjet Sender Email', validators=[Optional(), Email()])
     notification_debug_enabled = BooleanField('Enable debug-level notification logs')
     submit = SubmitField('Save Configuration')
+
+
+class BotIntegrationsForm(FlaskForm):
+    telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
+    telegram_bot_username = StringField('Telegram Bot Username', validators=[Optional(), Length(max=80)])
+    telegram_webhook_url = StringField('Telegram Webhook URL (optional override)', validators=[Optional(), URL(require_tld=False), Length(max=500)])
+    telegram_webhook_secret = PasswordField('Telegram Webhook Secret', validators=[Optional(), Length(max=200)])
+    telegram_webhook_allowed_ips = StringField('Telegram Webhook Allowed IPs (comma-separated CIDRs)', validators=[Optional(), Length(max=500)])
+    telegram_status_chat_id = StringField('Telegram Status Chat / Channel ID', validators=[Optional(), Length(max=120)])
+    telegram_digest_enabled = BooleanField('Enable Telegram Digest Mode')
+    telegram_digest_window_minutes = FloatField('Telegram Digest Window (minutes)', validators=[Optional(), NumberRange(min=1, max=120)], default=10)
+    service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
+    discord_bot_token = StringField('Discord Bot Token', validators=[Optional()])
+    discord_application_id = StringField('Discord Application ID', validators=[Optional(), Length(max=80)])
+    discord_guild_id = StringField('Discord Guild ID (optional for command sync)', validators=[Optional(), Length(max=80)])
+    discord_status_channel_id = StringField('Discord Status Channel ID', validators=[Optional(), Length(max=120)])
+    discord_webhook_url = StringField('Discord Webhook URL', validators=[Optional(), URL(require_tld=False), Length(max=500)])
+    discord_webhook_username = StringField('Discord Display Name', validators=[Optional(), Length(max=80)])
+    root_webhook_url = StringField('Root Webhook URL', validators=[Optional(), URL(require_tld=False), Length(max=500)])
+    root_webhook_name = StringField('Root Display Name', validators=[Optional(), Length(max=80)])
+    submit = SubmitField('Save Bot Integrations')
 
 
 class TelegramConfigForm(FlaskForm):
@@ -295,6 +335,31 @@ class TelegramCommandTemplateForm(FlaskForm):
     submit = SubmitField('Save Command Template')
 
 
+class BuiltinCommandConfigForm(FlaskForm):
+    tests_enabled = BooleanField('Enable /tests', default=True)
+    mytests_enabled = BooleanField('Enable /mytests', default=True)
+    status_enabled = BooleanField('Enable /status', default=True)
+    join_enabled = BooleanField('Enable /join', default=True)
+    publicresults_enabled = BooleanField('Enable /publicresults', default=True)
+    publicresults_allow_non_private = BooleanField('Allow /publicresults in groups/channels', default=False)
+    publicresults_allowed_chat_ids = StringField('Allowed Chat/Guild IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    publicresults_allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submit = SubmitField('Save Built-in Command Settings')
+
+
+class BotStatusTemplateForm(FlaskForm):
+    telegram_status_digest_header_template = TextAreaField('Status Digest Header', validators=[Optional(), Length(max=2000)])
+    telegram_status_digest_line_template = TextAreaField('Status Digest Line', validators=[Optional(), Length(max=2000)])
+    telegram_status_digest_participants_template = TextAreaField('Status Digest Participants', validators=[Optional(), Length(max=2000)])
+    telegram_status_new_test_template = TextAreaField('New Test Announcement', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_no_request_template = TextAreaField('User Status: No Request', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_denied_template = TextAreaField('User Status: Denied', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_results_template = TextAreaField('User Status: Results Available', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_approved_template = TextAreaField('User Status: Approved', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_pending_template = TextAreaField('User Status: Pending', validators=[Optional(), Length(max=2000)])
+    submit = SubmitField('Save Bot Status Templates')
+
+
 class StorageConfigForm(FlaskForm):
     storage_enabled = BooleanField('Enable object storage result file uploads')
     storage_provider = SelectField('Provider', choices=[('aws', 'AWS S3'), ('do', 'DigitalOcean Spaces')], validators=[DataRequired()])
@@ -338,7 +403,7 @@ class PaymentOptionForm(FlaskForm):
 
 class PasswordResetForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram')], default='email')
+    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
     submit = SubmitField('Send Reset')
 
 
@@ -430,6 +495,10 @@ def _build_payment_option_context(option):
         'destination_value': profile.get('destination_value') or '',
         'payment_link': profile.get('payment_link') or '',
         'qr_payload': profile.get('qr_payload') or '',
+        'link_type': profile.get('link_type') or 'none',
+        'mobile_action_label': profile.get('mobile_action_label') or 'Open payment app',
+        'desktop_action_label': profile.get('desktop_action_label') or 'Open payment page',
+        'copy_value': profile.get('copy_value') or '',
     }
 
 
@@ -540,6 +609,20 @@ def _issue_telegram_link_token(user):
 
     token_value = secrets.token_urlsafe(24)
     token = TelegramLinkToken(
+        user_id=user.id,
+        token=token_value,
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
+    db.session.add(token)
+    return token
+
+
+def _issue_discord_link_token(user):
+    if user is None:
+        return None
+
+    token_value = secrets.token_urlsafe(24)
+    token = DiscordLinkToken(
         user_id=user.id,
         token=token_value,
         expires_at=datetime.utcnow() + timedelta(hours=24),
@@ -766,7 +849,9 @@ def _send_status_update_to_telegram(test, previous_status):
         lines.extend(["", participants_line])
 
     digest_text = "\n".join(lines)
-    sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML')
+    action_buttons = _status_channel_action_buttons(pending_events, config_map)
+    sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML', buttons=action_buttons)
+    send_discord_status_channel_message(digest_text, buttons=action_buttons)
     if sent:
         sent_at = datetime.utcnow()
         for item in pending_events:
@@ -795,6 +880,7 @@ def _send_new_test_created_to_telegram(test, test_url=None):
     )
 
     sent = send_telegram_status_channel_message(message_text)
+    send_discord_status_channel_message(message_text)
     if not sent:
         append_notification_log(f'telegram: failed to send new test created message for test {test.id}')
 
@@ -825,6 +911,30 @@ def _format_status_phrase(status_value):
 def _render_telegram_status_template(config_map, key, default_text, context):
     template_value = str(config_map.get(key) or '').strip()
     return render_notification_template(template_value or default_text, context)
+
+
+def _status_channel_action_buttons(events, config_map):
+    base_url = str(config_map.get('service_base_url') or '').strip().rstrip('/')
+    if not base_url:
+        return []
+    buttons = []
+    seen = set()
+    for event in events:
+        status = str(event.new_status or '').strip().lower()
+        test_path = f'/test/{event.test_id}'
+        if status == 'ready_for_payment':
+            label = 'View Payment Options'
+            target = f'{base_url}{test_path}#payment-options'
+        elif status == 'closed':
+            label = 'View Test'
+            target = f'{base_url}{test_path}'
+        else:
+            continue
+        key = (label, target)
+        if key not in seen:
+            buttons.append({'label': label, 'url': target})
+            seen.add(key)
+    return buttons
 
 
 def _clamp_int(value, default, low, high):
@@ -956,7 +1066,8 @@ def register():
         user = User(
             username=form.username.data,
             email=form.email.data,
-            tg_username=form.tg_username.data or None
+            tg_username=form.tg_username.data or None,
+            discord_username=form.discord_username.data or None,
         )
         user.set_password(form.password.data)
         db.session.add(user)
@@ -1025,6 +1136,9 @@ def password_reset():
             if selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip():
                 flash('To use Telegram reset, open the bot and press Start first, then try again.', 'warning')
                 return render_template('password_reset.html', form=form)
+            if selected_channel == 'discord' and not (user.discord_user_id or '').strip():
+                flash('To use Discord reset, add the bot and run /start first, then try again.', 'warning')
+                return render_template('password_reset.html', form=form)
 
             new_password = os.urandom(6).hex()
             user.set_password(new_password)
@@ -1078,6 +1192,7 @@ def profile():
         current_user.username = form.username.data
         current_user.email = form.email.data
         current_user.tg_username = form.tg_username.data or None
+        current_user.discord_username = form.discord_username.data or None
         current_user.receive_group_test_notifications = form.receive_group_test_notifications.data
         current_user.notification_channel = form.notification_channel.data or 'email'
         current_user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
@@ -1102,6 +1217,15 @@ def profile():
     telegram_link_url = _build_telegram_deep_link(telegram_link_token) if telegram_link_token else None
     telegram_start_command = f"/start {telegram_link_token}" if telegram_link_token else None
 
+    discord_active_token = (
+        current_user.discord_link_tokens
+        .filter(DiscordLinkToken.used_at.is_(None), DiscordLinkToken.expires_at >= datetime.utcnow())
+        .order_by(DiscordLinkToken.created_at.desc())
+        .first()
+    )
+    discord_link_token = discord_active_token.token if discord_active_token else None
+    discord_start_command = f"/start {discord_link_token}" if discord_link_token else None
+
     return render_template(
         'profile.html',
         form=form,
@@ -1109,6 +1233,9 @@ def profile():
         telegram_link_token=telegram_link_token,
         telegram_start_command=telegram_start_command,
         telegram_chat_id=current_user.telegram_chat_id,
+        discord_link_token=discord_link_token,
+        discord_start_command=discord_start_command,
+        discord_user_id=current_user.discord_user_id,
     )
 
 
@@ -1123,6 +1250,20 @@ def create_telegram_link_token():
         flash('Telegram link created. Open the bot link and press Start to complete setup.', 'success')
     else:
         flash('Token created, but Telegram bot username is not configured by admin yet.', 'warning')
+
+    return redirect(url_for('main.profile'))
+
+
+@main_bp.route('/profile/discord-link-token', methods=['POST'])
+@login_required
+def create_discord_link_token():
+    token = _issue_discord_link_token(current_user)
+    db.session.commit()
+
+    if token is None:
+        flash('Could not create Discord link token.', 'danger')
+    else:
+        flash('Discord link token generated.', 'success')
 
     return redirect(url_for('main.profile'))
 
@@ -1367,6 +1508,7 @@ TELEGRAM_RESERVED_COMMANDS = {
     '/testing',
     '/status',
     '/join',
+    '/publicresults',
 }
 
 TELEGRAM_RESERVED_PREFIXES = (
@@ -1626,6 +1768,7 @@ def _telegram_help_custom_commands_block():
     commands = (
         TelegramCommandTemplate.query
         .filter_by(is_active=True)
+        .filter(~TelegramCommandTemplate.command.in_(TELEGRAM_RESERVED_COMMANDS))
         .order_by(TelegramCommandTemplate.command.asc())
         .all()
     )
@@ -1653,6 +1796,63 @@ def _telegram_help_message():
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/help - show this help message"
     ) + _telegram_help_custom_commands_block()
+
+
+def _public_results_telegram_tag_keyboard(tags, page, total_pages):
+    rows = [[{'text': tag.name[:64], 'callback_data': f'pr:results:{tag.id}:1'}] for tag in tags]
+    navigation = []
+    if page > 1:
+        navigation.append({'text': 'Previous', 'callback_data': f'pr:tags:{page - 1}'})
+    if page < total_pages:
+        navigation.append({'text': 'Next', 'callback_data': f'pr:tags:{page + 1}'})
+    if navigation:
+        rows.append(navigation)
+    return {'inline_keyboard': rows}
+
+
+def _public_results_telegram_result_keyboard(results, tag_id, page, total_pages):
+    rows = []
+    for result in results:
+        rows.append([{'text': f'COA: {result.title}'[:64], 'url': result.results_link}])
+    navigation = [{'text': 'Back to Tags', 'callback_data': 'pr:tags:1'}]
+    if page > 1:
+        navigation.append({'text': 'Previous', 'callback_data': f'pr:results:{tag_id}:{page - 1}'})
+    if page < total_pages:
+        navigation.append({'text': 'Next', 'callback_data': f'pr:results:{tag_id}:{page + 1}'})
+    rows.append(navigation)
+    return {'inline_keyboard': rows}
+
+
+def _public_results_telegram_view(tag_id=None, page=1):
+    if tag_id is None:
+        tags, page, total_pages = public_result_tag_page(page)
+        if not tags:
+            return 'No Public Results Available.', None
+        body = f'Public Result Tags (page {page}/{total_pages}):'
+        return body, _public_results_telegram_tag_keyboard(tags, page, total_pages)
+
+    tag, results, page, total_pages = public_results_for_tag_page(tag_id, page)
+    if tag is None or not results:
+        return 'No Public Results Available.', {'inline_keyboard': [[{'text': 'Back to Tags', 'callback_data': 'pr:tags:1'}]]}
+    body = f'Public Results for {tag.name} (page {page}/{total_pages}):\n' + '\n'.join(
+        f'- {result.title} ({result.created_at.strftime("%Y-%m-%d")})' for result in results
+    )
+    return body, _public_results_telegram_result_keyboard(results, tag.id, page, total_pages)
+
+
+def _process_public_results_telegram(linked_user, chat_id, chat_type, message_thread_id=None, tag_id=None, page=1, message_id=None):
+    if not _builtin_publicresults_enabled():
+        return False
+    if not _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id):
+        return False
+    if chat_type == 'private' and linked_user is None:
+        return False
+    body, keyboard = _public_results_telegram_view(tag_id=tag_id, page=page)
+    if message_id is None:
+        send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
+    else:
+        edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
+    return True
 
 
 def _telegram_sort_tests_by_id(tests, limit=20):
@@ -1856,8 +2056,10 @@ def telegram_webhook():
         return jsonify({'ok': False}), 403
 
     secret = str(config_map.get('telegram_webhook_secret') or '').strip()
+    if not secret:
+        return jsonify({'ok': False}), 503
     provided_secret = str(request.headers.get('X-Telegram-Bot-Api-Secret-Token') or '').strip()
-    if secret and not (provided_secret and secrets.compare_digest(secret, provided_secret)):
+    if not (provided_secret and secrets.compare_digest(secret, provided_secret)):
         return jsonify({'ok': False}), 403
 
     if not request.is_json:
@@ -1877,6 +2079,45 @@ def telegram_webhook():
             return jsonify({'ok': True})
 
     message = payload.get('message') or payload.get('edited_message') or payload.get('channel_post') or payload.get('edited_channel_post') or {}
+    callback_query = payload.get('callback_query')
+    if isinstance(callback_query, dict):
+        callback_message = callback_query.get('message') or {}
+        callback_chat = callback_message.get('chat') or {}
+        callback_from = callback_query.get('from') or {}
+        callback_chat_id = str(callback_chat.get('id') or '').strip()
+        callback_chat_type = str(callback_chat.get('type') or '').strip().lower()
+        callback_data = str(callback_query.get('data') or '').strip()
+        callback_message_id = callback_message.get('message_id')
+        callback_user = None
+        callback_telegram_user_id = str(callback_from.get('id') or '').strip()
+        if callback_chat_type == 'private' and callback_telegram_user_id:
+            callback_user = User.query.filter_by(telegram_user_id=callback_telegram_user_id).first()
+        if callback_user is None and callback_chat_type == 'private' and callback_chat_id:
+            callback_user = User.query.filter_by(telegram_chat_id=callback_chat_id).first()
+
+        handled = False
+        if callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
+            parts = callback_data.split(':')
+            try:
+                if parts[1] == 'tags' and len(parts) == 3:
+                    handled = _process_public_results_telegram(
+                        callback_user, callback_chat_id, callback_chat_type,
+                        tag_id=None, page=int(parts[2]), message_id=callback_message_id,
+                    )
+                elif parts[1] == 'results' and len(parts) == 4:
+                    handled = _process_public_results_telegram(
+                        callback_user, callback_chat_id, callback_chat_type,
+                        tag_id=int(parts[2]), page=int(parts[3]), message_id=callback_message_id,
+                    )
+            except (TypeError, ValueError):
+                handled = False
+        answer_telegram_callback_query(callback_query.get('id'))
+        if handled:
+            db.session.commit()
+        else:
+            db.session.rollback()
+        return jsonify({'ok': True})
+
     if not isinstance(message, dict):
         db.session.commit()
         return jsonify({'ok': True})
@@ -1911,6 +2152,15 @@ def telegram_webhook():
         non_private_user = None
         if telegram_user_id:
             non_private_user = User.query.filter_by(telegram_user_id=telegram_user_id).first()
+        if command_head == '/publicresults' and _process_public_results_telegram(
+            non_private_user,
+            chat_id,
+            chat_type,
+            message_thread_id=message_thread_id,
+        ):
+            db.session.commit()
+            return jsonify({'ok': True})
+
         if _process_custom_command_template(
             custom_template,
             non_private_user,
@@ -1989,6 +2239,9 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower == '/tests':
+        if not _builtin_enabled('tests'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         tests = _telegram_user_visible_tests(linked_user)
         if not tests:
             send_telegram_chat_message(chat_id, 'No eligible tests found right now.')
@@ -1998,6 +2251,9 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower == '/mytests':
+        if not _builtin_enabled('mytests'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         participations = _telegram_user_interacting_tests(linked_user)
         if not participations:
             send_telegram_chat_message(chat_id, 'You have no group test requests or approvals yet.')
@@ -2008,7 +2264,20 @@ def telegram_webhook():
         send_telegram_chat_message(chat_id, 'Your group tests:\n' + '\n'.join(lines))
         return jsonify({'ok': True})
 
+    if lower == '/publicresults':
+        if _process_public_results_telegram(
+            linked_user,
+            chat_id,
+            chat_type,
+            message_thread_id=message_thread_id,
+        ):
+            db.session.commit()
+            return jsonify({'ok': True})
+
     if lower.startswith('/status'):
+        if not _builtin_enabled('status'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         test_id = _telegram_extract_command_test_id(text, 'status')
         if test_id is None:
             send_telegram_chat_message(chat_id, 'Usage: /status <test_id> or /status_<test_id>')
@@ -2024,6 +2293,9 @@ def telegram_webhook():
         return jsonify({'ok': True})
 
     if lower.startswith('/join'):
+        if not _builtin_enabled('join'):
+            send_telegram_chat_message(chat_id, 'This command is currently disabled.')
+            return jsonify({'ok': True})
         test_id = _telegram_extract_command_test_id(text, 'join')
         if test_id is None:
             send_telegram_chat_message(chat_id, 'Usage: /join <test_id> or /join_<test_id>')
@@ -3122,6 +3394,181 @@ def add_participant_to_test(test_id):
 
 # ==================== USER MANAGEMENT (Admin) ====================
 
+@main_bp.route('/admin/settings')
+@login_required
+@admin_required
+def admin_settings():
+    configs = {config.key: config.value for config in NotificationConfig.query.all()}
+    return render_template(
+        'admin/settings.html',
+        settings_status={
+            'email': bool(configs.get('mailjet_sender_email')),
+            'telegram': bool(configs.get('telegram_bot_token')),
+            'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
+            'storage': bool(str(configs.get('storage_enabled') or '').lower() == 'true'),
+        },
+    )
+
+
+def _save_notification_config_values(values):
+    for key, value in values.items():
+        config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+        config.value = value or None
+        db.session.add(config)
+
+
+def _builtin_config_value(key, default=None):
+    config = NotificationConfig.query.filter_by(key=key).first()
+    return config.value if config is not None else default
+
+
+def _builtin_publicresults_enabled():
+    return _builtin_enabled('publicresults')
+
+
+def _builtin_enabled(command_name):
+    return str(_builtin_config_value(f'builtin_{command_name}_enabled', 'true')).lower() == 'true'
+
+
+def _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id=None):
+    chat_type = str(chat_type or '').strip().lower()
+    if chat_type == 'private':
+        return True
+    if str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() != 'true':
+        return False
+    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_publicresults_allowed_chat_ids', ''))
+    if allowed_chats and str(chat_id or '').strip() not in allowed_chats:
+        return False
+    allowed_threads = _normalize_allowed_thread_ids(_builtin_config_value('builtin_publicresults_allowed_thread_ids', ''))
+    if allowed_threads is None:
+        return False
+    if allowed_threads and str(message_thread_id or '').strip() not in allowed_threads:
+        return False
+    return True
+
+
+@main_bp.route('/admin/settings/bots', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def bot_integrations():
+    form = BotIntegrationsForm()
+    configs = {config.key: config.value for config in NotificationConfig.query.all()}
+    existing_discord_bot_token = str(configs.get('discord_bot_token') or '').strip()
+    existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
+    existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
+
+    if form.validate_on_submit():
+        submitted_discord_bot_token = (form.discord_bot_token.data or '').strip()
+        if submitted_discord_bot_token == mask_secret(existing_discord_bot_token):
+            submitted_discord_bot_token = existing_discord_bot_token
+        submitted_telegram_bot_token = (form.telegram_bot_token.data or '').strip()
+        if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
+            submitted_telegram_bot_token = existing_telegram_bot_token
+        webhook_secret = (form.telegram_webhook_secret.data or '').strip()
+
+        _save_notification_config_values({
+            'telegram_bot_token': submitted_telegram_bot_token,
+            'telegram_bot_username': form.telegram_bot_username.data,
+            'telegram_webhook_url': form.telegram_webhook_url.data,
+            'telegram_webhook_allowed_ips': form.telegram_webhook_allowed_ips.data,
+            'telegram_status_chat_id': form.telegram_status_chat_id.data,
+            'telegram_digest_enabled': 'true' if form.telegram_digest_enabled.data else 'false',
+            'telegram_digest_window_minutes': str(int(form.telegram_digest_window_minutes.data or 10)),
+            'service_base_url': form.service_base_url.data,
+            'discord_bot_token': submitted_discord_bot_token,
+            'discord_application_id': form.discord_application_id.data,
+            'discord_guild_id': form.discord_guild_id.data,
+            'discord_status_channel_id': form.discord_status_channel_id.data,
+            'discord_webhook_url': form.discord_webhook_url.data,
+            'discord_webhook_username': form.discord_webhook_username.data,
+            'root_webhook_url': form.root_webhook_url.data,
+            'root_webhook_name': form.root_webhook_name.data,
+        })
+        if webhook_secret:
+            _save_notification_config_values({'telegram_webhook_secret': webhook_secret})
+        elif existing_webhook_secret:
+            _save_notification_config_values({'telegram_webhook_secret': existing_webhook_secret})
+        db.session.commit()
+        append_notification_log('configuration: bot integrations updated')
+        flash('Bot integration configuration saved.', 'success')
+        return redirect(url_for('main.bot_integrations'))
+
+    if not form.is_submitted():
+        form.telegram_bot_token.data = mask_secret(existing_telegram_bot_token)
+        form.telegram_bot_username.data = configs.get('telegram_bot_username')
+        form.telegram_webhook_url.data = configs.get('telegram_webhook_url')
+        form.telegram_webhook_secret.data = ''
+        form.telegram_webhook_allowed_ips.data = configs.get('telegram_webhook_allowed_ips')
+        form.telegram_status_chat_id.data = configs.get('telegram_status_chat_id')
+        form.telegram_digest_enabled.data = str(configs.get('telegram_digest_enabled', 'false')).lower() == 'true'
+        try:
+            form.telegram_digest_window_minutes.data = float(configs.get('telegram_digest_window_minutes') or 10)
+        except (TypeError, ValueError):
+            form.telegram_digest_window_minutes.data = 10
+        form.service_base_url.data = configs.get('service_base_url')
+        form.discord_bot_token.data = mask_secret(existing_discord_bot_token)
+        form.discord_application_id.data = configs.get('discord_application_id')
+        form.discord_guild_id.data = configs.get('discord_guild_id')
+        form.discord_status_channel_id.data = configs.get('discord_status_channel_id')
+        form.discord_webhook_url.data = configs.get('discord_webhook_url')
+        form.discord_webhook_username.data = configs.get('discord_webhook_username')
+        form.root_webhook_url.data = configs.get('root_webhook_url')
+        form.root_webhook_name.data = configs.get('root_webhook_name')
+
+    return render_template(
+        'admin/bot_integrations.html',
+        form=form,
+        webhook_secret_mask=mask_secret(existing_webhook_secret),
+        integration_status={
+            'telegram': bool(configs.get('telegram_bot_token')),
+            'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
+            'root': bool(configs.get('root_webhook_url')),
+        },
+    )
+
+
+@main_bp.route('/admin/settings/commands')
+@login_required
+@admin_required
+def bot_commands():
+    return redirect(url_for('main.telegram_command_templates'))
+
+
+@main_bp.route('/admin/settings/commands/builtins', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def builtin_command_settings():
+    form = BuiltinCommandConfigForm()
+    if form.validate_on_submit():
+        allowed_threads = _normalize_allowed_thread_ids(form.publicresults_allowed_thread_ids.data)
+        if allowed_threads is None:
+            flash('Allowed thread IDs must be integers separated by commas.', 'danger')
+            return render_template('admin/builtin_command_settings.html', form=form)
+        _save_notification_config_values({
+            'builtin_tests_enabled': 'true' if form.tests_enabled.data else 'false',
+            'builtin_mytests_enabled': 'true' if form.mytests_enabled.data else 'false',
+            'builtin_status_enabled': 'true' if form.status_enabled.data else 'false',
+            'builtin_join_enabled': 'true' if form.join_enabled.data else 'false',
+            'builtin_publicresults_enabled': 'true' if form.publicresults_enabled.data else 'false',
+            'builtin_publicresults_allow_non_private': 'true' if form.publicresults_allow_non_private.data else 'false',
+            'builtin_publicresults_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.publicresults_allowed_chat_ids.data)),
+            'builtin_publicresults_allowed_thread_ids': ','.join(allowed_threads or []),
+        })
+        db.session.commit()
+        flash('Built-in command settings saved.', 'success')
+        return redirect(url_for('main.builtin_command_settings'))
+
+    if not form.is_submitted():
+        form.tests_enabled.data = _builtin_enabled('tests')
+        form.mytests_enabled.data = _builtin_enabled('mytests')
+        form.status_enabled.data = _builtin_enabled('status')
+        form.join_enabled.data = _builtin_enabled('join')
+        form.publicresults_enabled.data = _builtin_publicresults_enabled()
+        form.publicresults_allow_non_private.data = str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true'
+        form.publicresults_allowed_chat_ids.data = _builtin_config_value('builtin_publicresults_allowed_chat_ids', '')
+        form.publicresults_allowed_thread_ids.data = _builtin_config_value('builtin_publicresults_allowed_thread_ids', '')
+    return render_template('admin/builtin_command_settings.html', form=form)
+
 @main_bp.route('/admin/notification-templates', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -3144,7 +3591,32 @@ def notification_templates():
         flash('Notification template created.', 'success')
         return redirect(url_for('main.notification_templates'))
     templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
-    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=None)
+    status_form = BotStatusTemplateForm()
+    configs = _config_values_map()
+    if not status_form.is_submitted():
+        for field_name in status_form._fields:
+            if field_name != 'submit':
+                getattr(status_form, field_name).data = configs.get(field_name)
+    return render_template('admin/notification_templates.html', form=form, status_form=status_form, templates=templates, editing_template=None)
+
+
+@main_bp.route('/admin/settings/message-templates/status', methods=['POST'])
+@login_required
+@admin_required
+def save_bot_status_templates():
+    form = BotStatusTemplateForm()
+    if form.validate_on_submit():
+        _save_notification_config_values({
+            field_name: getattr(form, field_name).data
+            for field_name in form._fields
+            if field_name != 'submit'
+        })
+        db.session.commit()
+        append_notification_log('configuration: bot status templates updated')
+        flash('Bot status templates saved.', 'success')
+    else:
+        flash('Bot status templates could not be saved.', 'danger')
+    return redirect(url_for('main.notification_templates', _anchor='bot-status-templates'))
 
 
 @main_bp.route('/admin/notification-templates/<int:template_id>/edit', methods=['GET', 'POST'])
@@ -3170,7 +3642,12 @@ def edit_notification_template(template_id):
         return redirect(url_for('main.notification_templates'))
 
     templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
-    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=template)
+    status_form = BotStatusTemplateForm()
+    configs = _config_values_map()
+    for field_name in status_form._fields:
+        if field_name != 'submit':
+            getattr(status_form, field_name).data = configs.get(field_name)
+    return render_template('admin/notification_templates.html', form=form, status_form=status_form, templates=templates, editing_template=template)
 
 
 def _render_telegram_command_templates_page(form, editing_template=None):
@@ -3320,15 +3797,12 @@ def notification_config():
         if submitted_mailjet_secret_key == mask_secret(existing_mailjet_secret_key):
             submitted_mailjet_secret_key = existing_mailjet_secret_key
 
-        for key, value in {
+        _save_notification_config_values({
             'mailjet_api_key': submitted_mailjet_api_key,
             'mailjet_secret_key': submitted_mailjet_secret_key,
             'mailjet_sender_email': form.mailjet_sender_email.data,
             'notification_debug_enabled': 'true' if form.notification_debug_enabled.data else 'false',
-        }.items():
-            config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
-            config.value = value or None
-            db.session.add(config)
+        })
 
         db.session.commit()
         append_notification_log('configuration: notification settings updated')
@@ -3727,6 +4201,7 @@ def create_user():
             username=form.username.data,
             email=form.email.data,
             tg_username=form.tg_username.data,
+            discord_username=form.discord_username.data,
             is_admin=form.is_admin.data,
             is_active=form.is_active.data,
             receive_group_test_notifications=form.receive_group_test_notifications.data,
@@ -3774,6 +4249,7 @@ def edit_user(user_id):
         user.username = form.username.data
         user.email = form.email.data
         user.tg_username = form.tg_username.data
+        user.discord_username = form.discord_username.data
         user.is_admin = form.is_admin.data
         user.is_active = form.is_active.data
         user.receive_group_test_notifications = form.receive_group_test_notifications.data

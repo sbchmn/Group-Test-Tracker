@@ -267,7 +267,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <!-- Right: Participation / Request -->
     <div class="col-lg-5">
         {% if test.status == 'ready_for_payment' and payment_options %}
-            <div class="card mb-3">
+            <div class="card mb-3" id="payment-options">
                 <div class="card-header">Available Payment Methods</div>
                 <div class="card-body">
                     <ul class="list-group list-group-flush payment-option-list">
@@ -286,7 +286,10 @@ window.addEventListener('DOMContentLoaded', function() {
                                             {% if option.network %}<div>Network: {{ option.network }}</div>{% endif %}
                                             {% if option.details %}<div>{{ option.details }}</div>{% endif %}
                                             {% if option.payment_link %}
-                                                <div class="mt-1"><a href="{{ option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>
+                                                <div class="mt-2 d-flex flex-wrap gap-2">
+                                                    <a href="{{ option.payment_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><span class="d-md-none">{{ option.mobile_action_label }}</span><span class="d-none d-md-inline">{{ option.desktop_action_label }}</span></a>
+                                                    {% if option.copy_value %}<button type="button" class="btn btn-sm btn-outline-secondary" data-copy-value="{{ option.copy_value }}"><i class="bi bi-copy"></i> Copy</button>{% endif %}
+                                                </div>
                                             {% endif %}
                                         </div>
                                     </div>
@@ -366,7 +369,7 @@ window.addEventListener('DOMContentLoaded', function() {
                         <div class="fw-semibold">{{ selected_payment_option.title }}</div>
                         {% if selected_payment_option.destination_value %}<div>{{ selected_payment_option.destination_label }}: {{ selected_payment_option.destination_value }}</div>{% endif %}
                         {% if selected_payment_option.network %}<div>Network: {{ selected_payment_option.network }}</div>{% endif %}
-                        {% if selected_payment_option.payment_link %}<div><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>{% endif %}
+                        {% if selected_payment_option.payment_link %}<div class="mt-2 d-flex flex-wrap gap-2"><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><span class="d-md-none">{{ selected_payment_option.mobile_action_label }}</span><span class="d-none d-md-inline">{{ selected_payment_option.desktop_action_label }}</span></a>{% if selected_payment_option.copy_value %}<button type="button" class="btn btn-sm btn-outline-secondary" data-copy-value="{{ selected_payment_option.copy_value }}"><i class="bi bi-copy"></i> Copy</button>{% endif %}</div>{% endif %}
                         {% if selected_payment_option.qr_payload %}
                             <div class="mt-2">
                                 <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Selected payment QR" class="border rounded payment-qr-thumb">

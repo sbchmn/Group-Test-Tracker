@@ -12,6 +12,7 @@ from flask_login import LoginManager
 from flask_wtf import CSRFProtect
 from flask_migrate import Migrate
 from dotenv import load_dotenv
+from .version import APP_VERSION
 
 # Extensions (initialized in create_app to support factory)
 db = SQLAlchemy()
@@ -27,6 +28,11 @@ def create_app(config_overrides=None):
     app = Flask(__name__, 
                 template_folder='templates',
                 static_folder='static')
+    app.config['APP_VERSION'] = APP_VERSION
+
+    @app.context_processor
+    def inject_app_version():
+        return {'app_version': app.config['APP_VERSION']}
     
     # === Configuration ===
     # SECRET_KEY required for sessions, CSRF, Flask-Login

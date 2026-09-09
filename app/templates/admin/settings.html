@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Settings{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
+    <div>
+        <h3 class="mb-1">Admin Settings</h3>
+        <p class="text-muted mb-0">Configure delivery, bots, commands, templates, payments, and storage from one place.</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                    <div>
+                        <h5 class="card-title"><i class="bi bi-envelope"></i> Notifications</h5>
+                        <p class="card-text text-muted">Email delivery and diagnostic logging. Bot transport settings are grouped under Bot Integrations.</p>
+                    </div>
+                    <span class="badge text-bg-{{ 'success' if settings_status.email else 'secondary' }}">{{ 'Configured' if settings_status.email else 'Needs setup' }}</span>
+                </div>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.notification_config') }}">Open Notifications</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                    <div>
+                        <h5 class="card-title"><i class="bi bi-robot"></i> Bot Integrations</h5>
+                        <p class="card-text text-muted">Configure Telegram, Discord, and future bot providers from one integration directory.</p>
+                    </div>
+                    <span class="badge text-bg-{{ 'success' if settings_status.telegram else 'secondary' }}">{{ 'Configured' if settings_status.telegram else 'Needs setup' }}</span>
+                </div>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.bot_integrations') }}">Open Bot Integrations</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-chat-square-text"></i> Bot Commands</h5>
+                <p class="card-text text-muted">Manage command names, argument rules, scopes, rate limits, and reply text. The command registry will become provider-neutral as Discord command bindings are added.</p>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.bot_commands') }}">Open Command Registry</a>
+                <a class="btn btn-outline-secondary" href="{{ url_for('main.builtin_command_settings') }}">Built-in Commands</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-file-text"></i> Message Templates</h5>
+                <p class="card-text text-muted">Manage registration, password-reset, and participant notification templates with channel-specific message bodies.</p>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.notification_templates') }}">Open Message Templates</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-wallet2"></i> Payments</h5>
+                <p class="card-text text-muted">Configure payment destinations, method details, QR payloads, and active payment options used by group tests.</p>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.payment_options') }}">Open Payment Options</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                    <div>
+                        <h5 class="card-title"><i class="bi bi-cloud-arrow-up"></i> Storage</h5>
+                        <p class="card-text text-muted">Configure private object storage, upload limits, signed URLs, and result-image delivery.</p>
+                    </div>
+                    <span class="badge text-bg-{{ 'success' if settings_status.storage else 'secondary' }}">{{ 'Enabled' if settings_status.storage else 'Not enabled' }}</span>
+                </div>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.storage_config') }}">Open Storage</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,13 +1,16 @@
+import json
 import tempfile
 import unittest
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
 from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_mailjet_message, send_notification_message, send_telegram_message, send_telegram_status_channel_message
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_message, send_telegram_status_channel_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -379,6 +382,184 @@ class NotificationTests(unittest.TestCase):
         self.assertIn(b'"chat_id": "-1003638912415"', request.data)
         self.assertNotIn(b'"message_thread_id"', request.data)
 
+    def test_send_notification_message_delivers_discord_webhook(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_webhook_url", value="https://discord.example/webhook"),
+                NotificationConfig(key="discord_webhook_username", value="Tracker Bot"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.post_json", return_value=(True, "ok")) as mock_post:
+                result = send_notification_message(
+                    User(username="discorder", email="discorder@example.com"),
+                    "discord",
+                    "Subject",
+                    "Discord body",
+                )
+
+        self.assertTrue(result)
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.args[0], "https://discord.example/webhook")
+        self.assertEqual(mock_post.call_args.args[1]["content"], "Discord body")
+        self.assertEqual(mock_post.call_args.args[1]["username"], "Tracker Bot")
+
+    def test_send_notification_message_delivers_root_webhook(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="root_webhook_url", value="https://root.example/webhook"),
+                NotificationConfig(key="root_webhook_name", value="Tracker Bot"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.post_json", return_value=(True, "ok")) as mock_post:
+                result = send_notification_message(
+                    User(username="rooter", email="rooter@example.com"),
+                    "root",
+                    "Subject",
+                    "Root body",
+                )
+
+        self.assertTrue(result)
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.args[0], "https://root.example/webhook")
+        self.assertEqual(mock_post.call_args.args[1]["text"], "Root body")
+        self.assertEqual(mock_post.call_args.args[1]["sender"], "Tracker Bot")
+
+    def test_password_reset_uses_email_template_for_email_channel(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="resetter", email="resetter@example.com", notification_channel="email")
+            user.set_password("old-password")
+            db.session.add_all([
+                user,
+                NotificationTemplate(
+                    name="Reset Templates",
+                    email_subject="Reset",
+                    email_body="Email password: {{ new_password }}",
+                    telegram_body="Telegram password: {{ new_password }}",
+                    is_default_password_reset=True,
+                    is_active=True,
+                ),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.send_notification_message", return_value=True) as mock_send:
+                self.assertTrue(send_password_reset(user, "new-password"))
+
+        self.assertEqual(mock_send.call_args.args[1], "email")
+        self.assertEqual(mock_send.call_args.args[3], "Email password: new-password")
+
+    def test_send_notification_message_routes_discord_to_discord_api(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="discorder", email="discorder@example.com", discord_user_id="987654321")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add(NotificationConfig(key="discord_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                channel_response = Mock()
+                channel_response.read.return_value = b'{"id":"555"}'
+                channel_response.__enter__ = Mock(return_value=channel_response)
+                channel_response.__exit__ = Mock(return_value=False)
+
+                message_response = Mock()
+                message_response.read.return_value = b'{"id":"666"}'
+                message_response.__enter__ = Mock(return_value=message_response)
+                message_response.__exit__ = Mock(return_value=False)
+
+                mock_urlopen.side_effect = [channel_response, message_response]
+
+                result = send_notification_message(user, "discord", "Subject", "Discord body")
+
+        self.assertTrue(result)
+        self.assertEqual(mock_urlopen.call_count, 2)
+        first_request = mock_urlopen.call_args_list[0].args[0]
+        second_request = mock_urlopen.call_args_list[1].args[0]
+        self.assertIn("https://discord.com/api/v10/users/@me/channels", first_request.full_url)
+        self.assertIn("https://discord.com/api/v10/channels/555/messages", second_request.full_url)
+
+    def test_send_discord_status_channel_message_posts_to_discord_api(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_bot_token", value="123456:ABC"),
+                NotificationConfig(key="discord_status_channel_id", value="999888777"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"id":"777"}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_discord_status_channel_message("Discord status")
+
+        self.assertTrue(result)
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn("https://discord.com/api/v10/channels/999888777/messages", request.full_url)
+
+    def test_send_discord_status_channel_message_disables_mentions_in_payload(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_bot_token", value="123456:ABC"),
+                NotificationConfig(key="discord_status_channel_id", value="999888777"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"id":"777"}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                result = send_discord_status_channel_message("@everyone hello")
+
+        self.assertTrue(result)
+        request = mock_urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload.get("allowed_mentions", {}).get("parse"), [])
+
+    def test_send_discord_status_channel_message_retries_on_429(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_bot_token", value="123456:ABC"),
+                NotificationConfig(key="discord_status_channel_id", value="999888777"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.time.sleep", return_value=None) as mock_sleep, \
+                 patch("app.notifications.urlopen") as mock_urlopen:
+                rate_limit_error = HTTPError(
+                    url="https://discord.com/api/v10/channels/999888777/messages",
+                    code=429,
+                    msg="Too Many Requests",
+                    hdrs={"Retry-After": "0"},
+                    fp=BytesIO(b'{"retry_after": 0, "global": false}'),
+                )
+
+                success_response = Mock()
+                success_response.read.return_value = b'{"id":"777"}'
+                success_response.__enter__ = Mock(return_value=success_response)
+                success_response.__exit__ = Mock(return_value=False)
+
+                mock_urlopen.side_effect = [rate_limit_error, success_response]
+
+                result = send_discord_status_channel_message("Discord status")
+
+        self.assertTrue(result)
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
     def test_send_notification_message_falls_back_to_email_when_telegram_requires_start(self):
         with self.app.app_context():
             db.create_all()
@@ -473,6 +654,7 @@ class NotificationTests(unittest.TestCase):
             db.session.add(test)
             db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
             db.session.add(NotificationConfig(key="telegram_digest_enabled", value="false"))
+            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
             db.session.commit()
 
             with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
@@ -481,6 +663,37 @@ class NotificationTests(unittest.TestCase):
             self.assertTrue(mock_sender.called)
             sent_body = mock_sender.call_args.args[0]
             self.assertIn("Ready Label Test is now ready for payment", sent_body)
+            buttons = mock_sender.call_args.kwargs["buttons"]
+            self.assertEqual(buttons, [{
+                "label": "View Payment Options",
+                "url": "https://group-tests.example/test/1#payment-options",
+            }])
+
+    def test_status_digest_adds_closed_view_test_button(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-closed-button", email="admin-closed-button@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Closed Button Test", status="closed", created_by=admin.id)
+            db.session.add(test)
+            db.session.add_all([
+                NotificationConfig(key="telegram_status_chat_id", value="-10012345"),
+                NotificationConfig(key="telegram_digest_enabled", value="false"),
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+            ])
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "testing")
+
+        self.assertEqual(mock_sender.call_args.kwargs["buttons"], [{
+            "label": "View Test",
+            "url": f"https://group-tests.example/test/{test.id}",
+        }])
 
     def test_status_digest_uses_custom_config_templates(self):
         with self.app.app_context():

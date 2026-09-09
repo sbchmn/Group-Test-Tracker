@@ -93,7 +93,7 @@
 
             <div class="mt-4 d-flex gap-2">
                 <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
-                <a href="{{ url_for('main.manage_users') }}" class="btn btn-secondary">Back</a>
+                <a href="{{ url_for('main.admin_settings') }}" class="btn btn-secondary">Back to Settings</a>
                 <span class="small text-muted align-self-center">Current status: {{ 'Enabled' if storage_enabled else 'Disabled' }}</span>
             </div>
         </form>

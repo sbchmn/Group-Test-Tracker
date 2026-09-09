@@ -62,6 +62,7 @@ from .notifications import (
     send_discord_status_channel_message,
     send_telegram_chat_message,
     answer_telegram_callback_query,
+    delete_telegram_message,
     edit_telegram_message,
     register_telegram_webhook,
     unregister_telegram_webhook,
@@ -1807,6 +1808,7 @@ def _public_results_telegram_tag_keyboard(tags, page, total_pages):
         navigation.append({'text': 'Next', 'callback_data': f'pr:tags:{page + 1}'})
     if navigation:
         rows.append(navigation)
+    rows.append([{'text': 'Close', 'callback_data': 'pr:close'}])
     return {'inline_keyboard': rows}
 
 
@@ -1820,6 +1822,7 @@ def _public_results_telegram_result_keyboard(results, tag_id, page, total_pages)
     if page < total_pages:
         navigation.append({'text': 'Next', 'callback_data': f'pr:results:{tag_id}:{page + 1}'})
     rows.append(navigation)
+    rows.append([{'text': 'Close', 'callback_data': 'pr:close'}])
     return {'inline_keyboard': rows}
 
 
@@ -2099,7 +2102,9 @@ def telegram_webhook():
         if callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
             parts = callback_data.split(':')
             try:
-                if parts[1] == 'tags' and len(parts) == 3:
+                if parts[1] == 'close' and len(parts) == 2:
+                    handled = delete_telegram_message(callback_chat_id, callback_message_id)
+                elif parts[1] == 'tags' and len(parts) == 3:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
                         tag_id=None, page=int(parts[2]), message_id=callback_message_id,

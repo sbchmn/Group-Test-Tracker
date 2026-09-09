@@ -21,24 +21,18 @@ def _page_window(total, page):
 
 
 def public_result_tag_page(page=1):
-    total = (
-        Tag.query
-        .join(public_result_tags, public_result_tags.c.tag_id == Tag.id)
-        .join(PublicResult, PublicResult.id == public_result_tags.c.public_result_id)
-        .count()
-    )
-    page, total_pages = _page_window(total, page)
     tags = (
         Tag.query
         .join(public_result_tags, public_result_tags.c.tag_id == Tag.id)
         .join(PublicResult, PublicResult.id == public_result_tags.c.public_result_id)
         .distinct()
         .order_by(func.lower(Tag.name).asc(), Tag.id.asc())
-        .offset((page - 1) * PAGE_SIZE)
-        .limit(PAGE_SIZE)
         .all()
     )
-    return tags, page, total_pages
+    total = len(tags)
+    page, total_pages = _page_window(total, page)
+    start = (page - 1) * PAGE_SIZE
+    return tags[start:start + PAGE_SIZE], page, total_pages
 
 
 def public_results_for_tag_page(tag_id, page=1):

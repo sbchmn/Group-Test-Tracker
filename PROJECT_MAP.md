@@ -775,6 +775,61 @@
 - Focused security and notification suites passed with the Python 3.12 interpreter.
 - Full unittest discovery completed without reported failures.
 
+## Status Channel Test Navigation
+
+### Implemented Changes
+- Added a stable `#payment-options` anchor to the Ready for Payment section on group-test detail pages.
+- Ready-for-payment status events now include one `View Payment Options` button linking to `/test/<id>#payment-options`.
+- Closed status events now include one `View Test` button linking to `/test/<id>`.
+- Telegram uses inline URL buttons; Discord uses native link buttons. Root remains text-only.
+- Digest messages deduplicate repeated action buttons and continue sending text when no service base URL is configured.
+
+### Security / Reliability / Optimization Notes
+- Security: Buttons link to the existing authenticated test page; payment destinations are not exposed directly in group/channel messages.
+- Reliability: URL construction uses the configured service base URL and does not require an active Flask request context, so scheduled/status-triggered sends remain safe.
+- Optimization: One button per relevant test event; unrelated statuses remain text-only.
+
+### Validation Results
+- Ready-for-payment and closed button regressions passed.
+- Existing digest persistence and Discord status delivery tests passed.
+- Full unittest discovery completed without reported failures.
+
+## Discord User Form Audit
+
+### Reviewed Surfaces
+- Self-service Profile form and Discord link-token flow.
+- Admin Create User, Edit User, and Manage Users forms.
+- Password Reset channel selection and linked-account gating.
+- Notification channel selection and Discord DM delivery identity.
+- Participation and bot-facing user lookup paths.
+
+### Implemented Fix
+- Admin user creation and editing now persist `discord_username`, and Manage Users displays Discord display/link status.
+
+### Intentional Boundary
+- Discord account linking remains user-driven through Profile-generated one-time tokens and `/start`; admins do not directly edit Discord snowflake IDs. This prevents accidental identity reassignment and preserves the ownership checks in the Discord bot.
+
+### Validation Results
+- Focused user-form and password-reset tests passed.
+- Full unittest discovery completed without reported failures.
+- Updated user routes and models compiled successfully.
+
+## Admin Bot-Link Visibility and Edit Safety
+
+### Implemented Changes
+- Manage Users now shows Telegram and Discord display/link status badges.
+- Edit User now shows both provider linking states and explains that links are user-managed.
+- Admin create/edit forms persist Discord display names without touching provider identity IDs.
+
+### Safety Contract
+- Editing username, email, display names, notification settings, or activity status does not change `telegram_chat_id`, `telegram_user_id`, or `discord_user_id`.
+- Leaving the admin password field blank preserves the existing password hash.
+- Provider linking remains token-based and user-driven through Profile and bot `/start` flows.
+
+### Validation Results
+- Focused admin linking-status and password-preservation tests passed.
+- Full unittest discovery completed without reported failures.
+
 ## Built-in Bot Command Controls
 
 ### Implemented Changes

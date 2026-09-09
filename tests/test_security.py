@@ -195,6 +195,73 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("Temporary password generated", response.get_data(as_text=True))
 
+    def test_admin_user_forms_persist_discord_username_and_show_link_status(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="discord-admin", email="discord-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "discord-admin", "password": "secret"}, follow_redirects=True)
+        response = self.client.post(
+            "/admin/users/new",
+            data={
+                "username": "discord-user",
+                "email": "discord-user@example.com",
+                "tg_username": "",
+                "discord_username": "Discord Display",
+                "is_admin": "",
+                "is_active": "y",
+                "receive_group_test_notifications": "y",
+                "notification_channel": "discord",
+                "digest_frequency": "off",
+                "password": "secret123",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            user = User.query.filter_by(username="discord-user").first()
+            self.assertEqual(user.discord_username, "Discord Display")
+            user.telegram_chat_id = "tg-chat-1"
+            user.telegram_user_id = "tg-user-1"
+            user.discord_user_id = "discord-user-1"
+            password_hash = user.password_hash
+            db.session.commit()
+            user_id = user.id
+
+        edit_page = self.client.get(f"/admin/users/{user_id}/edit")
+        self.assertEqual(edit_page.status_code, 200)
+        self.assertIn("Telegram:", edit_page.get_data(as_text=True))
+        self.assertIn("Discord:", edit_page.get_data(as_text=True))
+
+        edit_response = self.client.post(
+            f"/admin/users/{user_id}/edit",
+            data={
+                "username": "discord-user",
+                "email": "discord-user@example.com",
+                "tg_username": "",
+                "discord_username": "Updated Discord Display",
+                "is_admin": "",
+                "is_active": "y",
+                "receive_group_test_notifications": "y",
+                "notification_channel": "discord",
+                "digest_frequency": "off",
+                "password": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(edit_response.status_code, 200)
+        self.assertIn("Updated Discord Display", edit_response.get_data(as_text=True))
+        with self.app.app_context():
+            refreshed = User.query.get(user_id)
+            self.assertEqual(refreshed.telegram_chat_id, "tg-chat-1")
+            self.assertEqual(refreshed.telegram_user_id, "tg-user-1")
+            self.assertEqual(refreshed.discord_user_id, "discord-user-1")
+            self.assertEqual(refreshed.password_hash, password_hash)
+
     def test_create_app_requires_secret_key_outside_test_mode(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(RuntimeError):

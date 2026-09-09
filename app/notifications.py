@@ -512,7 +512,7 @@ def _parse_telegram_channel_target(raw_target):
     return base_chat_id, int(suffix)
 
 
-def send_telegram_status_channel_message(body, parse_mode=None):
+def send_telegram_status_channel_message(body, parse_mode=None, buttons=None):
     configured_target = str(_get_config("telegram_status_chat_id") or "").strip()
     if not configured_target:
         return False
@@ -523,10 +523,15 @@ def send_telegram_status_channel_message(body, parse_mode=None):
         body,
         parse_mode=parse_mode,
         message_thread_id=message_thread_id,
+        reply_markup={'inline_keyboard': [[
+            {'text': str(button['label'])[:64], 'url': str(button['url'])}
+            for button in (buttons or [])
+            if button.get('label') and button.get('url')
+        ]]} if buttons else None,
     )
 
 
-def send_discord_status_channel_message(body):
+def send_discord_status_channel_message(body, buttons=None):
     configured_channel_id = str(_get_config("discord_status_channel_id") or "").strip()
     if not configured_channel_id:
         return False
@@ -535,6 +540,18 @@ def send_discord_status_channel_message(body):
     payloads = _build_discord_message_payloads(body)
     if not payloads:
         return False
+
+    if buttons:
+        components = [{
+            'type': 1,
+            'components': [
+                {'type': 2, 'style': 5, 'label': str(button['label'])[:80], 'url': str(button['url'])}
+                for button in buttons
+                if button.get('label') and button.get('url')
+            ],
+        }]
+        if components[0]['components']:
+            payloads[-1]['components'] = components
 
     for payload in payloads:
         message_ok, _ = _discord_api_post(f"channels/{configured_channel_id}/messages", payload)

@@ -26,6 +26,12 @@
                 {{ form.tg_username(class="form-control") }}
             </div>
 
+            <div class="mb-3">
+                {{ form.discord_username.label(class="form-label") }}
+                {{ form.discord_username(class="form-control") }}
+                <div class="form-text">Display name only. Discord delivery uses the linked Discord user ID.</div>
+            </div>
+
             <div class="row">
                 <div class="col-md-4 mb-3 form-check mt-4">
                     {{ form.is_admin(class="form-check-input") }}

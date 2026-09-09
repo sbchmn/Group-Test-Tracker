@@ -267,7 +267,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <!-- Right: Participation / Request -->
     <div class="col-lg-5">
         {% if test.status == 'ready_for_payment' and payment_options %}
-            <div class="card mb-3">
+            <div class="card mb-3" id="payment-options">
                 <div class="card-header">Available Payment Methods</div>
                 <div class="card-body">
                     <ul class="list-group list-group-flush payment-option-list">

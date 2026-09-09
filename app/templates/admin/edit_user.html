@@ -26,6 +26,24 @@
                 {{ form.tg_username(class="form-control") }}
             </div>
 
+            <div class="mb-3">
+                {{ form.discord_username.label(class="form-label") }}
+                {{ form.discord_username(class="form-control") }}
+                <div class="form-text">Display name only. Discord delivery uses the linked Discord user ID.</div>
+            </div>
+
+            <div class="alert alert-light border">
+                <div class="fw-semibold mb-1">Bot Linking Status</div>
+                <div class="small">
+                    Telegram:
+                    {% if user.telegram_chat_id %}<span class="text-success">Linked</span>{% else %}<span class="text-muted">Not linked</span>{% endif %}
+                    <span class="mx-2">|</span>
+                    Discord:
+                    {% if user.discord_user_id %}<span class="text-success">Linked</span>{% else %}<span class="text-muted">Not linked</span>{% endif %}
+                </div>
+                <div class="form-text">Provider account links are managed by users through Profile and bot link tokens. Editing this form does not change them.</div>
+            </div>
+
             <div class="row">
                 <div class="col-md-4 mb-3 form-check mt-4">
                     {{ form.is_admin(class="form-check-input") }}

@@ -849,8 +849,9 @@ def _send_status_update_to_telegram(test, previous_status):
         lines.extend(["", participants_line])
 
     digest_text = "\n".join(lines)
-    sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML')
-    send_discord_status_channel_message(digest_text)
+    action_buttons = _status_channel_action_buttons(pending_events, config_map)
+    sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML', buttons=action_buttons)
+    send_discord_status_channel_message(digest_text, buttons=action_buttons)
     if sent:
         sent_at = datetime.utcnow()
         for item in pending_events:
@@ -910,6 +911,30 @@ def _format_status_phrase(status_value):
 def _render_telegram_status_template(config_map, key, default_text, context):
     template_value = str(config_map.get(key) or '').strip()
     return render_notification_template(template_value or default_text, context)
+
+
+def _status_channel_action_buttons(events, config_map):
+    base_url = str(config_map.get('service_base_url') or '').strip().rstrip('/')
+    if not base_url:
+        return []
+    buttons = []
+    seen = set()
+    for event in events:
+        status = str(event.new_status or '').strip().lower()
+        test_path = f'/test/{event.test_id}'
+        if status == 'ready_for_payment':
+            label = 'View Payment Options'
+            target = f'{base_url}{test_path}#payment-options'
+        elif status == 'closed':
+            label = 'View Test'
+            target = f'{base_url}{test_path}'
+        else:
+            continue
+        key = (label, target)
+        if key not in seen:
+            buttons.append({'label': label, 'url': target})
+            seen.add(key)
+    return buttons
 
 
 def _clamp_int(value, default, low, high):
@@ -4176,6 +4201,7 @@ def create_user():
             username=form.username.data,
             email=form.email.data,
             tg_username=form.tg_username.data,
+            discord_username=form.discord_username.data,
             is_admin=form.is_admin.data,
             is_active=form.is_active.data,
             receive_group_test_notifications=form.receive_group_test_notifications.data,
@@ -4223,6 +4249,7 @@ def edit_user(user_id):
         user.username = form.username.data
         user.email = form.email.data
         user.tg_username = form.tg_username.data
+        user.discord_username = form.discord_username.data
         user.is_admin = form.is_admin.data
         user.is_active = form.is_active.data
         user.receive_group_test_notifications = form.receive_group_test_notifications.data

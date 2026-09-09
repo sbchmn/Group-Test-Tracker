@@ -654,6 +654,7 @@ class NotificationTests(unittest.TestCase):
             db.session.add(test)
             db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-10012345"))
             db.session.add(NotificationConfig(key="telegram_digest_enabled", value="false"))
+            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
             db.session.commit()
 
             with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
@@ -662,6 +663,37 @@ class NotificationTests(unittest.TestCase):
             self.assertTrue(mock_sender.called)
             sent_body = mock_sender.call_args.args[0]
             self.assertIn("Ready Label Test is now ready for payment", sent_body)
+            buttons = mock_sender.call_args.kwargs["buttons"]
+            self.assertEqual(buttons, [{
+                "label": "View Payment Options",
+                "url": "https://group-tests.example/test/1#payment-options",
+            }])
+
+    def test_status_digest_adds_closed_view_test_button(self):
+        with self.app.app_context():
+            from app.routes import _send_status_update_to_telegram
+
+            db.create_all()
+            admin = User(username="admin-closed-button", email="admin-closed-button@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Closed Button Test", status="closed", created_by=admin.id)
+            db.session.add(test)
+            db.session.add_all([
+                NotificationConfig(key="telegram_status_chat_id", value="-10012345"),
+                NotificationConfig(key="telegram_digest_enabled", value="false"),
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+            ])
+            db.session.commit()
+
+            with patch("app.routes.send_telegram_status_channel_message", return_value=True) as mock_sender:
+                _send_status_update_to_telegram(test, "testing")
+
+        self.assertEqual(mock_sender.call_args.kwargs["buttons"], [{
+            "label": "View Test",
+            "url": f"https://group-tests.example/test/{test.id}",
+        }])
 
     def test_status_digest_uses_custom_config_templates(self):
         with self.app.app_context():

@@ -775,6 +775,17 @@
 - Focused security and notification suites passed with the Python 3.12 interpreter.
 - Full unittest discovery completed without reported failures.
 
+## Telegram Public Results Dispatch Fix
+
+### Implemented Changes
+- Restricted the non-private Telegram Public Results handler to messages whose command head is exactly `/publicresults`.
+- Unknown group/channel commands such as `/testme` no longer open or repeat the Public Results browser.
+
+### Validation Results
+- Unknown-command regression passed.
+- Scoped group and linked private Public Results regressions passed.
+- Full unittest discovery completed without reported failures.
+
 ## Status Channel Test Navigation
 
 ### Implemented Changes

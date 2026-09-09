@@ -51,7 +51,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Application Version", body)
-        self.assertIn("Version 0.1.0", body)
+        self.assertIn("Version 3.2", body)
         self.assertIn("href=\"/version\"", body)
 
     def test_admin_settings_hub_requires_admin_and_groups_configuration_links(self):
@@ -943,6 +943,28 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         mock_send.assert_called_once()
         self.assertEqual(mock_send.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["text"], "Group Alpha")
+
+    def test_telegram_unknown_group_command_does_not_open_public_results(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="builtin_publicresults_allow_non_private", value="true"))
+            db.session.add(NotificationConfig(key="builtin_publicresults_allowed_chat_ids", value="-100888"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -100888, "type": "supergroup"},
+                        "from": {"id": 99888, "username": "unknown-command-user"},
+                        "text": "/testme",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
 
     def test_telegram_public_results_callback_edits_to_coa_links(self):
         with self.app.app_context():

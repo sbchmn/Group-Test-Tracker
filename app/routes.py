@@ -2152,7 +2152,7 @@ def telegram_webhook():
         non_private_user = None
         if telegram_user_id:
             non_private_user = User.query.filter_by(telegram_user_id=telegram_user_id).first()
-        if _process_public_results_telegram(
+        if command_head == '/publicresults' and _process_public_results_telegram(
             non_private_user,
             chat_id,
             chat_type,

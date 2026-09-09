@@ -397,6 +397,10 @@ class PaymentOption(db.Model):
             'destination_value': '',
             'payment_link': '',
             'qr_payload': '',
+            'link_type': 'none',
+            'mobile_action_label': 'Open payment app',
+            'desktop_action_label': 'Open payment page',
+            'copy_value': '',
         }
 
         if method == 'venmo':
@@ -407,6 +411,7 @@ class PaymentOption(db.Model):
                 profile['destination_value'] = f"@{normalized}"
                 profile['payment_link'] = f"https://venmo.com/{encoded}"
                 profile['qr_payload'] = profile['payment_link']
+                profile['link_type'] = 'web'
 
         elif method == 'cashapp':
             normalized = handle.lstrip('@$').strip()
@@ -416,6 +421,7 @@ class PaymentOption(db.Model):
                 profile['destination_value'] = f"${normalized}"
                 profile['payment_link'] = f"https://cash.app/${encoded}"
                 profile['qr_payload'] = profile['payment_link']
+                profile['link_type'] = 'web'
 
         elif method == 'paypal':
             normalized = handle.strip('/').strip()
@@ -425,6 +431,7 @@ class PaymentOption(db.Model):
                 profile['destination_value'] = normalized
                 profile['payment_link'] = f"https://paypal.me/{encoded}"
                 profile['qr_payload'] = profile['payment_link']
+                profile['link_type'] = 'web'
 
         elif method == 'crypto':
             if wallet:
@@ -436,6 +443,9 @@ class PaymentOption(db.Model):
                 else:
                     profile['payment_link'] = f"{scheme}:{wallet}"
                 profile['qr_payload'] = profile['payment_link']
+                profile['link_type'] = 'uri'
+                profile['mobile_action_label'] = 'Open wallet'
+                profile['desktop_action_label'] = 'Copy wallet URI'
 
         else:
             candidate = handle or wallet
@@ -445,6 +455,7 @@ class PaymentOption(db.Model):
                 if candidate.lower().startswith(('http://', 'https://')):
                     profile['payment_link'] = candidate
                     profile['qr_payload'] = candidate
+                    profile['link_type'] = 'web'
                 else:
                     profile['qr_payload'] = candidate
 
@@ -452,9 +463,11 @@ class PaymentOption(db.Model):
             profile['qr_payload'] = override
             if not profile['payment_link'] and override.lower().startswith(('http://', 'https://', 'bitcoin:', 'ethereum:', 'solana:', 'tron:', 'litecoin:', 'bitcoincash:', 'binance:', 'crypto:')):
                 profile['payment_link'] = override
+                profile['link_type'] = 'web' if override.lower().startswith(('http://', 'https://')) else 'uri'
 
         if not profile['destination_value']:
             profile['destination_value'] = handle or wallet
+        profile['copy_value'] = profile['payment_link'] or profile['destination_value'] or profile['qr_payload']
 
         return profile
 

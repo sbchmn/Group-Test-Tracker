@@ -23,15 +23,16 @@ class SecurityTests(unittest.TestCase):
         })
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
-        with self.app.app_context():
-            db.create_all()
-            db.session.add(NotificationConfig(key="telegram_webhook_secret", value="test-webhook-secret"))
-            db.session.commit()
 
         original_post = self.client.post
 
         def authenticated_post(*args, **kwargs):
             if args and args[0] == "/telegram/webhook":
+                with self.app.app_context():
+                    db.create_all()
+                    if NotificationConfig.query.filter_by(key="telegram_webhook_secret").first() is None:
+                        db.session.add(NotificationConfig(key="telegram_webhook_secret", value="test-webhook-secret"))
+                        db.session.commit()
                 headers = dict(kwargs.get("headers") or {})
                 headers.setdefault("X-Telegram-Bot-Api-Secret-Token", "test-webhook-secret")
                 kwargs["headers"] = headers
@@ -44,6 +45,14 @@ class SecurityTests(unittest.TestCase):
             db.session.remove()
             db.engine.dispose()
         self.temp_dir.cleanup()
+
+    def test_version_page_and_footer_expose_application_version(self):
+        response = self.client.get("/version")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Application Version", body)
+        self.assertIn("Version 0.1.0", body)
+        self.assertIn("href=\"/version\"", body)
 
     def test_admin_settings_hub_requires_admin_and_groups_configuration_links(self):
         with self.app.app_context():
@@ -105,6 +114,29 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(values["discord_bot_token"], "discord-token")
         self.assertEqual(values["discord_status_channel_id"], "channel-123")
         self.assertEqual(values["root_webhook_url"], "https://root.example/webhook")
+
+        telegram_save = self.client.post(
+            "/admin/settings/bots",
+            data={
+                "telegram_bot_token": "telegram-token",
+                "telegram_bot_username": "tracker_bot",
+                "telegram_webhook_url": "https://group-tests.example/telegram/webhook",
+                "telegram_webhook_secret": "webhook-secret",
+                "telegram_webhook_allowed_ips": "149.154.160.0/20",
+                "telegram_status_chat_id": "-100123",
+                "telegram_digest_enabled": "y",
+                "telegram_digest_window_minutes": "10",
+                "service_base_url": "https://group-tests.example",
+                "submit": "Save Bot Integrations",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(telegram_save.status_code, 302)
+        with self.app.app_context():
+            values = {item.key: item.value for item in NotificationConfig.query.all()}
+        self.assertEqual(values["telegram_bot_token"], "telegram-token")
+        self.assertEqual(values["telegram_webhook_secret"], "webhook-secret")
+        self.assertEqual(values["telegram_status_chat_id"], "-100123")
 
         command_response = self.client.get("/admin/settings/commands", follow_redirects=False)
         self.assertEqual(command_response.status_code, 302)
@@ -1417,6 +1449,8 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(profile["destination_value"], "@collector.user")
         self.assertEqual(profile["payment_link"], expected_link)
         self.assertEqual(profile["qr_payload"], expected_link)
+        self.assertEqual(profile["link_type"], "web")
+        self.assertEqual(profile["copy_value"], expected_link)
 
     def test_payment_profile_generates_crypto_link_destination_and_qr(self):
         option = PaymentOption(
@@ -1434,6 +1468,9 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(profile["destination_value"], "0xabc123")
         self.assertEqual(profile["payment_link"], "ethereum:0xabc123")
         self.assertEqual(profile["qr_payload"], "ethereum:0xabc123")
+        self.assertEqual(profile["link_type"], "uri")
+        self.assertEqual(profile["mobile_action_label"], "Open wallet")
+        self.assertEqual(profile["copy_value"], "ethereum:0xabc123")
 
     def test_ready_for_payment_renders_venmo_link_and_qr(self):
         with self.app.app_context():
@@ -1455,7 +1492,8 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
         body = response.get_data(as_text=True)
-        self.assertIn("Open Payment Link", body)
+        self.assertIn("Open payment app", body)
+        self.assertIn("data-copy-value=\"https://venmo.com/collector\"", body)
         self.assertIn("https://venmo.com/collector", body)
         self.assertIn("Venmo Handle", body)
         self.assertIn("api.qrserver.com", body)

@@ -45,7 +45,7 @@
                         {% if selected_payment_option.destination_value %}<div>{{ selected_payment_option.destination_label }}: {{ selected_payment_option.destination_value }}</div>{% endif %}
                         {% if selected_payment_option.network %}<div>Network: {{ selected_payment_option.network }}</div>{% endif %}
                         {% if selected_payment_option.details %}<div>{{ selected_payment_option.details }}</div>{% endif %}
-                        {% if selected_payment_option.payment_link %}<div><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>{% endif %}
+                        {% if selected_payment_option.payment_link %}<div class="mt-2 d-flex flex-wrap gap-2"><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><span class="d-md-none">{{ selected_payment_option.mobile_action_label }}</span><span class="d-none d-md-inline">{{ selected_payment_option.desktop_action_label }}</span></a>{% if selected_payment_option.copy_value %}<button type="button" class="btn btn-sm btn-outline-secondary" data-copy-value="{{ selected_payment_option.copy_value }}"><i class="bi bi-copy"></i> Copy</button>{% endif %}</div>{% endif %}
                         {% if selected_payment_option.qr_payload %}
                             <div class="mt-2">
                                 <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Payment QR code" class="border rounded payment-qr-thumb">

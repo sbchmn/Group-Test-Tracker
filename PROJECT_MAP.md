@@ -776,6 +776,26 @@
 - Full unittest discovery completed without reported failures.
 - `git diff --check` passed.
 
+## Application Version and Payment UX
+
+### Implemented Changes
+- Added the authoritative application version in `app/version.py` (`0.1.0`).
+- Added a public `/version` page, authenticated user-menu entry, and footer version link.
+- Extended payment profiles with web-vs-URI classification, mobile/desktop action labels, and copyable fallback values.
+- Added responsive Open/Copy payment controls to group-test and participant payment views.
+- Kept payment options informational: no transaction processing or payment-proof behavior was introduced.
+
+### Security / Reliability / Optimization Notes
+- Security: Payment links remain administrator-provided/generated destinations; no credentials or payment tokens are handled by the app.
+- Reliability: Desktop browsers get web-page/copy behavior while mobile users get app/wallet-oriented actions; QR payloads remain available for camera-based handoff.
+- Optimization: No new dependency or migration was added. There is no universal library that can reliably launch every supported payment provider across desktop and mobile, so the app uses provider standards and progressive enhancement instead.
+
+### Validation Results
+- Version-page/footer regression passed.
+- Venmo and crypto payment profile regressions passed.
+- Ready-for-payment rendering regression passed.
+- Full unittest discovery completed without reported failures.
+
 ## Discord API Compliance Hardening
 
 ### Target Files and Modules
@@ -989,6 +1009,32 @@
 - Settings hub regression passed for anonymous, non-admin, and admin users.
 - Bot Integrations and Bot Commands navigation regression passed.
 - Bot Integrations persistence regression passed for Discord and Root settings.
+
+## Unified Bot Integration Settings
+
+### Implemented Changes
+- Moved Telegram provider fields onto the canonical `/admin/settings/bots` page beside Discord and Root.
+- Preserved `/admin/telegram-config` as a compatibility route for existing bookmarks, tests, and webhook workflows.
+- Added a provider-neutral Bot Status Message Templates editor under Message Templates at `/admin/settings/message-templates/status`.
+- Kept status-template configuration keys stable while moving their admin ownership out of Telegram Config.
+- Corrected Settings back links from Notification Config, Storage Config, Telegram Config, and Message Templates.
+- Preserved masked secret handling for Telegram and Discord tokens.
+
+### Security / Reliability / Optimization Notes
+- Security: All provider and template routes remain admin-only; blank secret fields preserve existing secrets.
+- Reliability: Existing Telegram webhook action routes and configuration keys remain compatible during the UI migration.
+- Optimization: One canonical provider form and shared configuration save helper avoid duplicate persistence logic.
+- Save semantics: Bot Integrations writes the complete submitted provider form values, not a field-level diff. Unchanged values are harmlessly rewritten; masked secrets are preserved.
+
+### Provider Lifecycle Notes
+- Telegram uses explicit Register/Unregister Webhook actions because Telegram delivers inbound updates through an app webhook.
+- Discord uses its gateway process and command synchronization, so it needs connection/sync controls rather than webhook registration.
+- Root is outbound-webhook-only and needs a future Send Test Message action rather than registration.
+
+### Validation Results
+- Settings consolidation compatibility slice passed.
+- Canonical Telegram/Discord/Root persistence regression passed.
+- Full unittest discovery completed without reported failures.
 - Full security suite passed.
 - Route compilation passed; no template diagnostics were reported for the new hub or updated navigation.
 

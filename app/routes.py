@@ -75,8 +75,19 @@ from .storage import (
     get_storage_settings,
     upload_result_image,
 )
+from .version import APP_NAME, APP_RELEASE, APP_VERSION
 
 main_bp = Blueprint('main', __name__)
+
+
+@main_bp.route('/version')
+def version_info():
+    return render_template(
+        'version.html',
+        app_name=APP_NAME,
+        app_version=APP_VERSION,
+        app_release=APP_RELEASE,
+    )
 
 
 # ==================== FORMS ====================
@@ -254,6 +265,15 @@ class NotificationConfigForm(FlaskForm):
 
 
 class BotIntegrationsForm(FlaskForm):
+    telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
+    telegram_bot_username = StringField('Telegram Bot Username', validators=[Optional(), Length(max=80)])
+    telegram_webhook_url = StringField('Telegram Webhook URL (optional override)', validators=[Optional(), URL(require_tld=False), Length(max=500)])
+    telegram_webhook_secret = PasswordField('Telegram Webhook Secret', validators=[Optional(), Length(max=200)])
+    telegram_webhook_allowed_ips = StringField('Telegram Webhook Allowed IPs (comma-separated CIDRs)', validators=[Optional(), Length(max=500)])
+    telegram_status_chat_id = StringField('Telegram Status Chat / Channel ID', validators=[Optional(), Length(max=120)])
+    telegram_digest_enabled = BooleanField('Enable Telegram Digest Mode')
+    telegram_digest_window_minutes = FloatField('Telegram Digest Window (minutes)', validators=[Optional(), NumberRange(min=1, max=120)], default=10)
+    service_base_url = StringField('Service Base URL', validators=[Optional(), URL(require_tld=False)])
     discord_bot_token = StringField('Discord Bot Token', validators=[Optional()])
     discord_application_id = StringField('Discord Application ID', validators=[Optional(), Length(max=80)])
     discord_guild_id = StringField('Discord Guild ID (optional for command sync)', validators=[Optional(), Length(max=80)])
@@ -313,6 +333,19 @@ class TelegramCommandTemplateForm(FlaskForm):
     reply_text = TextAreaField('Reply Text', validators=[DataRequired(), Length(max=4000)])
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Command Template')
+
+
+class BotStatusTemplateForm(FlaskForm):
+    telegram_status_digest_header_template = TextAreaField('Status Digest Header', validators=[Optional(), Length(max=2000)])
+    telegram_status_digest_line_template = TextAreaField('Status Digest Line', validators=[Optional(), Length(max=2000)])
+    telegram_status_digest_participants_template = TextAreaField('Status Digest Participants', validators=[Optional(), Length(max=2000)])
+    telegram_status_new_test_template = TextAreaField('New Test Announcement', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_no_request_template = TextAreaField('User Status: No Request', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_denied_template = TextAreaField('User Status: Denied', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_results_template = TextAreaField('User Status: Results Available', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_approved_template = TextAreaField('User Status: Approved', validators=[Optional(), Length(max=2000)])
+    telegram_status_user_pending_template = TextAreaField('User Status: Pending', validators=[Optional(), Length(max=2000)])
+    submit = SubmitField('Save Bot Status Templates')
 
 
 class StorageConfigForm(FlaskForm):
@@ -450,6 +483,10 @@ def _build_payment_option_context(option):
         'destination_value': profile.get('destination_value') or '',
         'payment_link': profile.get('payment_link') or '',
         'qr_payload': profile.get('qr_payload') or '',
+        'link_type': profile.get('link_type') or 'none',
+        'mobile_action_label': profile.get('mobile_action_label') or 'Open payment app',
+        'desktop_action_label': profile.get('desktop_action_label') or 'Open payment page',
+        'copy_value': profile.get('copy_value') or '',
     }
 
 
@@ -3339,13 +3376,27 @@ def bot_integrations():
     form = BotIntegrationsForm()
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     existing_discord_bot_token = str(configs.get('discord_bot_token') or '').strip()
+    existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
+    existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
 
     if form.validate_on_submit():
         submitted_discord_bot_token = (form.discord_bot_token.data or '').strip()
         if submitted_discord_bot_token == mask_secret(existing_discord_bot_token):
             submitted_discord_bot_token = existing_discord_bot_token
+        submitted_telegram_bot_token = (form.telegram_bot_token.data or '').strip()
+        if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
+            submitted_telegram_bot_token = existing_telegram_bot_token
+        webhook_secret = (form.telegram_webhook_secret.data or '').strip()
 
         _save_notification_config_values({
+            'telegram_bot_token': submitted_telegram_bot_token,
+            'telegram_bot_username': form.telegram_bot_username.data,
+            'telegram_webhook_url': form.telegram_webhook_url.data,
+            'telegram_webhook_allowed_ips': form.telegram_webhook_allowed_ips.data,
+            'telegram_status_chat_id': form.telegram_status_chat_id.data,
+            'telegram_digest_enabled': 'true' if form.telegram_digest_enabled.data else 'false',
+            'telegram_digest_window_minutes': str(int(form.telegram_digest_window_minutes.data or 10)),
+            'service_base_url': form.service_base_url.data,
             'discord_bot_token': submitted_discord_bot_token,
             'discord_application_id': form.discord_application_id.data,
             'discord_guild_id': form.discord_guild_id.data,
@@ -3355,12 +3406,28 @@ def bot_integrations():
             'root_webhook_url': form.root_webhook_url.data,
             'root_webhook_name': form.root_webhook_name.data,
         })
+        if webhook_secret:
+            _save_notification_config_values({'telegram_webhook_secret': webhook_secret})
+        elif existing_webhook_secret:
+            _save_notification_config_values({'telegram_webhook_secret': existing_webhook_secret})
         db.session.commit()
         append_notification_log('configuration: bot integrations updated')
         flash('Bot integration configuration saved.', 'success')
         return redirect(url_for('main.bot_integrations'))
 
     if not form.is_submitted():
+        form.telegram_bot_token.data = mask_secret(existing_telegram_bot_token)
+        form.telegram_bot_username.data = configs.get('telegram_bot_username')
+        form.telegram_webhook_url.data = configs.get('telegram_webhook_url')
+        form.telegram_webhook_secret.data = ''
+        form.telegram_webhook_allowed_ips.data = configs.get('telegram_webhook_allowed_ips')
+        form.telegram_status_chat_id.data = configs.get('telegram_status_chat_id')
+        form.telegram_digest_enabled.data = str(configs.get('telegram_digest_enabled', 'false')).lower() == 'true'
+        try:
+            form.telegram_digest_window_minutes.data = float(configs.get('telegram_digest_window_minutes') or 10)
+        except (TypeError, ValueError):
+            form.telegram_digest_window_minutes.data = 10
+        form.service_base_url.data = configs.get('service_base_url')
         form.discord_bot_token.data = mask_secret(existing_discord_bot_token)
         form.discord_application_id.data = configs.get('discord_application_id')
         form.discord_guild_id.data = configs.get('discord_guild_id')
@@ -3373,6 +3440,7 @@ def bot_integrations():
     return render_template(
         'admin/bot_integrations.html',
         form=form,
+        webhook_secret_mask=mask_secret(existing_webhook_secret),
         integration_status={
             'telegram': bool(configs.get('telegram_bot_token')),
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
@@ -3409,7 +3477,32 @@ def notification_templates():
         flash('Notification template created.', 'success')
         return redirect(url_for('main.notification_templates'))
     templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
-    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=None)
+    status_form = BotStatusTemplateForm()
+    configs = _config_values_map()
+    if not status_form.is_submitted():
+        for field_name in status_form._fields:
+            if field_name != 'submit':
+                getattr(status_form, field_name).data = configs.get(field_name)
+    return render_template('admin/notification_templates.html', form=form, status_form=status_form, templates=templates, editing_template=None)
+
+
+@main_bp.route('/admin/settings/message-templates/status', methods=['POST'])
+@login_required
+@admin_required
+def save_bot_status_templates():
+    form = BotStatusTemplateForm()
+    if form.validate_on_submit():
+        _save_notification_config_values({
+            field_name: getattr(form, field_name).data
+            for field_name in form._fields
+            if field_name != 'submit'
+        })
+        db.session.commit()
+        append_notification_log('configuration: bot status templates updated')
+        flash('Bot status templates saved.', 'success')
+    else:
+        flash('Bot status templates could not be saved.', 'danger')
+    return redirect(url_for('main.notification_templates', _anchor='bot-status-templates'))
 
 
 @main_bp.route('/admin/notification-templates/<int:template_id>/edit', methods=['GET', 'POST'])
@@ -3435,7 +3528,12 @@ def edit_notification_template(template_id):
         return redirect(url_for('main.notification_templates'))
 
     templates = NotificationTemplate.query.order_by(NotificationTemplate.name).all()
-    return render_template('admin/notification_templates.html', form=form, templates=templates, editing_template=template)
+    status_form = BotStatusTemplateForm()
+    configs = _config_values_map()
+    for field_name in status_form._fields:
+        if field_name != 'submit':
+            getattr(status_form, field_name).data = configs.get(field_name)
+    return render_template('admin/notification_templates.html', form=form, status_form=status_form, templates=templates, editing_template=template)
 
 
 def _render_telegram_command_templates_page(form, editing_template=None):

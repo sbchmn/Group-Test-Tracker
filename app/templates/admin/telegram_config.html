@@ -59,7 +59,7 @@
                     {{ form.telegram_digest_window_minutes(class="form-control", step="1") }}
                 </div>
             </div>
-            <div class="card mb-3" id="telegram-status-templates">
+            <div class="card mb-3 d-none" id="telegram-status-templates">
                 <div class="card-header">Telegram Status Message Templates</div>
                 <div class="card-body">
                     <p class="small text-muted mb-2">Editable placeholders include: {{ '{{ test_id }}' }}, {{ '{{ test_title }}' }}, {{ '{{ old_status }}' }}, {{ '{{ old_status_label }}' }}, {{ '{{ new_status }}' }}, {{ '{{ new_status_label }}' }}, {{ '{{ new_status_phrase }}' }}, {{ '{{ status }}' }}, {{ '{{ status_label }}' }}, {{ '{{ status_phrase }}' }}, {{ '{{ test_url }}' }}, {{ '{{ mentions }}' }}, {{ '{{ denied_reason }}' }}, {{ '{{ order_status }}' }}, {{ '{{ amount_owed }}' }}, {{ '{{ amount_paid }}' }}, {{ '{{ results_url }}' }}.</p>
@@ -107,7 +107,7 @@
                 <div class="form-text">Used to build fully qualified links like {{ '{{ test_link }}' }} in notification templates.</div>
             </div>
             <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
-            <a href="{{ url_for('main.notification_config') }}" class="btn btn-secondary">Back to Notification Config</a>
+            <a href="{{ url_for('main.bot_integrations') }}" class="btn btn-secondary">Back to Bot Integrations</a>
         </form>
 
         <hr>

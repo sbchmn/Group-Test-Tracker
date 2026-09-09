@@ -25,8 +25,52 @@
                     <h5 class="card-title"><i class="bi bi-telegram"></i> Telegram</h5>
                     <span class="badge text-bg-{{ 'success' if integration_status.telegram else 'secondary' }}">{{ 'Configured' if integration_status.telegram else 'Needs setup' }}</span>
                 </div>
-                <p class="card-text text-muted">Bot credentials, private webhook security, status chat routing, and digest delivery.</p>
-                <a class="btn btn-outline-primary" href="{{ url_for('main.telegram_config') }}">Configure Telegram</a>
+                <p class="card-text text-muted">Bot credentials, webhook security, status routing, and digest delivery.</p>
+                <div class="mb-3">
+                    {{ form.telegram_bot_token.label(class="form-label") }}
+                    {{ form.telegram_bot_token(class="form-control") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.telegram_bot_username.label(class="form-label") }}
+                    {{ form.telegram_bot_username(class="form-control", placeholder="your_bot_username") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.telegram_webhook_url.label(class="form-label") }}
+                    {{ form.telegram_webhook_url(class="form-control", placeholder="https://your-domain.example/telegram/webhook") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.telegram_webhook_secret.label(class="form-label") }}
+                    {{ form.telegram_webhook_secret(class="form-control") }}
+                    {% if webhook_secret_mask %}<div class="form-text">Existing secret: {{ webhook_secret_mask }} (leave blank to keep current value).</div>{% endif %}
+                </div>
+                <div class="mb-3">
+                    {{ form.telegram_webhook_allowed_ips.label(class="form-label") }}
+                    {{ form.telegram_webhook_allowed_ips(class="form-control", placeholder="149.154.160.0/20") }}
+                </div>
+                <div class="mb-3">
+                    {{ form.telegram_status_chat_id.label(class="form-label") }}
+                    {{ form.telegram_status_chat_id(class="form-control", placeholder="-1001234567890 or @channelname") }}
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3 form-check mt-4">
+                        {{ form.telegram_digest_enabled(class="form-check-input") }}
+                        {{ form.telegram_digest_enabled.label(class="form-check-label") }}
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        {{ form.telegram_digest_window_minutes.label(class="form-label") }}
+                        {{ form.telegram_digest_window_minutes(class="form-control", step="1") }}
+                    </div>
+                </div>
+                <div class="mb-3">
+                    {{ form.service_base_url.label(class="form-label") }}
+                    {{ form.service_base_url(class="form-control", placeholder="https://your-domain.example") }}
+                </div>
+                <div class="small text-muted mb-2">Webhook actions</div>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-outline-primary" formaction="{{ url_for('main.register_telegram_webhook_action') }}">Register Webhook</button>
+                    <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('main.unregister_telegram_webhook_action') }}" formmethod="post" onclick="return confirm('Unregister Telegram webhook?');">Unregister Webhook</button>
+                </div>
+                <div class="small mt-2"><a href="{{ url_for('main.telegram_config') }}">Open legacy Telegram view</a></div>
             </div>
         </div>
     </div>

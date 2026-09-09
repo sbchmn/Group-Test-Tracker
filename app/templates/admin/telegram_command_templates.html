@@ -19,7 +19,7 @@
 
 <div class="card mb-4">
     <div class="card-body">
-        <form method="POST" novalidate>
+        <form method="POST" enctype="multipart/form-data" novalidate>
             {{ form.hidden_tag() }}
             <div class="mb-3">
                 {{ form.command.label(class="form-label") }}
@@ -83,6 +83,20 @@
             <div class="mb-3">
                 {{ form.reply_text.label(class="form-label") }}
                 {{ form.reply_text(class="form-control", rows=5, placeholder="Hi {{ first_name }}, current info: ...") }}
+            </div>
+            <div class="mb-3">
+                {{ form.response_image.label(class="form-label") }}
+                {{ form.response_image(class="form-control", accept="image/jpeg,image/png,image/webp,image/gif") }}
+                <div class="form-text">Optional single image response, stored using the configured object storage provider.</div>
+            </div>
+            <div class="form-check mb-3">
+                {{ form.remove_response_image(class="form-check-input") }}
+                {{ form.remove_response_image.label(class="form-check-label") }}
+            </div>
+            <div class="form-check mb-3">
+                {{ form.allow_admin_bot_updates(class="form-check-input") }}
+                {{ form.allow_admin_bot_updates.label(class="form-check-label") }}
+                <div class="form-text">A linked Group Test Tracker admin can reply to a bot-generated command message in Telegram to replace the command response exactly.</div>
             </div>
             <div class="form-check mb-3">
                 {{ form.is_active(class="form-check-input") }}

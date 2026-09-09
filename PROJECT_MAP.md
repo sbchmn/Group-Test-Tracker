@@ -800,6 +800,46 @@
 - Scoped group and linked private Public Results regressions passed.
 - Full unittest discovery completed without reported failures.
 
+## Future Admin-Only Bot Workflows
+
+### Planned Behavior
+- Support bot commands that require a linked Group Test Tracker administrator through `User.is_admin`.
+- Keep application-admin authorization distinct from Telegram group-admin and Discord server-moderator status.
+- Allow each future command to declare its required authorization policy instead of inheriting broad bot access.
+
+### Authorization Layers
+- Linked Group Test Tracker admin.
+- Linked regular user.
+- Telegram group administrator, when provider metadata is available and explicitly enabled.
+- Discord server moderator/administrator, when interaction permissions are available and explicitly enabled.
+- Explicit chat, guild, channel, or thread scope.
+
+### Security / Reliability Notes
+- Application-admin status remains the authoritative policy for administrative workflows.
+- Platform-admin status must never silently substitute for application-admin status.
+- Existing public and participation commands remain governed by their current linking and scope rules.
+- Future admin-only commands require dedicated authorization tests for private and group/channel contexts.
+
+## Provider-Aware Bot Destination Selectors
+
+### Planned Behavior
+- Add admin configuration selectors for bot status destinations using friendly names rather than raw IDs.
+- Clearly label every option by provider, for example `Telegram · Group Test Updates` or `Discord · Results Channel`.
+- Do not display Telegram chat IDs, Discord guild IDs, Discord channel IDs, or raw technical identifiers in dropdown labels.
+- Selecting a friendly destination writes the underlying provider ID into the correct configuration field.
+- Keep manual ID entry and validation available as a fallback when discovery is unavailable.
+
+### Provider Discovery Model
+- Discord: discover accessible guilds and channels through the connected bot, then expose provider-labeled friendly names with permission status.
+- Telegram: validate manually entered or previously discovered chats through Bot API metadata and remember friendly chat titles/types for future selection; Telegram cannot globally enumerate all bot chats.
+- Store provider, destination type, friendly name, underlying ID, last validation time, and permission state separately from the active configuration value.
+
+### Security / Reliability / UX Notes
+- Only show Discord guilds/channels the bot can access and use for the selected operation.
+- Validate Telegram destinations before saving and show clear permission/error states.
+- Use explicit Refresh/Resolve and Send Test actions rather than silently replacing configured destinations.
+- Preserve raw IDs in storage and logs only where operationally necessary; never use raw IDs as the primary user-facing label.
+
 ## Status Channel Test Navigation
 
 ### Implemented Changes
@@ -1166,3 +1206,50 @@
 - Five focused public-results tests passed for ordering/exclusion, private linking, scoped group use, callback editing, COA URLs, and empty state.
 - Security and notification suites passed.
 - All feature modules compiled successfully.
+
+## Media-Enabled Configurable Bot Commands
+
+### Planned Behavior
+- Add an `Allow admin bot updates` checkbox to generic bot command configuration.
+- Support one optional image per command using the existing private object-storage provider.
+- Preserve the existing command text exactly, including plain-text external links such as EzForm URLs.
+- Support Telegram and Discord command responses immediately.
+- Telegram should send the configured image with the configured text as the message caption.
+- Discord should send the configured image as an attachment with the configured text in the same message; embeds are not required for the first implementation.
+- Allow a linked Group Test Tracker admin to reply to an existing bot-generated command message in any chat/channel when admin updates are enabled.
+- Store provider, chat/channel ID, bot message ID, and command-template ID so replies update only the originating command response.
+
+### Exact Admin Reply Semantics
+- Image plus text replaces both the command image and text.
+- Image without text replaces the image and clears existing text.
+- Text without an image replaces the text and removes the existing image.
+- Empty replies are rejected because they would leave the command without a response.
+- The bot sends an explicit update confirmation after a successful reconfiguration.
+
+### Planned Data and Transport Changes
+- Add command media fields such as `response_image_key` and `allow_admin_bot_updates`.
+- Add durable bot-message ownership records for Telegram and Discord provider message IDs.
+- Extend storage upload/delete handling for command images and fail closed on invalid or unavailable storage.
+- Extend Telegram webhook parsing for admin replies containing photos and text.
+- Add Discord message-event handling and the required message-content/message-reference permissions.
+- Preserve admin identity checks using linked `User.is_admin`; platform moderator status is not an implicit substitute.
+
+### Security / Reliability / Optimization Notes
+- Only linked Group Test Tracker admins may update commands.
+- Updates require a reply to a message previously generated by that command.
+- Existing command scope controls remain separate from the admin-update authorization policy.
+- Replacing media must delete the previous stored object after the database update is safely persisted.
+- Provider message ownership prevents admins from editing unrelated bot messages.
+- One image per command keeps payload size, storage cleanup, and provider behavior bounded.
+
+### Estimated AI Implementation Effort
+- Architecture and data-model design: 2,000-3,000 tokens.
+- Storage/model/migration changes: 2,000-3,000 tokens.
+- Shared command rendering and ownership tracking: 3,000-4,000 tokens.
+- Telegram photo/reply parsing and replacement flow: 3,000-4,500 tokens.
+- Discord message-event/attachment/reply flow: 4,000-6,000 tokens.
+- Admin UI, upload controls, and status feedback: 2,000-3,000 tokens.
+- Security, migration, provider, and regression tests: 4,000-6,000 tokens.
+- Documentation and validation/debugging: 2,000-3,000 tokens.
+
+**Estimated total:** approximately **22,000-32,500 AI tokens** for a complete implementation, assuming the existing storage provider and command model remain the foundation. The main uncertainty is Discord message-event permissions and attachment handling, which may require an additional integration/debugging pass.

@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import os
 import re
@@ -316,6 +317,51 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id
         append_notification_log(f"telegram: failed for {chat_id}: {exc} | {error_body}")
         append_notification_log(f"telegram: exception details for {chat_id}: {exc} | {error_body}", debug=True)
         return False
+
+
+def send_telegram_command_response(chat_id, body, image_key=None, message_thread_id=None):
+    """Send a configurable command response and return its Telegram message ID."""
+    chat_id = str(chat_id or '').strip()
+    if not chat_id:
+        return None
+
+    if image_key:
+        from .storage import generate_result_image_presigned_url
+
+        image_url = generate_result_image_presigned_url(image_key)
+        payload = {'chat_id': chat_id, 'photo': image_url, 'caption': str(body or '')[:1024]}
+        method_name = 'sendPhoto'
+    else:
+        payload = {'chat_id': chat_id, 'text': str(body or '')}
+        method_name = 'sendMessage'
+    if message_thread_id is not None:
+        payload['message_thread_id'] = int(message_thread_id)
+
+    ok, response = _telegram_api_post(method_name, payload)
+    if not ok:
+        return None
+    result = response.get('result') if isinstance(response, dict) else None
+    return str(result.get('message_id')) if isinstance(result, dict) and result.get('message_id') is not None else None
+
+
+def download_telegram_photo(file_id):
+    """Download a Telegram photo into a storage-compatible file object."""
+    bot_token = str(_get_config('telegram_bot_token') or '').strip()
+    if not bot_token or not file_id:
+        return None
+    ok, response = _telegram_api_post('getFile', {'file_id': str(file_id)})
+    file_path = (response.get('result') or {}).get('file_path') if ok and isinstance(response, dict) else None
+    if not file_path:
+        return None
+    url = f'https://api.telegram.org/file/bot{quote(bot_token, safe="")}/{file_path}'
+    try:
+        with urlopen(url, timeout=10) as remote_file:
+            payload = remote_file.read()
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        return None
+    upload = io.BytesIO(payload)
+    upload.filename = file_path.rsplit('/', 1)[-1] or 'telegram-command-image.jpg'
+    return upload
 
 
 def _discord_api_post(method_name, payload):

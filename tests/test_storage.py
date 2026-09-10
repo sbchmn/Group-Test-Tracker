@@ -8,7 +8,7 @@ from werkzeug.datastructures import FileStorage
 
 from app import create_app, db
 from app.models import NotificationConfig
-from app.storage import StorageUploadError, upload_result_image
+from app.storage import StorageUploadError, upload_result_image, upload_telegram_animation
 
 
 class _FakeS3Client:
@@ -100,6 +100,54 @@ class StorageUploadTests(unittest.TestCase):
             self.assertTrue(object_key.endswith(".pdf"))
             self.assertEqual(len(fake_client.calls), 1)
             self.assertEqual(fake_client.calls[0]["ContentType"], "application/pdf")
+
+    def test_upload_telegram_animation_accepts_real_gif(self):
+        with self.app.app_context():
+            db.create_all()
+            self._seed_storage_config()
+
+            fake_client = _FakeS3Client()
+            file_storage = FileStorage(
+                stream=io.BytesIO(b"GIF89a" + b"\x00" * 32),
+                filename="groupbuy.gif",
+            )
+
+            with patch("app.storage._build_client", return_value=fake_client):
+                object_key = upload_telegram_animation(file_storage, "bot-commands")
+
+            self.assertTrue(object_key.endswith(".gif"))
+            self.assertEqual(fake_client.calls[0]["ContentType"], "image/gif")
+
+    def test_upload_telegram_animation_accepts_mp4_loop(self):
+        with self.app.app_context():
+            db.create_all()
+            self._seed_storage_config()
+
+            fake_client = _FakeS3Client()
+            file_storage = FileStorage(
+                stream=io.BytesIO(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32),
+                filename="groupbuy.mp4",
+            )
+
+            with patch("app.storage._build_client", return_value=fake_client):
+                object_key = upload_telegram_animation(file_storage, "bot-commands")
+
+            self.assertTrue(object_key.endswith(".mp4"))
+            self.assertEqual(fake_client.calls[0]["ContentType"], "video/mp4")
+
+    def test_upload_telegram_animation_rejects_unrecognized_payload(self):
+        with self.app.app_context():
+            db.create_all()
+            self._seed_storage_config()
+
+            file_storage = FileStorage(
+                stream=io.BytesIO(b"not-a-real-animation"),
+                filename="groupbuy.bin",
+            )
+
+            with patch("app.storage._build_client", return_value=_FakeS3Client()):
+                with self.assertRaises(StorageUploadError):
+                    upload_telegram_animation(file_storage, "bot-commands")
 
 
 if __name__ == "__main__":

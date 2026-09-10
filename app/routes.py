@@ -78,6 +78,7 @@ from .storage import (
     generate_result_image_presigned_url,
     get_storage_settings,
     upload_result_image,
+    upload_telegram_animation,
 )
 from .version import APP_NAME, APP_RELEASE, APP_VERSION
 
@@ -1927,7 +1928,10 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, m
             uploaded_file = download_telegram_photo(media['file_id'])
             if uploaded_file is None:
                 raise StorageUploadError('Telegram image download failed.')
-            new_image_key = upload_result_image(uploaded_file, 'bot-commands')
+            if animation and media is animation:
+                new_image_key = upload_telegram_animation(uploaded_file, 'bot-commands')
+            else:
+                new_image_key = upload_result_image(uploaded_file, 'bot-commands')
         template.reply_text = new_text
         template.response_image_key = new_image_key
         db.session.commit()

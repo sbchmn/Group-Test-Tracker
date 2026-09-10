@@ -1126,9 +1126,9 @@ class SecurityTests(unittest.TestCase):
 
         with patch("app.routes.send_telegram_chat_message") as mock_send, \
                 patch("app.routes.download_telegram_photo") as mock_download, \
-                patch("app.routes.upload_result_image") as mock_upload:
+                patch("app.routes.upload_telegram_animation") as mock_upload:
             mock_download.return_value = object()
-            mock_upload.return_value = "bot-commands/new.gif"
+            mock_upload.return_value = "bot-commands/new.mp4"
             response = self.client.post(
                 "/telegram/webhook",
                 json={
@@ -1143,10 +1143,11 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_download.assert_called_once_with("anim-file-id")
+        mock_upload.assert_called_once()
         self.assertIn("Command response updated", mock_send.call_args.args[1])
         with self.app.app_context():
             refreshed = TelegramCommandTemplate.query.filter_by(command="/groupbuy").first()
-            self.assertEqual(refreshed.response_image_key, "bot-commands/new.gif")
+            self.assertEqual(refreshed.response_image_key, "bot-commands/new.mp4")
 
     def test_telegram_public_results_callback_edits_to_coa_links(self):
         with self.app.app_context():

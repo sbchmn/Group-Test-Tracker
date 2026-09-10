@@ -233,6 +233,51 @@ def upload_result_image(file_storage, category):
     return object_key
 
 
+def upload_telegram_animation(file_storage, category):
+    """Upload a Telegram "animation" attachment (GIF, sent as GIF or as a
+    soundless MP4 loop) without routing it through PIL's still-image
+    validation, which rejects MP4 payloads.
+    """
+    settings = get_storage_settings()
+    _assert_configured(settings)
+
+    payload = file_storage.read() if file_storage else b""
+    if not payload:
+        raise StorageUploadError("No file data was received.")
+
+    max_bytes = int(settings["max_upload_size_mb"] * 1024 * 1024)
+    if len(payload) > max_bytes:
+        raise StorageUploadError(f"File exceeds the configured upload limit ({settings['max_upload_size_mb']:.0f} MB).")
+
+    if payload.startswith(b"GIF87a") or payload.startswith(b"GIF89a"):
+        ext, content_type = "gif", "image/gif"
+    elif payload[4:8] == b"ftyp":
+        ext, content_type = "mp4", "video/mp4"
+    else:
+        raise StorageUploadError("Uploaded animation is not a supported GIF or video format.")
+
+    object_key = _build_object_key(settings, category, ext)
+
+    client = _build_client(settings)
+    put_kwargs = {
+        "Bucket": settings["bucket"],
+        "Key": object_key,
+        "Body": payload,
+        "ContentType": content_type,
+        "CacheControl": "public, max-age=31536000",
+    }
+    if settings["make_public"]:
+        put_kwargs["ACL"] = "public-read"
+
+    try:
+        client.put_object(**put_kwargs)
+    except Exception as exc:
+        current_app.logger.exception("Failed uploading animation to object storage")
+        raise StorageUploadError("Animation upload failed. Check storage credentials and bucket policy.") from exc
+
+    return object_key
+
+
 def generate_result_image_presigned_url(object_key, expires_in=None):
     if not object_key:
         raise StorageConfigurationError("No result image is available.")

@@ -328,9 +328,14 @@ def send_telegram_command_response(chat_id, body, image_key=None, message_thread
     if image_key:
         from .storage import generate_result_image_presigned_url
 
-        image_url = generate_result_image_presigned_url(image_key)
-        payload = {'chat_id': chat_id, 'photo': image_url, 'caption': str(body or '')[:1024]}
-        method_name = 'sendPhoto'
+        media_url = generate_result_image_presigned_url(image_key)
+        # Animated GIFs are stored as MP4 loops and must be sent via sendAnimation.
+        if str(image_key).lower().endswith('.mp4'):
+            payload = {'chat_id': chat_id, 'animation': media_url, 'caption': str(body or '')[:1024]}
+            method_name = 'sendAnimation'
+        else:
+            payload = {'chat_id': chat_id, 'photo': media_url, 'caption': str(body or '')[:1024]}
+            method_name = 'sendPhoto'
     else:
         payload = {'chat_id': chat_id, 'text': str(body or '')}
         method_name = 'sendMessage'

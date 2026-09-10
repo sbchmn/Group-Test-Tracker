@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
 from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_message, send_telegram_status_channel_message
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -358,6 +358,27 @@ class NotificationTests(unittest.TestCase):
         request = mock_urlopen.call_args.args[0]
         self.assertIn(b'"chat_id": "-1003638912415"', request.data)
         self.assertIn(b'"message_thread_id": 2', request.data)
+
+    def test_send_telegram_command_response_uses_send_animation_for_mp4_key(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen, \
+                    patch("app.storage.generate_result_image_presigned_url", return_value="https://example.com/a.mp4"):
+                response = Mock()
+                response.read.return_value = b'{"ok":true,"result":{"message_id":5}}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                message_id = send_telegram_command_response("-1001", "caption", image_key="bot-commands/x.mp4")
+
+        self.assertEqual(message_id, "5")
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn("sendAnimation", request.full_url)
+        self.assertIn(b'"animation"', request.data)
 
     def test_send_telegram_status_channel_message_without_thread_suffix_uses_chat_only(self):
         with self.app.app_context():

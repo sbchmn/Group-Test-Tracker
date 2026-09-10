@@ -820,6 +820,51 @@
 - Existing public and participation commands remain governed by their current linking and scope rules.
 - Future admin-only commands require dedicated authorization tests for private and group/channel contexts.
 
+## Bot Service Boundary and Versioned Internal API
+
+### Recommendation
+- Keep Telegram and Discord as separate bot processes initially, but keep them in the same repository and use a shared GTM service layer.
+- Do not duplicate business authorization or database rules inside provider adapters.
+- Introduce authenticated internal GTM API endpoints before splitting bot processes into separately deployed applications.
+- Use the path shape `/internal/api/v1/...` for the first stable internal API version.
+- Move bot outbound delivery toward durable jobs once provider traffic or retry requirements justify the added infrastructure.
+
+### Boundary Responsibilities
+- GTM web application/API: system of record, business rules, authorization, command configuration, user linking, tests, participation, and Public Results.
+- Telegram process: webhook parsing, Telegram media/callback handling, message IDs, and Telegram API delivery.
+- Discord process: gateway events, slash commands, Discord permissions, attachments, interactions, and Discord API delivery.
+- Shared service layer: provider-neutral operations such as resolve linked user, check command policy, list Public Results, submit join request, and record bot message ownership.
+
+### Versioned API Management Prompts
+Before adding or changing an internal bot API endpoint, answer these questions in the project map or change plan:
+
+- What is the endpoint's version, method, request schema, response schema, and owning service layer?
+- Is this backward compatible with existing Telegram and Discord processes?
+- Does the change require a new `/v2` endpoint, or can `/v1` safely accept an additive field?
+- What authentication, authorization policy, and provider scope apply?
+- What idempotency key or provider event ID prevents duplicate effects?
+- What timeout, retry, rate-limit, and failure behavior applies?
+- How are secrets, tokens, image keys, and provider IDs prevented from leaking into logs?
+- What migration or dual-read/dual-write period is required?
+- How will old bot versions behave during rollout and rollback?
+- Which contract, security, migration, and provider integration tests prove compatibility?
+- What deprecation date and removal plan applies to the old endpoint or field?
+
+### API Reliability Rules
+- Use authenticated service-to-service requests with separate credentials from user sessions.
+- Require idempotency for join requests, command updates, message ownership records, and outbound event processing.
+- Keep API responses provider-neutral; Telegram and Discord formatting stays in their adapters.
+- Prefer additive changes within a version; introduce a new version for breaking schema or authorization changes.
+- Maintain contract tests for each supported bot process against every active API version.
+- Document rollout order: deploy GTM compatibility first, then bot clients, then remove deprecated behavior only after the client minimum version is enforced.
+
+### Planned Migration Stages
+1. Extract shared bot operations from route/adapter code into a tested GTM service layer.
+2. Add authenticated `/internal/api/v1` endpoints with request validation and idempotency.
+3. Update Telegram and Discord processes to call the service boundary while retaining compatibility fallbacks.
+4. Add durable outbound jobs and provider delivery status when operational load requires them.
+5. Split provider processes into independently deployable applications only after the versioned API contract is stable.
+
 ## Provider-Aware Bot Destination Selectors
 
 ### Planned Behavior
@@ -1253,3 +1298,82 @@
 - Documentation and validation/debugging: 2,000-3,000 tokens.
 
 **Estimated total:** approximately **22,000-32,500 AI tokens** for a complete implementation, assuming the existing storage provider and command model remain the foundation. The main uncertainty is Discord message-event permissions and attachment handling, which may require an additional integration/debugging pass.
+
+## Public Results Notifications and JSON Enrichment
+
+### Planned Behavior
+- Send a notification when a new `PublicResult` is created through configured Telegram and Discord status destinations.
+- Include the public-result title, summary when available, sanitized itemized JSON result values, posted date, and an external COA link/button.
+- Do not notify or expose Group Test results through this public-results notification path.
+- Enrich `/publicresults` result pages with sanitized summary and itemized JSON values while keeping button labels compact.
+- Keep ordinary edits notification-free by default; add an explicit admin re-notify action later if needed.
+
+### Input Normalization and Command-Injection Protection
+- Treat `item_results` as untrusted structured input even when entered by an admin.
+- Validate that itemized results are JSON objects/rows with bounded field lengths and a bounded total item count.
+- Normalize values to plain text before rendering provider messages.
+- Escape Telegram HTML/Markdown content and prevent user values from becoming Telegram commands, callback data, mentions, or markup.
+- Disable or explicitly control Discord mentions using `allowed_mentions`; prevent `@everyone`, role, and user mention injection.
+- Never place arbitrary result text in callback-data values or button URLs.
+- Validate external COA URLs before rendering provider link buttons.
+- Truncate oversized summaries/result values and provide a safe “View Full Result” path when appropriate.
+- Add tests for slash-command-looking text such as `/join`, `/start`, `/publicresults`, bot mentions, HTML tags, Discord mentions, malformed JSON, and oversized values.
+
+### Reliability and Delivery
+- Send notifications only after the Public Result database transaction commits.
+- Notification failure must not roll back Public Result creation.
+- Add an idempotent notification event keyed by Public Result ID and notification event type to prevent duplicate sends on retries.
+- Use provider-specific adapters: Telegram formatted text plus inline COA URL button, Discord formatted content plus native link button, and Root text/webhook payload.
+- Keep button labels short; detailed JSON belongs in the message body rather than button labels.
+
+### Validation Plan
+- Add focused model/helper tests for JSON normalization, field limits, URL validation, and provider escaping.
+- Add route tests for post-commit notification dispatch on new Public Results.
+- Add Telegram/Discord payload tests proving malicious result text cannot trigger commands, markup, or broad mentions.
+- Add `/publicresults` tests covering summary/itemized rendering, empty values, malformed values, and large-value truncation.
+
+## Telegram Media-Enabled Configurable Commands
+
+### Implemented Changes
+- Added provider-neutral command fields for one response image and `allow_admin_bot_updates`.
+- Added additive migration `b2c4d6e8f0a1_add_command_media_and_bot_messages.py`.
+- Added durable `BotCommandMessage` ownership records for Telegram bot message IDs.
+- Added admin command-registry image upload, remove-image control, and admin-update checkbox using existing object storage.
+- Added Telegram photo/caption response sending through presigned storage URLs.
+- Added Telegram admin reply updates for any chat where the sender is a linked Group Test Tracker admin and the command permits updates.
+- Exact replacement semantics are enforced:
+	- image + text replaces both;
+	- image only replaces image and clears text;
+	- text only replaces text and removes the existing image;
+	- empty replies are rejected.
+- Existing text-only commands retain their prior send path unless media or admin updates are enabled.
+
+### Security / Reliability Notes
+- Admin updates require `User.is_admin`, a reply to an owned bot message, matching Telegram chat/message ownership, and the command-level opt-in.
+- Previous stored images are deleted only after the replacement database update commits.
+- Storage validation and signed URL generation reuse the existing result-file security boundary.
+- Discord media sending and reply-based updates remain intentionally deferred; labels and model fields remain provider-neutral for that future phase.
+
+### Validation Results
+- Telegram exact-replacement regression passed.
+- Existing command-registry regression passed.
+- Full unittest discovery completed without reported failures.
+- Changed Python modules compiled successfully.
+
+## Telegram Admin Command Update Thread-Routing Fix
+
+### Bug
+- Admin replies used to update a media-enabled command (`allow_admin_bot_updates`) landed in the wrong Telegram forum topic instead of the topic where the admin's reply occurred.
+
+### Root Cause
+- `_process_telegram_admin_command_update` (app/routes.py) never read `message.get('message_thread_id')` and never forwarded it to any of its three `send_telegram_chat_message(...)` calls (the "reply with text/image" prompt, the storage-error message, and the "Command response updated." confirmation). Telegram's `sendMessage` defaults to the chat's general topic when `message_thread_id` is omitted, so replies in non-general topics were silently misrouted. The webhook handler already extracted `message_thread_id` from the incoming update but never passed it into this function.
+
+### Fix
+- Added `message_thread_id=None` parameter to `_process_telegram_admin_command_update` and forwarded it to all three `send_telegram_chat_message` calls.
+- Updated both call sites in `telegram_webhook` to pass `message_thread_id=message_thread_id`.
+- Verified `send_telegram_command_response` (used for the original command send) already threads `message_thread_id` correctly, so no change was needed there.
+
+### Validation Results
+- Added `test_telegram_admin_reply_stays_in_originating_message_thread` (tests/test_security.py) asserting the confirmation reply carries the incoming `message_thread_id`.
+- Existing `test_telegram_linked_admin_reply_replaces_command_response_exactly` still passes.
+- Full unittest suite run (background, long-running due to per-test DB setup); focused regression tests confirmed passing.

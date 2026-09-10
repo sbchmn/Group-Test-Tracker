@@ -1878,7 +1878,7 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
     return True
 
 
-def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=None):
     reply_to_message = message.get('reply_to_message') or {}
     replied_message_id = reply_to_message.get('message_id')
     if not replied_message_id or not telegram_user_id:
@@ -1907,7 +1907,11 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
     photo_sizes = message.get('photo') or []
     photo = photo_sizes[-1] if photo_sizes else None
     if not new_text and not photo:
-        send_telegram_chat_message(chat_id, 'Reply with text, an image, or both to replace this command response.')
+        send_telegram_chat_message(
+            chat_id,
+            'Reply with text, an image, or both to replace this command response.',
+            message_thread_id=message_thread_id,
+        )
         return True
 
     new_image_key = None
@@ -1925,10 +1929,10 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
             delete_result_image(old_image_key)
     except (StorageConfigurationError, StorageUploadError) as exc:
         db.session.rollback()
-        send_telegram_chat_message(chat_id, str(exc))
+        send_telegram_chat_message(chat_id, str(exc), message_thread_id=message_thread_id)
         return True
 
-    send_telegram_chat_message(chat_id, 'Command response updated.')
+    send_telegram_chat_message(chat_id, 'Command response updated.', message_thread_id=message_thread_id)
     return True
 
 
@@ -2212,13 +2216,13 @@ def telegram_webhook():
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     if not chat_id or not text:
-        if _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+        if _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=message_thread_id):
             db.session.commit()
             return jsonify({'ok': True})
         db.session.commit()
         return jsonify({'ok': True})
 
-    if _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+    if _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=message_thread_id):
         db.session.commit()
         return jsonify({'ok': True})
 

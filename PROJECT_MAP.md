@@ -1377,3 +1377,20 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Added `test_telegram_admin_reply_stays_in_originating_message_thread` (tests/test_security.py) asserting the confirmation reply carries the incoming `message_thread_id`.
 - Existing `test_telegram_linked_admin_reply_replaces_command_response_exactly` still passes.
 - Full unittest suite run (background, long-running due to per-test DB setup); focused regression tests confirmed passing.
+
+## Telegram Admin Command Update: GIF/Animation Support
+
+### Bug
+- Replying to a media-enabled command with a GIF produced "Reply with text, an image, or both to replace this command response." instead of updating the command, because Telegram sends GIFs as an `animation` attachment (not `photo`).
+
+### Root Cause
+- `_process_telegram_admin_command_update` (app/routes.py) only inspected `message.get('photo')`. GIFs and image-typed documents arrive under `message['animation']` / `message['document']`, so they were never recognized as media.
+
+### Fix
+- Extended media detection to accept `photo`, `document` (only when `mime_type` starts with `image/`), or `animation`, falling back through them in that order.
+- Reused the existing download/upload/validation pipeline (`download_telegram_photo` → `upload_result_image`) unchanged; genuine non-GIF video animations still fail with a clear `StorageUploadError` message (unsupported format) rather than the previous misleading "no media" prompt.
+- Updated the fallback prompt text to mention GIFs.
+
+### Validation Results
+- Added `test_telegram_admin_reply_with_animation_updates_command_image` confirming an `animation` reply downloads/uploads and updates `response_image_key`.
+- Full unittest suite (130 tests) passes via the workspace `.venv` interpreter.

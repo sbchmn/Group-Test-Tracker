@@ -1095,6 +1095,59 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(mock_send.call_args.kwargs.get("message_thread_id"), 42)
 
+    def test_telegram_admin_reply_with_animation_updates_command_image(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(
+                username="gif-admin",
+                email="gif-admin@example.com",
+                is_admin=True,
+                telegram_user_id="9003",
+                telegram_chat_id="-1009003",
+            )
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            template = TelegramCommandTemplate(
+                command="/groupbuy",
+                reply_text="Old text",
+                allow_admin_bot_updates=True,
+                is_active=True,
+            )
+            db.session.add(template)
+            db.session.flush()
+            db.session.add(BotCommandMessage(
+                command_template_id=template.id,
+                provider="telegram",
+                chat_id="-1009003",
+                message_id="99",
+            ))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send, \
+                patch("app.routes.download_telegram_photo") as mock_download, \
+                patch("app.routes.upload_result_image") as mock_upload:
+            mock_download.return_value = object()
+            mock_upload.return_value = "bot-commands/new.gif"
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -1009003, "type": "supergroup"},
+                        "from": {"id": 9003, "username": "gif-admin"},
+                        "animation": {"file_id": "anim-file-id"},
+                        "reply_to_message": {"message_id": 99, "from": {"is_bot": True}},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_download.assert_called_once_with("anim-file-id")
+        self.assertIn("Command response updated", mock_send.call_args.args[1])
+        with self.app.app_context():
+            refreshed = TelegramCommandTemplate.query.filter_by(command="/groupbuy").first()
+            self.assertEqual(refreshed.response_image_key, "bot-commands/new.gif")
+
     def test_telegram_public_results_callback_edits_to_coa_links(self):
         with self.app.app_context():
             db.create_all()

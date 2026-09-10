@@ -1906,10 +1906,16 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, m
     new_text = str(message.get('caption') or message.get('text') or '').strip()
     photo_sizes = message.get('photo') or []
     photo = photo_sizes[-1] if photo_sizes else None
-    if not new_text and not photo:
+    document = message.get('document') or None
+    if document and not str(document.get('mime_type') or '').startswith('image/'):
+        document = None
+    # Telegram sends GIFs as an "animation" attachment, not "photo".
+    animation = message.get('animation') or None
+    media = photo or document or animation
+    if not new_text and not media:
         send_telegram_chat_message(
             chat_id,
-            'Reply with text, an image, or both to replace this command response.',
+            'Reply with text, an image or GIF, or both to replace this command response.',
             message_thread_id=message_thread_id,
         )
         return True
@@ -1917,8 +1923,8 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, m
     new_image_key = None
     old_image_key = template.response_image_key
     try:
-        if photo and photo.get('file_id'):
-            uploaded_file = download_telegram_photo(photo['file_id'])
+        if media and media.get('file_id'):
+            uploaded_file = download_telegram_photo(media['file_id'])
             if uploaded_file is None:
                 raise StorageUploadError('Telegram image download failed.')
             new_image_key = upload_result_image(uploaded_file, 'bot-commands')

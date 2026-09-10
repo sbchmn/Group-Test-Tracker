@@ -78,6 +78,7 @@ from .storage import (
     generate_result_image_presigned_url,
     get_storage_settings,
     upload_result_image,
+    upload_telegram_animation,
 )
 from .version import APP_NAME, APP_RELEASE, APP_VERSION
 
@@ -1878,7 +1879,7 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
     return True
 
 
-def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=None):
     reply_to_message = message.get('reply_to_message') or {}
     replied_message_id = reply_to_message.get('message_id')
     if not replied_message_id or not telegram_user_id:
@@ -1906,18 +1907,31 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
     new_text = str(message.get('caption') or message.get('text') or '').strip()
     photo_sizes = message.get('photo') or []
     photo = photo_sizes[-1] if photo_sizes else None
-    if not new_text and not photo:
-        send_telegram_chat_message(chat_id, 'Reply with text, an image, or both to replace this command response.')
+    document = message.get('document') or None
+    if document and not str(document.get('mime_type') or '').startswith('image/'):
+        document = None
+    # Telegram sends GIFs as an "animation" attachment, not "photo".
+    animation = message.get('animation') or None
+    media = photo or document or animation
+    if not new_text and not media:
+        send_telegram_chat_message(
+            chat_id,
+            'Reply with text, an image or GIF, or both to replace this command response.',
+            message_thread_id=message_thread_id,
+        )
         return True
 
     new_image_key = None
     old_image_key = template.response_image_key
     try:
-        if photo and photo.get('file_id'):
-            uploaded_file = download_telegram_photo(photo['file_id'])
+        if media and media.get('file_id'):
+            uploaded_file = download_telegram_photo(media['file_id'])
             if uploaded_file is None:
                 raise StorageUploadError('Telegram image download failed.')
-            new_image_key = upload_result_image(uploaded_file, 'bot-commands')
+            if animation and media is animation:
+                new_image_key = upload_telegram_animation(uploaded_file, 'bot-commands')
+            else:
+                new_image_key = upload_result_image(uploaded_file, 'bot-commands')
         template.reply_text = new_text
         template.response_image_key = new_image_key
         db.session.commit()
@@ -1925,10 +1939,10 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
             delete_result_image(old_image_key)
     except (StorageConfigurationError, StorageUploadError) as exc:
         db.session.rollback()
-        send_telegram_chat_message(chat_id, str(exc))
+        send_telegram_chat_message(chat_id, str(exc), message_thread_id=message_thread_id)
         return True
 
-    send_telegram_chat_message(chat_id, 'Command response updated.')
+    send_telegram_chat_message(chat_id, 'Command response updated.', message_thread_id=message_thread_id)
     return True
 
 
@@ -2212,13 +2226,13 @@ def telegram_webhook():
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     if not chat_id or not text:
-        if _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+        if _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=message_thread_id):
             db.session.commit()
             return jsonify({'ok': True})
         db.session.commit()
         return jsonify({'ok': True})
 
-    if _process_telegram_admin_command_update(message, chat_id, telegram_user_id):
+    if _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=message_thread_id):
         db.session.commit()
         return jsonify({'ok': True})
 

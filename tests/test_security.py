@@ -511,10 +511,14 @@ class SecurityTests(unittest.TestCase):
 
     def test_telegram_webhook_requires_configured_secret(self):
         with self.app.app_context():
+            db.create_all()
             NotificationConfig.query.filter_by(key="telegram_webhook_secret").delete()
             db.session.commit()
 
-        response = self.client.post(
+        # Use a raw client here since self.client.post auto-seeds the webhook
+        # secret for convenience in other tests, which would defeat this test.
+        raw_client = self.app.test_client()
+        response = raw_client.post(
             "/telegram/webhook",
             json={"message": {"chat": {"id": 1001}, "text": "/help"}},
         )
@@ -1044,6 +1048,106 @@ class SecurityTests(unittest.TestCase):
             refreshed = TelegramCommandTemplate.query.filter_by(command="/groupbuy").first()
             self.assertEqual(refreshed.reply_text, "Updated text only")
             self.assertIsNone(refreshed.response_image_key)
+
+    def test_telegram_admin_reply_stays_in_originating_message_thread(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(
+                username="thread-admin",
+                email="thread-admin@example.com",
+                is_admin=True,
+                telegram_user_id="9002",
+                telegram_chat_id="-1009002",
+            )
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            template = TelegramCommandTemplate(
+                command="/groupbuy",
+                reply_text="Old text",
+                allow_admin_bot_updates=True,
+                is_active=True,
+            )
+            db.session.add(template)
+            db.session.flush()
+            db.session.add(BotCommandMessage(
+                command_template_id=template.id,
+                provider="telegram",
+                chat_id="-1009002",
+                message_id="88",
+            ))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -1009002, "type": "supergroup"},
+                        "from": {"id": 9002, "username": "thread-admin"},
+                        "text": "Updated in-thread text",
+                        "message_thread_id": 42,
+                        "reply_to_message": {"message_id": 88, "from": {"is_bot": True}},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_send.call_args.kwargs.get("message_thread_id"), 42)
+
+    def test_telegram_admin_reply_with_animation_updates_command_image(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(
+                username="gif-admin",
+                email="gif-admin@example.com",
+                is_admin=True,
+                telegram_user_id="9003",
+                telegram_chat_id="-1009003",
+            )
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            template = TelegramCommandTemplate(
+                command="/groupbuy",
+                reply_text="Old text",
+                allow_admin_bot_updates=True,
+                is_active=True,
+            )
+            db.session.add(template)
+            db.session.flush()
+            db.session.add(BotCommandMessage(
+                command_template_id=template.id,
+                provider="telegram",
+                chat_id="-1009003",
+                message_id="99",
+            ))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send, \
+                patch("app.routes.download_telegram_photo") as mock_download, \
+                patch("app.routes.upload_telegram_animation") as mock_upload:
+            mock_download.return_value = object()
+            mock_upload.return_value = "bot-commands/new.mp4"
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "message": {
+                        "chat": {"id": -1009003, "type": "supergroup"},
+                        "from": {"id": 9003, "username": "gif-admin"},
+                        "animation": {"file_id": "anim-file-id"},
+                        "reply_to_message": {"message_id": 99, "from": {"is_bot": True}},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_download.assert_called_once_with("anim-file-id")
+        mock_upload.assert_called_once()
+        self.assertIn("Command response updated", mock_send.call_args.args[1])
+        with self.app.app_context():
+            refreshed = TelegramCommandTemplate.query.filter_by(command="/groupbuy").first()
+            self.assertEqual(refreshed.response_image_key, "bot-commands/new.mp4")
 
     def test_telegram_public_results_callback_edits_to_coa_links(self):
         with self.app.app_context():

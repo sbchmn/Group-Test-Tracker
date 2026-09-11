@@ -151,7 +151,7 @@ Source boundaries:
 1. Create tests from Admin -> Create Test.
 2. Keep recruiting tests open while collecting requests.
 3. Move to ready_for_payment when you want payment options shown before active testing.
-4. Use Admin -> Action Queue to approve/deny quickly across tests.
+4. Use Admin -> Action Queue for result-analysis review/failures and participant approval/denial across tests.
 5. Use Manage Participants inside each test for detailed per-user updates.
 6. Send participant notifications from test detail pages.
 7. Move tests to testing and then closed when complete.

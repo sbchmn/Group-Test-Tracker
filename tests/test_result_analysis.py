@@ -315,6 +315,68 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(review.status_code, 200)
         self.assertIn(f'Run {run.id}', review.get_data(as_text=True))
 
+    def test_action_queue_surfaces_analysis_reviews_and_failures(self):
+        group_test = self._group_test()
+        public_result = PublicResult(
+            title='Failed Public Analysis',
+            results_link='https://example.com/failed-report.pdf',
+            item_results=[],
+            created_by=self.user.id,
+        )
+        hidden_result = PublicResult(
+            title='Already Applied Analysis',
+            results_link='https://example.com/applied-report.pdf',
+            item_results=[],
+            created_by=self.user.id,
+        )
+        db.session.add_all([public_result, hidden_result])
+        db.session.flush()
+        review_run = ResultAnalysisRun(
+            group_test_id=group_test.id, source_kind='upload', source_reference=group_test.results_image_key,
+            provider='openai', provider_model='review-model', status='analyzing', max_attempts=3,
+        )
+        failed_run = ResultAnalysisRun(
+            public_result_id=public_result.id, source_kind='link', source_reference=public_result.results_link,
+            provider='openai', provider_model='failure-model', status='failed', max_attempts=3,
+            error_code='provider_error', error_message='Provider requires administrator attention.',
+        )
+        applied_run = ResultAnalysisRun(
+            public_result_id=hidden_result.id, source_kind='link', source_reference=hidden_result.results_link,
+            provider='openai', provider_model='applied-model', status='applied', max_attempts=3,
+        )
+        db.session.add_all([review_run, failed_run, applied_run])
+        db.session.flush()
+        persist_extraction(
+            review_run,
+            AnalysisExtraction(extraction_payload([finding('Purity', 'Purity', '99.4%')]), 'review-model'),
+        )
+        db.session.commit()
+
+        client = self.app.test_client()
+        client.post('/login', data={'username': self.user.username, 'password': 'secret-pass'})
+        response = client.get('/admin/action-queue?status=recruiting&q=no-participant-match')
+        page = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Tirzepatide Test', page)
+        self.assertIn('Review Findings', page)
+        self.assertIn('Failed Public Analysis', page)
+        self.assertIn('Provider requires administrator attention.', page)
+        self.assertIn('Inspect Failure', page)
+        self.assertIn('Acknowledge', page)
+        self.assertNotIn('Already Applied Analysis', page)
+
+        acknowledge = client.post(
+            f'/admin/result-analysis/{failed_run.id}/acknowledge-failure',
+            follow_redirects=True,
+        )
+        self.assertEqual(acknowledge.status_code, 200)
+        self.assertNotIn('Failed Public Analysis', acknowledge.get_data(as_text=True))
+        db.session.refresh(failed_run)
+        self.assertEqual(failed_run.status, 'failed')
+        self.assertEqual(failed_run.reviewed_by_id, self.user.id)
+        self.assertIsNotNone(failed_run.reviewed_at)
+
     @patch('app.result_analysis.jobs.acquire_run_source')
     @patch('app.result_analysis.jobs.build_provider')
     def test_worker_claims_and_processes_run_with_mocked_provider(self, build_provider, acquire_source):

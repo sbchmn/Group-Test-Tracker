@@ -21,8 +21,9 @@ from datetime import datetime, date
 from datetime import timedelta
 from functools import wraps
 from itertools import zip_longest
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload, selectinload
 import secrets
 import ipaddress
 import html
@@ -3125,6 +3126,23 @@ def review_result_analysis(run_id):
     return render_template('admin/result_analysis_review.html', run=run, target=run.target)
 
 
+@main_bp.route('/admin/result-analysis/<int:run_id>/acknowledge-failure', methods=['POST'])
+@login_required
+@admin_required
+def acknowledge_result_analysis_failure(run_id):
+    run = ResultAnalysisRun.query.get_or_404(run_id)
+    if run.status != 'failed':
+        flash('Only failed result-analysis runs can be acknowledged.', 'warning')
+    elif run.reviewed_at is not None:
+        flash('This result-analysis failure was already acknowledged.', 'info')
+    else:
+        run.reviewed_by_id = current_user.id
+        run.reviewed_at = datetime.utcnow()
+        db.session.commit()
+        flash(f'Acknowledged result-analysis failure {run.id}.', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
 @main_bp.route('/admin/result-analysis/<int:run_id>/apply', methods=['POST'])
 @login_required
 @admin_required
@@ -3246,6 +3264,7 @@ def _queue_redirect_params():
         'status': (request.form.get('status') or request.args.get('status') or 'all').strip().lower(),
         'q': (request.form.get('q') or request.args.get('q') or '').strip(),
         'page': request.form.get('page') or request.args.get('page') or 1,
+        'analysis_page': request.form.get('analysis_page') or request.args.get('analysis_page') or 1,
     }
 
 
@@ -3256,11 +3275,14 @@ def action_queue():
     status_filter = (request.args.get('status') or 'all').strip().lower()
     search = (request.args.get('q') or '').strip()
     page = request.args.get('page', default=1, type=int) or 1
+    analysis_page = request.args.get('analysis_page', default=1, type=int) or 1
     per_page = 25
     if status_filter not in {'all', 'recruiting', 'testing', 'closed'}:
         status_filter = 'all'
     if page < 1:
         page = 1
+    if analysis_page < 1:
+        analysis_page = 1
 
     pending_query = _build_pending_queue_query(status_filter, search)
     pending_parts_pagination = pending_query.order_by(Participation.requested_at.asc(), GroupTest.start_date.asc()).paginate(
@@ -3268,13 +3290,30 @@ def action_queue():
         per_page=per_page,
         error_out=False,
     )
+    analysis_runs_pagination = (
+        ResultAnalysisRun.query
+        .options(
+            joinedload(ResultAnalysisRun.group_test),
+            joinedload(ResultAnalysisRun.public_result),
+            selectinload(ResultAnalysisRun.findings),
+        )
+        .filter(or_(
+            ResultAnalysisRun.status == 'needs_review',
+            and_(ResultAnalysisRun.status == 'failed', ResultAnalysisRun.reviewed_at.is_(None)),
+        ))
+        .order_by(ResultAnalysisRun.completed_at.asc(), ResultAnalysisRun.id.asc())
+        .paginate(page=analysis_page, per_page=per_page, error_out=False)
+    )
     return render_template(
         'admin/action_queue.html',
         pending_parts=pending_parts_pagination.items,
         pending_parts_pagination=pending_parts_pagination,
+        analysis_runs=analysis_runs_pagination.items,
+        analysis_runs_pagination=analysis_runs_pagination,
         status_filter=status_filter,
         search=search,
         page=page,
+        analysis_page=analysis_page,
     )
 
 
@@ -3368,7 +3407,13 @@ def approve_filtered_from_queue():
         f'Approved all filtered pending requests: {len(pending_parts)} participant(s) across {len(affected_test_ids)} test(s).',
         'success',
     )
-    return redirect(url_for('main.action_queue', status=status_filter, q=search, page=1))
+    return redirect(url_for(
+        'main.action_queue',
+        status=status_filter,
+        q=search,
+        page=1,
+        analysis_page=request.form.get('analysis_page') or 1,
+    ))
 
 
 @main_bp.route('/admin/action-queue/deny/<int:part_id>', methods=['POST'])

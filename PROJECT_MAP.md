@@ -5,7 +5,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
-- **Current branch baseline:** `Test-Updates` at `24f4bfffc43b13c53a25cfdc405a8c0d32308d72`.
+- **Current branch baseline:** `Test-Updates` at `cc700412f387e8680720584016dbd4f023ebf2a4`.
 - **Application version:** `3.2` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
@@ -161,11 +161,11 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 ## Validation Baseline
 
-Latest local validation on 2026-09-10, from baseline `24f4bfffc43b13c53a25cfdc405a8c0d32308d72` before the untested queue-snapshot refresh diff:
+Latest local validation on 2026-09-11, from baseline `cc700412f387e8680720584016dbd4f023ebf2a4` plus the unified Action Queue diff:
 
 ```text
 PYTHONPATH=/tmp/group-test-tracker-test-deps-20260910 /home/sbachman/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -B -m unittest
-148 tests passed in 179.352s
+149 tests passed in 158.283s
 ```
 
 This local result is recorded in project history but is not backed by a GitHub Actions check. The provider/network paths use mocks; production credentials and the real-report evaluation corpus were not exercised.
@@ -212,16 +212,16 @@ After each edit phase:
 
 ## Current Change Record
 
-- **Date:** 2026-09-10
-- **Scope:** Add safe provider diagnostic logging, display it on the administrator-only Result Analysis Settings page, and harden DigitalOcean worker startup and polling.
-- **Target files/modules:** New `app/result_analysis/diagnostics.py`, provider error normalization, worker and connection-test call sites, queue claim/session lifecycle, Discord lifecycle helpers, `Procfile`, the settings template, focused tests, `README.md`, and `ADMIN_QUICK_START.md`.
-- **Intended behavior:** Record enough structured context to diagnose provider failures while excluding secrets, report content, and raw responses; display recent entries only to administrators; ensure Discord lifecycle callbacks have Flask context; invoke the analysis worker through explicit Flask factory discovery; and ensure every queue poll observes a fresh database snapshot.
-- **Assumptions:** The deployment filesystem is writable at the application instance path; logs are operational diagnostics rather than durable audit records.
-- **Security risks/checks:** API-key leakage, provider-response leakage, report-content exposure, HTML injection, unauthorized log access, control characters, and oversized attacker-controlled fields.
-- **Reliability risks/checks:** Concurrent web/worker writes, logging failures masking provider failures, malformed existing log data, deterministic pruning, Flask context availability in long-running Discord callbacks, worker command discovery in App Platform components, and stale repeatable-read snapshots in long-running queue polling.
-- **Optimization checks:** Cap each entry and the complete file, retain only recent complete lines, avoid database growth, and perform no extra provider calls.
-- **Validation plan:** Focused diagnostics/provider/route tests, existing result-analysis and security tests, full `python -m unittest`, and `git diff --check`.
-- **Applied changes:** Added structured SDK-error normalization; a sanitized JSON-lines diagnostic writer/reader; bounded, locked retention; connection-test success/failure entries; worker failure entries; administrator-only display on Result Analysis Settings; a narrow ignore rule for the runtime diagnostic file; context-safe Discord lifecycle logging/status delivery; an explicit `python -m flask --app app:create_app` worker command; unambiguous DigitalOcean Run Command documentation; empty-poll transaction cleanup; per-iteration session removal; and a worker startup log entry.
-- **Security/reliability/optimization review:** Credential patterns are redacted, all fields are single-line and length bounded, unexpected internal errors omit details, template output is auto-escaped, logging failures are isolated, Linux web/worker writes use file locks, the default file cap is 128 KiB, and configuration is hard-capped at 1 MiB.
-- **Validation:** The preceding deployment follow-up passed all 148 tests. For the confirmed stale-poll follow-up, tests were explicitly skipped at user request; diff/whitespace and repository-state review passed before commit.
-- **Remaining operational note:** The log is intentionally non-durable and component-local unless `RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH` points to shared persistent storage; separately deployed web and worker components may therefore show different local files.
+- **Date:** 2026-09-11
+- **Scope:** Make the Admin Action Queue the central inbox for result-analysis review and operational attention.
+- **Target files/modules:** Action Queue query/rendering in `app/routes.py` and `app/templates/admin/action_queue.html`, result-analysis route coverage, administrator documentation, and this project map.
+- **Intended behavior:** Show result-analysis runs in `needs_review` and unacknowledged `failed` states alongside existing pending participation requests, link directly to review/failure details, and remove resolved or acknowledged runs automatically.
+- **Assumptions:** `needs_review` requires approval and `failed` requires intervention; queued/analyzing work does not require administrator action yet.
+- **Security risks/checks:** Preserve the existing administrator-only route boundary, escape provider/error text, and expose no new actions without existing CSRF controls.
+- **Reliability risks/checks:** Avoid hiding analysis attention behind participation filters, preserve both pagination states across participation actions, and ensure applied/resolved runs disappear.
+- **Optimization checks:** Paginate analysis attention independently at 25 rows and eager-load target/finding relationships to prevent N+1 database queries.
+- **Validation plan:** Focused result-analysis and action-queue tests, full unittest discovery, template rendering, and `git diff --check`.
+- **Applied changes:** Added an independently paginated Result Analysis section; surfaced review-ready and unacknowledged failed runs regardless of participation filters; added direct review/inspection links; added an administrator-only, CSRF-protected failure acknowledgment action; and preserved both pagination states across participation actions.
+- **Security/reliability/optimization review:** The Action Queue and acknowledgment endpoint remain administrator-only; acknowledgment is POST-only and CSRF-protected; provider/error strings remain auto-escaped; acknowledged failures retain their failed status and audit metadata; and eager loading plus 25-row pagination bounds database and rendering work.
+- **Validation:** Focused result-analysis and participation suites passed 26 tests in 32.336s; full discovery passed 149 tests in 158.283s; the final pagination-context adjustment passed its two targeted tests; and `git diff --check` passed. Existing deprecation warnings remain.
+- **Product invariant:** Any present or future state requiring administrator approval or attention must surface in the Admin Action Queue until resolved.

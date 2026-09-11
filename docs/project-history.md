@@ -1524,3 +1524,27 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Restarting the DigitalOcean worker immediately processed rows that had remained queued, confirming stale worker transaction state as the failure mode.
 - Automated tests were explicitly skipped at the user's request.
 - Diff/whitespace and repository-state review passed before commit.
+
+## Unified Administrator Action Queue
+
+### Applied Changes
+
+- Surface result-analysis runs awaiting review or requiring failure intervention in the existing Admin Action Queue.
+- Keep result-analysis attention independent from participation filters and pagination while preserving queue context across participation actions.
+- Establish the project-wide invariant that every feature requiring administrator approval or attention must contribute an item to the Admin Action Queue until resolved.
+- Allow administrators to acknowledge failed analysis runs without changing or deleting the retained failure record.
+
+### Security / Reliability / Performance Review
+
+- Retain the existing administrator-only boundary and Jinja auto-escaping.
+- Link to existing review pages instead of duplicating approval mutations.
+- Paginate and eager-load the new queue section to keep query count and memory bounded.
+- Keep failure acknowledgment POST-only and CSRF-protected, and store the acknowledging administrator and timestamp in existing audit fields.
+
+### Validation Results
+
+- Focused result-analysis and participation suites passed 26 tests in 32.336 seconds.
+- Full unittest discovery passed 149 tests in 158.283 seconds.
+- Coverage verifies needs-review and failed runs render, resolved runs do not render, participation filters do not hide analysis attention, and acknowledged failures leave the queue while retaining their record.
+- The final pagination-context adjustment passed its two targeted Action Queue tests.
+- `git diff --check` passed; existing Python, SQLAlchemy, and Flask-Migrate deprecation warnings remain.

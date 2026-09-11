@@ -302,14 +302,17 @@ Important behavior:
 
 ### Admin Action Queue (Cross-Test)
 
-Use for fast pending-request triage across all tests.
+Use as the central inbox for anything requiring administrator approval or attention.
 
 1. Open Admin -> Action Queue.
-2. Filter by status and keyword.
-3. Approve or deny single requests.
-4. Select multiple rows for bulk approve/deny.
-5. Use Approve All Filtered for large backlogs.
-6. Enter confirmation text when prompted for filtered bulk approval.
+2. Review completed result-analysis findings and inspect failed analysis runs.
+3. Filter participation requests by status and keyword.
+4. Approve or deny single requests.
+5. Select multiple rows for bulk approve/deny.
+6. Use Approve All Filtered for large backlogs.
+7. Enter confirmation text when prompted for filtered bulk approval.
+
+Items remain in this queue until their attention state is resolved. New features that require administrator approval or intervention must also surface here.
 
 ### Manually Add Participant
 

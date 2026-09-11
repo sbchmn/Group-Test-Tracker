@@ -60,6 +60,8 @@ V1 canonical types:
 
 Aliases are normalized in application code, not in provider-specific prompts. Examples include `assay`/`content` to Net Content only when report context supports that meaning, `LC-MS identity` to Identity, `HPLC purity` to Purity, and `LAL` to Endotoxin. Ambiguous aliases remain unrecognized.
 
+The shared extraction prompt defines these categories with positive and negative examples. It treats FTIR identification as Identity, HPLC potency as Net Content, bacterial endotoxin/BET/USP `<85>` as Endotoxin, and peptide-to-excipient ratios as Unknown. Prompt or taxonomy behavior changes advance the schema version so completed-run deduplication does not treat materially different analysis logic as equivalent.
+
 ## Source Examples
 
 - SteriGenix rendered verification page: `https://sterigenixanalytical.com/verify/RPT-2026-624601`
@@ -339,6 +341,13 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 
 - The same source controls and status card.
 - Review preview distinguishes new canonical rows, conflicts, metadata, and unrecognized findings.
+
+### Future bot-submitted Public Results
+
+- Keep report acquisition, extraction, taxonomy, and review application independent of the web form so Telegram and Discord can reuse the same services.
+- Bot input must create a reviewable draft through one shared application service rather than writing `PublicResult` rows directly from chat handlers.
+- Require a linked application identity with explicit authorization, validate uploads/links through the same source boundaries, and preserve platform/message provenance for auditing and idempotency.
+- Never publish bot-submitted values directly; queue analysis and require the same administrator review used by web-submitted reports.
 
 ### Settings
 

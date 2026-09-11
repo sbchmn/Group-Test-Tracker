@@ -25,6 +25,7 @@ def public_result_tag_page(page=1):
         Tag.query
         .join(public_result_tags, public_result_tags.c.tag_id == Tag.id)
         .join(PublicResult, PublicResult.id == public_result_tags.c.public_result_id)
+        .filter(PublicResult.publication_status == 'published')
         .distinct()
         .order_by(func.lower(Tag.name).asc(), Tag.id.asc())
         .all()
@@ -44,6 +45,7 @@ def public_results_for_tag_page(tag_id, page=1):
         PublicResult.query
         .join(public_result_tags, public_result_tags.c.public_result_id == PublicResult.id)
         .filter(public_result_tags.c.tag_id == tag.id)
+        .filter(PublicResult.publication_status == 'published')
         .order_by(PublicResult.created_at.desc(), PublicResult.id.desc())
     )
     total = query.count()

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ result.title }}{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h3>{{ result.title }}</h3>
+        {% if result.summary %}<p>{{ result.summary }}</p>{% endif %}
+        {% if result.item_results %}
+        <dl class="row">
+            {% for item in result.item_results %}<dt class="col-sm-4">{{ item.name }}</dt><dd class="col-sm-8">{{ item.result or '' }}</dd>{% endfor %}
+        </dl>
+        {% endif %}
+        {% if result.results_link %}<a class="btn btn-primary" href="{{ result.results_link }}" rel="noopener noreferrer">Open Source</a>{% endif %}
+        {% if result.results_image_key %}<a class="btn btn-outline-primary" href="{{ url_for('main.serve_public_result_image', result_id=result.id) }}">View COA</a>{% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -70,6 +70,7 @@ from .notifications import (
     register_telegram_webhook,
     unregister_telegram_webhook,
     send_telegram_command_response,
+    send_telegram_interactive_message,
     download_telegram_photo,
 )
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
@@ -380,6 +381,12 @@ class BuiltinCommandConfigForm(FlaskForm):
     publicresults_allow_non_private = BooleanField('Allow /publicresults in groups/channels', default=False)
     publicresults_allowed_chat_ids = StringField('Allowed Chat/Guild IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     publicresults_allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submitcoa_enabled = BooleanField('Enable /submitcoa', default=False)
+    submitcoa_allow_non_private = BooleanField('Allow /submitcoa in groups', default=False)
+    submitcoa_allowed_chat_ids = StringField('Allowed submission Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submitcoa_allowed_thread_ids = StringField('Allowed submission Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submitcoa_review_chat_id = StringField('Review Chat ID (blank uses submission chat)', validators=[Optional(), Length(max=120)])
+    submitcoa_review_thread_id = StringField('Review Thread ID (optional)', validators=[Optional(), Length(max=80)])
     submit = SubmitField('Save Built-in Command Settings')
 
 
@@ -637,6 +644,71 @@ def _telegram_testing_message(config_map):
         f"Sign up: {register_url}\n"
         f"Log in: {login_url}"
     )
+
+
+def _telegram_linked_user(telegram_user_id, chat_id=None):
+    user = User.query.filter_by(telegram_user_id=str(telegram_user_id)).first() if telegram_user_id else None
+    if user is None and chat_id:
+        user = User.query.filter_by(telegram_chat_id=str(chat_id)).first()
+    return user
+
+
+def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
+    if user is None or not user.is_active or not _builtin_submitcoa_scope_allowed(chat_id, chat_type, thread_id):
+        return False
+    text = str(message.get('text') or message.get('caption') or '').strip()
+    if not text.lower().startswith('/submitcoa'):
+        return False
+    argument = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ''
+    document = message.get('document') or {}
+    photos = message.get('photo') or []
+    attachment = document or (photos[-1] if photos else {})
+    link = argument if argument.startswith(('https://', 'http://')) else None
+    if not attachment and not link:
+        send_telegram_chat_message(
+            chat_id, 'Attach a PDF/image or provide a public HTTP/HTTPS COA link after /submitcoa.',
+            message_thread_id=thread_id,
+        )
+        return True
+    result = PublicResult(
+        title='Pending COA review',
+        results_link=link,
+        item_results=[],
+        created_by=user.id,
+        publication_status='queued',
+        submission_platform='telegram',
+        submission_chat_id=str(chat_id),
+        submission_thread_id=str(thread_id) if thread_id is not None else None,
+        submission_message_id=str(message.get('message_id') or ''),
+        review_state_json={'selected': {}, 'messages': []},
+    )
+    db.session.add(result)
+    db.session.flush()
+    if attachment:
+        max_bytes = int(get_storage_settings()['max_upload_size_mb'] * 1024 * 1024)
+        upload = download_telegram_photo(attachment.get('file_id'), max_bytes=max_bytes)
+        if upload is None:
+            db.session.rollback()
+            send_telegram_chat_message(chat_id, 'The COA could not be downloaded or exceeds the upload limit.', message_thread_id=thread_id)
+            return True
+        upload.filename = str(document.get('file_name') or upload.filename or 'telegram-coa')
+        try:
+            result.results_image_key = upload_result_image(upload, 'public-results')
+        except (StorageConfigurationError, StorageUploadError) as exc:
+            db.session.rollback()
+            send_telegram_chat_message(chat_id, str(exc), message_thread_id=thread_id)
+            return True
+    db.session.commit()
+    run = enqueue_analysis(result, 'upload' if attachment else 'link', requested_by_id=user.id)
+    confirmation_id = send_telegram_interactive_message(
+        chat_id, f'COA submission #{result.id} queued as analysis run #{run.id}.', message_thread_id=thread_id,
+    )
+    if confirmation_id:
+        state = dict(result.review_state_json or {})
+        state['submission_messages'] = [confirmation_id]
+        result.review_state_json = state
+        db.session.commit()
+    return True
 
 
 def _issue_telegram_link_token(user):
@@ -1570,6 +1642,7 @@ TELEGRAM_RESERVED_COMMANDS = {
     '/status',
     '/join',
     '/publicresults',
+    '/submitcoa',
 }
 
 TELEGRAM_RESERVED_PREFIXES = (
@@ -1869,6 +1942,7 @@ def _telegram_help_message():
         "/testing - get signup/login links for group testing\n"
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
+        "/submitcoa <public link> - submit a COA for administrator review (or attach a PDF/image)\n"
         "/help - show this help message"
     ) + _telegram_help_custom_commands_block()
 
@@ -2234,13 +2308,22 @@ def telegram_webhook():
         callback_message_id = callback_message.get('message_id')
         callback_user = None
         callback_telegram_user_id = str(callback_from.get('id') or '').strip()
-        if callback_chat_type == 'private' and callback_telegram_user_id:
+        if callback_telegram_user_id:
             callback_user = User.query.filter_by(telegram_user_id=callback_telegram_user_id).first()
         if callback_user is None and callback_chat_type == 'private' and callback_chat_id:
             callback_user = User.query.filter_by(telegram_chat_id=callback_chat_id).first()
 
         handled = False
-        if callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
+        callback_notice = None
+        if callback_data.startswith('ra:') and callback_message_id and callback_chat_id:
+            from .telegram_result_review import handle_review_callback
+            handled, callback_notice = handle_review_callback(
+                callback_user,
+                callback_chat_id,
+                callback_message.get('message_thread_id'),
+                callback_data,
+            )
+        elif callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
             parts = callback_data.split(':')
             try:
                 if parts[1] == 'close' and len(parts) == 2:
@@ -2278,6 +2361,15 @@ def telegram_webhook():
     message_thread_id = message.get('message_thread_id')
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
+    caption = (message.get('caption') or '').strip()
+    potential_user = _telegram_linked_user(telegram_user_id, chat_id if chat_type == 'private' else None)
+    if (text or caption).lower().startswith('/submitcoa'):
+        if potential_user is None:
+            send_telegram_chat_message(chat_id, 'Your Telegram account must be linked before submitting a COA.', message_thread_id=message_thread_id)
+        else:
+            _submit_telegram_coa(message, potential_user, chat_id, chat_type, message_thread_id)
+        db.session.commit()
+        return jsonify({'ok': True})
     if not chat_id or not text:
         if _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=message_thread_id):
             db.session.commit()
@@ -2387,6 +2479,10 @@ def telegram_webhook():
         linked_user.telegram_chat_id = chat_id
     db.session.commit()
 
+    from .telegram_result_review import handle_review_reply
+    if handle_review_reply(linked_user, chat_id, message_thread_id, message):
+        return jsonify({'ok': True})
+
     if lower == '/help':
         send_telegram_chat_message(chat_id, _telegram_help_message())
         return jsonify({'ok': True})
@@ -2494,6 +2590,8 @@ def serve_group_test_result_image(test_id):
 @login_required
 def serve_public_result_image(result_id):
     result = PublicResult.query.get_or_404(result_id)
+    if result.publication_status != 'published' and not current_user.is_admin:
+        abort(404)
     if not result.results_image_key:
         abort(404)
 
@@ -2502,6 +2600,15 @@ def serve_public_result_image(result_id):
     except (StorageConfigurationError, StorageUploadError):
         abort(503)
     return redirect(secure_url)
+
+
+@main_bp.route('/public-results/<int:result_id>')
+@login_required
+def public_result_detail(result_id):
+    result = PublicResult.query.get_or_404(result_id)
+    if result.publication_status != 'published' and not current_user.is_admin:
+        abort(404)
+    return render_template('public_result_detail.html', result=result)
 
 
 @main_bp.route('/test/<int:test_id>', methods=['GET', 'POST'])
@@ -2645,7 +2752,7 @@ def my_results():
             ]),
         })
 
-    public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+    public_results = PublicResult.query.filter_by(publication_status='published').order_by(PublicResult.posted_at.desc()).all()
     for result in public_results:
         group_results.append({
             'kind': 'public_result',
@@ -3817,6 +3924,20 @@ def _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id=N
     return True
 
 
+def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None):
+    if not _builtin_enabled('submitcoa'):
+        return False
+    if str(chat_type or '').lower() == 'private':
+        return True
+    if str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() != 'true':
+        return False
+    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_submitcoa_allowed_chat_ids', ''))
+    allowed_threads = _normalize_allowed_thread_ids(_builtin_config_value('builtin_submitcoa_allowed_thread_ids', ''))
+    if allowed_chats and str(chat_id) not in allowed_chats:
+        return False
+    return allowed_threads is not None and (not allowed_threads or str(message_thread_id or '') in allowed_threads)
+
+
 @main_bp.route('/admin/settings/bots', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -3911,7 +4032,9 @@ def builtin_command_settings():
     form = BuiltinCommandConfigForm()
     if form.validate_on_submit():
         allowed_threads = _normalize_allowed_thread_ids(form.publicresults_allowed_thread_ids.data)
-        if allowed_threads is None:
+        submit_threads = _normalize_allowed_thread_ids(form.submitcoa_allowed_thread_ids.data)
+        review_thread = str(form.submitcoa_review_thread_id.data or '').strip()
+        if allowed_threads is None or submit_threads is None or (review_thread and not review_thread.lstrip('-').isdigit()):
             flash('Allowed thread IDs must be integers separated by commas.', 'danger')
             return render_template('admin/builtin_command_settings.html', form=form)
         _save_notification_config_values({
@@ -3923,6 +4046,12 @@ def builtin_command_settings():
             'builtin_publicresults_allow_non_private': 'true' if form.publicresults_allow_non_private.data else 'false',
             'builtin_publicresults_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.publicresults_allowed_chat_ids.data)),
             'builtin_publicresults_allowed_thread_ids': ','.join(allowed_threads or []),
+            'builtin_submitcoa_enabled': 'true' if form.submitcoa_enabled.data else 'false',
+            'builtin_submitcoa_allow_non_private': 'true' if form.submitcoa_allow_non_private.data else 'false',
+            'builtin_submitcoa_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.submitcoa_allowed_chat_ids.data)),
+            'builtin_submitcoa_allowed_thread_ids': ','.join(submit_threads or []),
+            'telegram_coa_review_chat_id': form.submitcoa_review_chat_id.data,
+            'telegram_coa_review_thread_id': review_thread,
         })
         db.session.commit()
         flash('Built-in command settings saved.', 'success')
@@ -3937,6 +4066,12 @@ def builtin_command_settings():
         form.publicresults_allow_non_private.data = str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true'
         form.publicresults_allowed_chat_ids.data = _builtin_config_value('builtin_publicresults_allowed_chat_ids', '')
         form.publicresults_allowed_thread_ids.data = _builtin_config_value('builtin_publicresults_allowed_thread_ids', '')
+        form.submitcoa_enabled.data = _builtin_enabled('submitcoa')
+        form.submitcoa_allow_non_private.data = str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() == 'true'
+        form.submitcoa_allowed_chat_ids.data = _builtin_config_value('builtin_submitcoa_allowed_chat_ids', '')
+        form.submitcoa_allowed_thread_ids.data = _builtin_config_value('builtin_submitcoa_allowed_thread_ids', '')
+        form.submitcoa_review_chat_id.data = _builtin_config_value('telegram_coa_review_chat_id', '')
+        form.submitcoa_review_thread_id.data = _builtin_config_value('telegram_coa_review_thread_id', '')
     return render_template('admin/builtin_command_settings.html', form=form)
 
 @main_bp.route('/admin/notification-templates', methods=['GET', 'POST'])

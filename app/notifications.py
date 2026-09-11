@@ -263,8 +263,9 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id
     payload = {"chat_id": chat_id, "text": body}
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    if message_thread_id is not None:
-        payload["message_thread_id"] = int(message_thread_id)
+    thread_id = normalize_telegram_thread_id(message_thread_id)
+    if thread_id is not None:
+        payload["message_thread_id"] = thread_id
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     payload_json = json.dumps(payload, ensure_ascii=False)
@@ -339,8 +340,9 @@ def send_telegram_command_response(chat_id, body, image_key=None, message_thread
     else:
         payload = {'chat_id': chat_id, 'text': str(body or '')}
         method_name = 'sendMessage'
-    if message_thread_id is not None:
-        payload['message_thread_id'] = int(message_thread_id)
+    thread_id = normalize_telegram_thread_id(message_thread_id)
+    if thread_id is not None:
+        payload['message_thread_id'] = thread_id
 
     ok, response = _telegram_api_post(method_name, payload)
     if not ok:
@@ -629,8 +631,9 @@ def send_telegram_chat_message(chat_id, body, parse_mode=None, message_thread_id
 def send_telegram_interactive_message(
         chat_id, body, message_thread_id=None, reply_markup=None, reply_to_message_id=None):
     payload = {'chat_id': str(chat_id or ''), 'text': str(body or '')[:4096]}
-    if message_thread_id is not None:
-        payload['message_thread_id'] = int(message_thread_id)
+    thread_id = normalize_telegram_thread_id(message_thread_id)
+    if thread_id is not None:
+        payload['message_thread_id'] = thread_id
     if reply_markup is not None:
         payload['reply_markup'] = reply_markup
     if reply_to_message_id is not None:
@@ -638,6 +641,16 @@ def send_telegram_interactive_message(
     ok, response = _telegram_api_post('sendMessage', payload)
     result = response.get('result') if ok and isinstance(response, dict) else None
     return str(result.get('message_id')) if isinstance(result, dict) and result.get('message_id') is not None else None
+
+
+def normalize_telegram_thread_id(value):
+    """Return a valid Telegram thread ID, or None for an unset/invalid value."""
+    if value is None or str(value).strip().lower() in {'', 'none', 'null'}:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def answer_telegram_callback_query(callback_query_id):

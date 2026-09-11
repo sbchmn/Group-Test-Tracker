@@ -5,7 +5,12 @@ from datetime import datetime
 
 from . import db
 from .models import NotificationConfig, PublicResult, ResultAnalysisRun
-from .notifications import delete_telegram_message, edit_telegram_message, send_telegram_interactive_message
+from .notifications import (
+    delete_telegram_message,
+    edit_telegram_message,
+    normalize_telegram_thread_id,
+    send_telegram_interactive_message,
+)
 from .result_analysis.service import AnalysisConflict, apply_analysis_run
 
 
@@ -29,10 +34,12 @@ def _state(result):
 
 def _review_location(result):
     configured_chat = str(_config('telegram_coa_review_chat_id')).strip()
+    if configured_chat.lower() in {'none', 'null'}:
+        configured_chat = ''
     if configured_chat:
-        thread = str(_config('telegram_coa_review_thread_id')).strip() or None
+        thread = normalize_telegram_thread_id(_config('telegram_coa_review_thread_id'))
         return configured_chat, thread
-    return result.submission_chat_id, result.submission_thread_id
+    return result.submission_chat_id, normalize_telegram_thread_id(result.submission_thread_id)
 
 
 def _result_url(result):

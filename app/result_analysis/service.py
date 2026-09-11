@@ -25,7 +25,9 @@ def _target_filter(target):
     raise ValueError('Unsupported analysis target.')
 
 
-def enqueue_analysis(target, source_kind, requested_by_id=None, provider=None, automatic=False):
+def enqueue_analysis(
+        target, source_kind, requested_by_id=None, provider=None, automatic=False,
+        bypass_duplicate_check=False):
     settings = get_analysis_settings()
     if automatic and not settings['enabled']:
         return None
@@ -55,6 +57,7 @@ def enqueue_analysis(target, source_kind, requested_by_id=None, provider=None, a
         provider=selected,
         provider_model=config['model'],
         schema_version=SCHEMA_VERSION,
+        bypass_duplicate_check=bool(bypass_duplicate_check),
         max_attempts=settings['max_attempts'],
         requested_by_id=requested_by_id,
         status='queued',

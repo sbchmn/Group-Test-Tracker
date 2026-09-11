@@ -29,7 +29,7 @@
             <tbody>
             {% for finding in run.findings %}
                 <tr>
-                    <td>{% if run.status == 'needs_review' and finding.proposed_action in ('fill', 'create') %}<input type="checkbox" name="accept_{{ finding.id }}" value="yes" checked>{% else %}—{% endif %}</td>
+                    <td>{% if run.status == 'needs_review' and finding.proposed_action in ('fill', 'create') %}<input type="checkbox" name="accept_{{ finding.id }}" value="yes" {% if finding.proposed_action == 'fill' %}checked{% endif %}>{% else %}—{% endif %}</td>
                     <td><strong>{{ finding.canonical_type or 'Unrecognized' }}</strong><div class="small text-muted">{{ finding.source_label }}{% if finding.page_number %} · page {{ finding.page_number }}{% endif %} · {{ '%.0f'|format(finding.confidence * 100) }}%</div></td>
                     <td><input class="form-control form-control-sm" name="value_{{ finding.id }}" value="{{ finding.reviewed_value or finding.reported_value }}" {% if run.status != 'needs_review' %}disabled{% endif %}></td>
                     <td class="small">{{ finding.evidence_text }}</td>

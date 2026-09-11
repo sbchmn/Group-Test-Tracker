@@ -349,20 +349,25 @@ def send_telegram_command_response(chat_id, body, image_key=None, message_thread
     return str(result.get('message_id')) if isinstance(result, dict) and result.get('message_id') is not None else None
 
 
-def download_telegram_photo(file_id):
-    """Download a Telegram photo into a storage-compatible file object."""
+def download_telegram_photo(file_id, max_bytes=None):
+    """Download a Telegram file into a storage-compatible, optionally bounded stream."""
     bot_token = str(_get_config('telegram_bot_token') or '').strip()
     if not bot_token or not file_id:
         return None
     ok, response = _telegram_api_post('getFile', {'file_id': str(file_id)})
-    file_path = (response.get('result') or {}).get('file_path') if ok and isinstance(response, dict) else None
+    result = (response.get('result') or {}) if ok and isinstance(response, dict) else {}
+    file_path = result.get('file_path')
     if not file_path:
+        return None
+    if max_bytes and int(result.get('file_size') or 0) > max_bytes:
         return None
     url = f'https://api.telegram.org/file/bot{quote(bot_token, safe="")}/{file_path}'
     try:
         with urlopen(url, timeout=10) as remote_file:
-            payload = remote_file.read()
+            payload = remote_file.read((max_bytes + 1) if max_bytes else -1)
     except (HTTPError, URLError, TimeoutError, ValueError):
+        return None
+    if max_bytes and len(payload) > max_bytes:
         return None
     upload = io.BytesIO(payload)
     upload.filename = file_path.rsplit('/', 1)[-1] or 'telegram-command-image.jpg'
@@ -619,6 +624,20 @@ def send_telegram_chat_message(chat_id, body, parse_mode=None, message_thread_id
         message_thread_id=message_thread_id,
         reply_markup=reply_markup,
     )
+
+
+def send_telegram_interactive_message(
+        chat_id, body, message_thread_id=None, reply_markup=None, reply_to_message_id=None):
+    payload = {'chat_id': str(chat_id or ''), 'text': str(body or '')[:4096]}
+    if message_thread_id is not None:
+        payload['message_thread_id'] = int(message_thread_id)
+    if reply_markup is not None:
+        payload['reply_markup'] = reply_markup
+    if reply_to_message_id is not None:
+        payload['reply_parameters'] = {'message_id': int(reply_to_message_id)}
+    ok, response = _telegram_api_post('sendMessage', payload)
+    result = response.get('result') if ok and isinstance(response, dict) else None
+    return str(result.get('message_id')) if isinstance(result, dict) and result.get('message_id') is not None else None
 
 
 def answer_telegram_callback_query(callback_query_id):

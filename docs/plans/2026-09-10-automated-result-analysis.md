@@ -9,7 +9,7 @@
 
 Analyze newly uploaded or manually selected linked laboratory reports, extract reported peptide or molecule test values, and present evidence-backed suggestions for administrator approval.
 
-- Group Tests: match findings only to existing `lab_test_details` rows and fill blank `result` values.
+- Group Tests: match findings to existing `lab_test_details` rows and fill blank `result` values; administrators may also approve creation of unmatched canonical rows.
 - Public Results: propose new `item_results` rows for recognized test types.
 - Both record types: propose report metadata in a managed description block.
 
@@ -19,10 +19,10 @@ The system reports what the laboratory document says. It does not provide clinic
 
 - Analysis suggestions require administrator review before application.
 - Existing non-empty result values are never overwritten.
-- Group Test rows are never created by analysis.
+- Group Test rows are created by analysis only when an administrator explicitly approves an unmatched canonical finding; created rows use zero cost and zero required vials.
 - Composite Group Test rows remain intact and receive labeled combined results.
 - Public Result rows use canonical test names and preserve source labels in evidence.
-- Unrecognized findings remain review-only and are not added automatically.
+- Truly unrecognized findings remain review-only and are not actionable; recognized unmatched findings may be explicitly approved as new rows.
 - Reported values and units are preserved verbatim.
 - Additional metadata is written only after approval to a delimited, idempotently managed description block.
 - Client and laboratory-personnel names are excluded from metadata.
@@ -59,6 +59,8 @@ V1 canonical types:
 - Appearance
 
 Aliases are normalized in application code, not in provider-specific prompts. Examples include `assay`/`content` to Net Content only when report context supports that meaning, `LC-MS identity` to Identity, `HPLC purity` to Purity, and `LAL` to Endotoxin. Ambiguous aliases remain unrecognized.
+
+The shared extraction prompt defines these categories with positive and negative examples. It treats FTIR identification as Identity, HPLC potency as Net Content, bacterial endotoxin/BET/USP `<85>` as Endotoxin, and peptide-to-excipient ratios as Unknown. Prompt or taxonomy behavior changes advance the schema version so completed-run deduplication does not treat materially different analysis logic as equivalent.
 
 ## Source Examples
 
@@ -146,6 +148,7 @@ Methods: HPLC, LC-MS, LAL
 - Convert the first GIF frame to a still image for analysis; ignore later frames.
 - Enforce the lower of the storage upload limit and the 20 MB analysis limit.
 - Reject PDFs over 25 pages before provider submission.
+- Parse PDFs tolerantly and use the existing page renderer as a fallback for structurally imperfect files that standard viewers can open.
 
 ### Direct files and public webpages
 
@@ -185,7 +188,7 @@ All adapters use the same conservative JSON Schema subset, prompt intent, output
 
 - Store the selected provider and configured model on every run before it is leased.
 - An automatic upload uses the active provider at queue time; later settings changes do not alter that run.
-- A manual rerun may explicitly select another configured provider and creates a separate auditable run.
+- A manual rerun may explicitly select a configured provider, bypass completed-source deduplication, and create a separate auditable run.
 - Do not automatically fail over between providers. Cross-provider fallback could transmit a report to an unapproved processor, obscure cost/audit history, and change extraction behavior.
 - A provider connection test validates credentials and model access with a minimal text-only schema request; it never transmits a report.
 
@@ -291,7 +294,7 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 3. When the laboratory explicitly reports `Net`, `Average`, or `Batch Average`, choose it as the proposed displayed value and retain vial-level values as evidence.
 4. Never calculate an average from individual values.
 5. If multiple non-aggregate candidates remain, mark the type ambiguous and require manual entry.
-6. For Group Tests, match canonical findings against existing simple or composite test rows.
+6. For Group Tests, match canonical findings against existing simple or composite test rows; offer unmatched canonical findings as unchecked new-row proposals.
 7. A composite row receives a stable labeled string such as `Mass: 10.2 mg; Purity: 99.4%; Identity: Confirmed`.
 8. If the matched Group Test row already has a non-empty result, create a conflict finding and do not modify it.
 9. For Public Results, propose one canonical row per accepted type and do not create a duplicate of an existing non-empty row.
@@ -303,8 +306,8 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 
 - A successful new upload or upload replacement queues one run after the owning database transaction commits.
 - A manual POST action queues the explicitly selected upload or link.
-- Source hash, target, provider, and schema version form the idempotency identity.
-- A duplicate queued/analyzing/reviewable run returns the existing run instead of creating another.
+- Source hash, target, provider, and schema version form the automatic-analysis idempotency identity.
+- Concurrent queued/analyzing runs are deduplicated, while an explicit administrator rerun may reanalyze a completed source.
 - A new source supersedes older unapplied runs for that target/source kind.
 
 ### Worker
@@ -338,6 +341,13 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 
 - The same source controls and status card.
 - Review preview distinguishes new canonical rows, conflicts, metadata, and unrecognized findings.
+
+### Future bot-submitted Public Results
+
+- Keep report acquisition, extraction, taxonomy, and review application independent of the web form so Telegram and Discord can reuse the same services.
+- Bot input must create a reviewable draft through one shared application service rather than writing `PublicResult` rows directly from chat handlers.
+- Require a linked application identity with explicit authorization, validate uploads/links through the same source boundaries, and preserve platform/message provenance for auditing and idempotency.
+- Never publish bot-submitted values directly; queue analysis and require the same administrator review used by web-submitted reports.
 
 ### Settings
 
@@ -374,7 +384,7 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 - Maximum generic HTML: 2 MB.
 - Maximum three redirects.
 - Two retries and two concurrent analyses per worker by default.
-- Avoid duplicate provider calls through source hashing and active-run deduplication.
+- Avoid duplicate automatic provider calls through source hashing and active-run deduplication; honor explicit administrator reruns.
 - Store usage metadata for cost monitoring without storing document text.
 - Render or decode only pages/frames needed by the selected provider input path.
 
@@ -503,14 +513,14 @@ Work:
 6. Known laboratory resolvers never bypass authentication, CAPTCHAs, or anti-bot restrictions and return `upload_required` when safe retrieval is unavailable.
 7. Private, loopback, link-local, reserved, metadata-service, or redirect-to-private URLs are rejected before content is processed.
 8. Eligible upload types come from the effective storage format allowlist; GIF analysis uses only the first frame.
-9. Sources over 20 MB, PDFs over 25 pages, and HTML over 2 MB fail safely without a provider call.
+9. Sources over 20 MB, PDFs over 25 pages, and HTML over 2 MB fail safely without a provider call; structurally imperfect but readable PDFs are parsed tolerantly.
 10. OpenAI receives acquired file/image content through the Responses API with strict JSON-schema output and `store=False`.
 11. Provider credentials and raw provider responses never appear in logs or UI errors.
 12. Every proposed result includes a source label, verbatim value, confidence, and evidence; page number is included when available.
 13. Explicit Net/Average/Batch Average values are preferred over vial readings, and the application never calculates an absent aggregate.
-14. Group Test analysis creates no test rows and never overwrites a non-empty result.
+14. Group Test analysis creates rows only for explicitly approved unmatched canonical findings, using zero cost and zero required vials, and never overwrites a non-empty result.
 15. Composite Group Test rows receive deterministic labeled result strings.
-16. Public Result analysis proposes canonical rows, avoids duplicates, and leaves unrecognized findings review-only.
+16. Result analysis proposes canonical rows, avoids duplicates, and leaves truly unrecognized findings non-actionable.
 17. Description metadata is administrator-reviewed, excludes personnel/client names, preserves manual text, and maintains one idempotent managed block.
 18. Applying accepted findings is atomic and rechecks concurrent record changes.
 19. Failed, retried, superseded, rejected, and applied runs remain auditable without retaining duplicate source documents.

@@ -133,6 +133,7 @@ Daily review behavior:
 - New eligible uploads queue after the Group Test or Public Result record commits.
 - Links never queue automatically. Use Analyze Linked Result on the edit page.
 - Open Review Findings, verify the evidence and confidence, accept/reject each row, correct accepted text if needed, and optionally append metadata.
+- Optional Telegram COA workflow: enable `/submitcoa` under Built-in Bot Commands, allowlist any groups/topics, and optionally set a dedicated review chat/topic. Linked users submit a PDF/image or public link; linked admins name, edit, select, and publish or reject it in that same review conversation.
 - Group Tests only fill blank existing test rows.
 - Public Results can add recognized canonical rows.
 - Non-empty values are never overwritten. Unrecognized and conflicting findings remain review-only.

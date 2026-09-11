@@ -11,7 +11,7 @@ from app import create_app, db
 from app.models import (
     GroupTest, NotificationConfig, PublicResult, ResultAnalysisRun, User,
 )
-from app.result_analysis.service import apply_analysis_run, enqueue_analysis, persist_extraction
+from app.result_analysis.service import AnalysisConflict, apply_analysis_run, enqueue_analysis, persist_extraction
 from app.result_analysis.jobs import process_next_run
 from app.result_analysis.diagnostics import append_provider_diagnostic, read_provider_diagnostics
 from app.result_analysis.providers.base import classify_sdk_error
@@ -149,6 +149,75 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(test.lab_test_details[0]['result'], fill.reported_value)
         self.assertEqual(test.lab_test_details[1]['result'], 'Pass')
         self.assertIn('<!-- result-analysis:start -->', test.description)
+
+    def test_group_test_can_create_unmatched_canonical_row_but_not_unknown(self):
+        test = self._group_test()
+        run = ResultAnalysisRun(
+            group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
+            provider='openai', provider_model='test-model', status='analyzing', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        payload = extraction_payload([
+            finding('Endotoxin (USP <85>)', 'Endotoxin', '1.158 EU/mL'),
+            finding('Fentanyl Screen', 'Unknown', 'Not Detected'),
+        ])
+        persist_extraction(run, AnalysisExtraction(payload, 'test-model'))
+        db.session.commit()
+
+        create = next(item for item in run.findings if item.canonical_type == 'Endotoxin')
+        unknown = next(item for item in run.findings if item.canonical_type is None)
+        self.assertEqual(create.proposed_action, 'create')
+        self.assertEqual(unknown.proposed_action, 'unrecognized')
+
+        count = apply_analysis_run(
+            run,
+            {
+                create.id: {'accepted': True},
+                unknown.id: {'accepted': True},
+            },
+            self.user.id,
+        )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(test.lab_test_details[-1], {
+            'name': 'Endotoxin',
+            'price': 0.0,
+            'vials_needed': 0,
+            'result': '1.158 EU/mL',
+        })
+        self.assertEqual(unknown.review_decision, 'rejected')
+
+    def test_group_test_create_is_unchecked_and_rechecks_for_duplicate_rows(self):
+        test = self._group_test()
+        run = ResultAnalysisRun(
+            group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
+            provider='openai', provider_model='test-model', status='analyzing', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        persist_extraction(run, AnalysisExtraction(
+            extraction_payload([finding('Appearance', 'Appearance', 'Good')]),
+            'test-model',
+        ))
+        db.session.commit()
+        create = next(iter(run.findings))
+
+        client = self.app.test_client()
+        client.post('/login', data={'username': self.user.username, 'password': 'secret-pass'})
+        response = client.get(f'/admin/result-analysis/{run.id}')
+        html = response.get_data(as_text=True)
+        checkbox = f'name="accept_{create.id}" value="yes"'
+        self.assertIn(checkbox, html)
+        self.assertNotIn(f'{checkbox} checked', html)
+
+        test.lab_test_details = [
+            *test.lab_test_details,
+            {'name': 'Appearance', 'price': 25.0, 'vials_needed': 0},
+        ]
+        db.session.commit()
+        with self.assertRaises(AnalysisConflict):
+            apply_analysis_run(run, {create.id: {'accepted': True}}, self.user.id)
 
     def test_public_result_adds_only_new_canonical_rows(self):
         result = PublicResult(

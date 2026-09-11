@@ -9,7 +9,7 @@
 
 Analyze newly uploaded or manually selected linked laboratory reports, extract reported peptide or molecule test values, and present evidence-backed suggestions for administrator approval.
 
-- Group Tests: match findings only to existing `lab_test_details` rows and fill blank `result` values.
+- Group Tests: match findings to existing `lab_test_details` rows and fill blank `result` values; administrators may also approve creation of unmatched canonical rows.
 - Public Results: propose new `item_results` rows for recognized test types.
 - Both record types: propose report metadata in a managed description block.
 
@@ -19,10 +19,10 @@ The system reports what the laboratory document says. It does not provide clinic
 
 - Analysis suggestions require administrator review before application.
 - Existing non-empty result values are never overwritten.
-- Group Test rows are never created by analysis.
+- Group Test rows are created by analysis only when an administrator explicitly approves an unmatched canonical finding; created rows use zero cost and zero required vials.
 - Composite Group Test rows remain intact and receive labeled combined results.
 - Public Result rows use canonical test names and preserve source labels in evidence.
-- Unrecognized findings remain review-only and are not added automatically.
+- Truly unrecognized findings remain review-only and are not actionable; recognized unmatched findings may be explicitly approved as new rows.
 - Reported values and units are preserved verbatim.
 - Additional metadata is written only after approval to a delimited, idempotently managed description block.
 - Client and laboratory-personnel names are excluded from metadata.
@@ -291,7 +291,7 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 3. When the laboratory explicitly reports `Net`, `Average`, or `Batch Average`, choose it as the proposed displayed value and retain vial-level values as evidence.
 4. Never calculate an average from individual values.
 5. If multiple non-aggregate candidates remain, mark the type ambiguous and require manual entry.
-6. For Group Tests, match canonical findings against existing simple or composite test rows.
+6. For Group Tests, match canonical findings against existing simple or composite test rows; offer unmatched canonical findings as unchecked new-row proposals.
 7. A composite row receives a stable labeled string such as `Mass: 10.2 mg; Purity: 99.4%; Identity: Confirmed`.
 8. If the matched Group Test row already has a non-empty result, create a conflict finding and do not modify it.
 9. For Public Results, propose one canonical row per accepted type and do not create a duplicate of an existing non-empty row.
@@ -508,9 +508,9 @@ Work:
 11. Provider credentials and raw provider responses never appear in logs or UI errors.
 12. Every proposed result includes a source label, verbatim value, confidence, and evidence; page number is included when available.
 13. Explicit Net/Average/Batch Average values are preferred over vial readings, and the application never calculates an absent aggregate.
-14. Group Test analysis creates no test rows and never overwrites a non-empty result.
+14. Group Test analysis creates rows only for explicitly approved unmatched canonical findings, using zero cost and zero required vials, and never overwrites a non-empty result.
 15. Composite Group Test rows receive deterministic labeled result strings.
-16. Public Result analysis proposes canonical rows, avoids duplicates, and leaves unrecognized findings review-only.
+16. Result analysis proposes canonical rows, avoids duplicates, and leaves truly unrecognized findings non-actionable.
 17. Description metadata is administrator-reviewed, excludes personnel/client names, preserves manual text, and maintains one idempotent managed block.
 18. Applying accepted findings is atomic and rechecks concurrent record changes.
 19. Failed, retried, superseded, rejected, and applied runs remain auditable without retaining duplicate source documents.

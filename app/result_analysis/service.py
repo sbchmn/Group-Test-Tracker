@@ -164,8 +164,7 @@ def persist_extraction(run, extraction):
                 proposed_action='conflict' if canonical in existing_types else 'create',
             ))
 
-    leftovers = ambiguous + [item for canonical, item in selected.items() if canonical not in used]
-    for item in leftovers:
+    for item in ambiguous:
         canonical = item.get('canonical_type')
         db.session.add(ResultAnalysisFinding(
             run=run,
@@ -177,6 +176,21 @@ def persist_extraction(run, extraction):
             confidence=item['confidence'],
             is_reported_aggregate=item['is_reported_aggregate'],
             proposed_action='unrecognized',
+        ))
+
+    for canonical, item in selected.items():
+        if canonical in used:
+            continue
+        db.session.add(ResultAnalysisFinding(
+            run=run,
+            canonical_type=canonical,
+            source_label=item['source_label'],
+            reported_value=item['reported_value'],
+            evidence_text=item['evidence'],
+            page_number=item['page_number'],
+            confidence=item['confidence'],
+            is_reported_aggregate=item['is_reported_aggregate'],
+            proposed_action='create' if isinstance(target, GroupTest) else 'unrecognized',
         ))
 
     run.provider_model = extraction.provider_model[:120]
@@ -237,6 +251,21 @@ def apply_analysis_run(run, decisions, reviewed_by_id, include_metadata=False):
     if isinstance(target, GroupTest):
         rows = [dict(item) for item in (target.lab_test_details or [])]
         for finding in accepted:
+            if finding.proposed_action == 'create':
+                existing_types = {
+                    canonical
+                    for row in rows
+                    for canonical in canonical_types_for_row(row.get('name'))
+                }
+                if finding.canonical_type in existing_types:
+                    raise AnalysisConflict('A matching Group Test row was added after analysis.')
+                rows.append({
+                    'name': finding.canonical_type,
+                    'price': 0.0,
+                    'vials_needed': 0,
+                    'result': finding.reviewed_value,
+                })
+                continue
             try:
                 raw_index, expected_digest = finding.target_row_key.split(':', 1)
                 index = int(raw_index)

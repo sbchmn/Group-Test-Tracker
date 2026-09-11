@@ -24,6 +24,10 @@ def claim_next_run():
         )
     ).order_by(ResultAnalysisRun.queued_at, ResultAnalysisRun.id).first()
     if not candidate:
+        # End the read transaction so the next poll receives a fresh snapshot.
+        # This is required for databases such as MySQL that default to
+        # REPEATABLE READ isolation.
+        db.session.rollback()
         return None
     token = secrets.token_hex(24)
     settings = get_analysis_settings()

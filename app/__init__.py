@@ -210,10 +210,16 @@ def create_app(config_overrides=None):
         from .result_analysis.jobs import process_next_run
 
         with app.app_context():
+            click.echo(f'Result analysis worker started; polling every {poll_seconds} seconds.')
             while True:
-                run = process_next_run()
-                if run:
-                    click.echo(f'Result analysis run {run.id}: {run.status}')
+                run = None
+                try:
+                    run = process_next_run()
+                    if run:
+                        click.echo(f'Result analysis run {run.id}: {run.status}')
+                finally:
+                    # Never retain an identity map or transaction across polls.
+                    db.session.remove()
                 if once:
                     return
                 if not run:

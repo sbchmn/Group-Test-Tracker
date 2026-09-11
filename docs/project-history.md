@@ -1503,3 +1503,24 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - The Discord module's missing-token path exited cleanly without an application-context error.
 - Full post-fix unittest discovery passed 148 tests in 179.352 seconds.
 - `git diff --check` passed; only existing Python, SQLAlchemy, and Flask-Migrate deprecation warnings remain.
+
+## Result Analysis Queue Snapshot Refresh
+
+### Applied Changes
+
+- Closed the read transaction whenever a poll finds no eligible analysis run, ensuring the next poll sees a fresh database snapshot under MySQL's default repeatable-read isolation.
+- Removed the scoped SQLAlchemy session after every worker-loop iteration so identity-map and transaction state never persist between polls.
+- Added a startup log line that confirms the configured polling interval in DigitalOcean runtime logs.
+
+### Security / Reliability / Performance Review
+
+- Queue authorization and provider selection are unchanged.
+- Existing conditional claims still prevent two workers from successfully claiming the same queued row.
+- Rollback on an empty read discards no writes, and session removal runs after completed result logging.
+- One transaction cleanup per poll adds negligible database overhead relative to the five-second default polling interval.
+
+### Validation Results
+
+- Restarting the DigitalOcean worker immediately processed rows that had remained queued, confirming stale worker transaction state as the failure mode.
+- Automated tests were explicitly skipped at the user's request.
+- Diff/whitespace and repository-state review passed before commit.

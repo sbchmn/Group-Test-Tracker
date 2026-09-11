@@ -5,7 +5,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
-- **Current branch baseline:** `Test-Updates` at `96069b4426b756b5c92e369e7b8ce3db7706d976`.
+- **Current branch baseline:** `Test-Updates` at `24f4bfffc43b13c53a25cfdc405a8c0d32308d72`.
 - **Application version:** `3.2` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
@@ -161,7 +161,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 ## Validation Baseline
 
-Latest local validation on 2026-09-10, from baseline `96069b4426b756b5c92e369e7b8ce3db7706d976` plus the diagnostic-log and worker-startup diff:
+Latest local validation on 2026-09-10, from baseline `24f4bfffc43b13c53a25cfdc405a8c0d32308d72` before the untested queue-snapshot refresh diff:
 
 ```text
 PYTHONPATH=/tmp/group-test-tracker-test-deps-20260910 /home/sbachman/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -B -m unittest
@@ -213,15 +213,15 @@ After each edit phase:
 ## Current Change Record
 
 - **Date:** 2026-09-10
-- **Scope:** Add safe provider diagnostic logging, display it on the administrator-only Result Analysis Settings page, and harden DigitalOcean worker startup.
-- **Target files/modules:** New `app/result_analysis/diagnostics.py`, provider error normalization, worker and connection-test call sites, Discord lifecycle helpers, `Procfile`, the settings template, focused tests, `README.md`, and `ADMIN_QUICK_START.md`.
-- **Intended behavior:** Record enough structured context to diagnose provider failures while excluding secrets, report content, and raw responses; display recent entries only to administrators; ensure Discord lifecycle callbacks have Flask context; and invoke the analysis worker through explicit Flask factory discovery.
+- **Scope:** Add safe provider diagnostic logging, display it on the administrator-only Result Analysis Settings page, and harden DigitalOcean worker startup and polling.
+- **Target files/modules:** New `app/result_analysis/diagnostics.py`, provider error normalization, worker and connection-test call sites, queue claim/session lifecycle, Discord lifecycle helpers, `Procfile`, the settings template, focused tests, `README.md`, and `ADMIN_QUICK_START.md`.
+- **Intended behavior:** Record enough structured context to diagnose provider failures while excluding secrets, report content, and raw responses; display recent entries only to administrators; ensure Discord lifecycle callbacks have Flask context; invoke the analysis worker through explicit Flask factory discovery; and ensure every queue poll observes a fresh database snapshot.
 - **Assumptions:** The deployment filesystem is writable at the application instance path; logs are operational diagnostics rather than durable audit records.
 - **Security risks/checks:** API-key leakage, provider-response leakage, report-content exposure, HTML injection, unauthorized log access, control characters, and oversized attacker-controlled fields.
-- **Reliability risks/checks:** Concurrent web/worker writes, logging failures masking provider failures, malformed existing log data, deterministic pruning, Flask context availability in long-running Discord callbacks, and worker command discovery in App Platform components.
+- **Reliability risks/checks:** Concurrent web/worker writes, logging failures masking provider failures, malformed existing log data, deterministic pruning, Flask context availability in long-running Discord callbacks, worker command discovery in App Platform components, and stale repeatable-read snapshots in long-running queue polling.
 - **Optimization checks:** Cap each entry and the complete file, retain only recent complete lines, avoid database growth, and perform no extra provider calls.
 - **Validation plan:** Focused diagnostics/provider/route tests, existing result-analysis and security tests, full `python -m unittest`, and `git diff --check`.
-- **Applied changes:** Added structured SDK-error normalization; a sanitized JSON-lines diagnostic writer/reader; bounded, locked retention; connection-test success/failure entries; worker failure entries; administrator-only display on Result Analysis Settings; a narrow ignore rule for the runtime diagnostic file; context-safe Discord lifecycle logging/status delivery; an explicit `python -m flask --app app:create_app` worker command; and unambiguous DigitalOcean Run Command documentation.
+- **Applied changes:** Added structured SDK-error normalization; a sanitized JSON-lines diagnostic writer/reader; bounded, locked retention; connection-test success/failure entries; worker failure entries; administrator-only display on Result Analysis Settings; a narrow ignore rule for the runtime diagnostic file; context-safe Discord lifecycle logging/status delivery; an explicit `python -m flask --app app:create_app` worker command; unambiguous DigitalOcean Run Command documentation; empty-poll transaction cleanup; per-iteration session removal; and a worker startup log entry.
 - **Security/reliability/optimization review:** Credential patterns are redacted, all fields are single-line and length bounded, unexpected internal errors omit details, template output is auto-escaped, logging failures are isolated, Linux web/worker writes use file locks, the default file cap is 128 KiB, and configuration is hard-capped at 1 MiB.
-- **Validation:** The deployment follow-up passed a 13-test focused suite, confirmed CLI registration, completed an empty `result-analysis-worker --once` run, cleanly exercised Discord's missing-token startup path, and passed all 148 tests in 179.352s. `git diff --check` passed.
+- **Validation:** The preceding deployment follow-up passed all 148 tests. For the confirmed stale-poll follow-up, tests were explicitly skipped at user request; diff/whitespace and repository-state review passed before commit.
 - **Remaining operational note:** The log is intentionally non-durable and component-local unless `RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH` points to shared persistent storage; separately deployed web and worker components may therefore show different local files.

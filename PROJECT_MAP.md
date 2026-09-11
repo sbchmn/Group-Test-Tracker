@@ -5,7 +5,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
-- **Current branch baseline:** `Test-Updates` at `827a8e473db8660558df85d4a9210ecccbcfdf97`.
+- **Current branch baseline:** `Test-Updates` at `96069b4426b756b5c92e369e7b8ce3db7706d976`.
 - **Application version:** `3.2` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
@@ -82,6 +82,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Provide a consolidated Settings hub for notifications, bot integrations, commands, templates, payments, and storage.
 - Preserve masked provider secrets when forms submit unchanged placeholders.
 - Keep provider identity linking user-owned; administrator edits do not silently reassign Telegram or Discord identities.
+- Display sanitized, bounded provider diagnostics only on the administrator-only Result Analysis Settings page.
 
 ## Active Priorities
 
@@ -135,6 +136,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Group-test result links and files require administrator access or approved-and-paid participation.
 - Uploaded content is size bounded, type validated, stored under generated keys, and never trusted based only on a client filename.
 - Secrets remain masked in admin interfaces and must not appear in logs or rendered messages.
+- Result-analysis diagnostics retain only bounded status/code/request-ID context, redact credential patterns, exclude report content and raw responses, and rely on template auto-escaping.
 - User-controlled Telegram/Discord text must not create markup, commands, callbacks, or broad mentions.
 
 ## Reliability Invariants
@@ -144,6 +146,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - External delivery failures do not roll back committed domain changes.
 - Duplicate webhook and digest events are handled idempotently.
 - External calls use explicit timeouts and bounded retry behavior.
+- Provider diagnostic writes are best-effort, process-safe on Linux, and cannot alter provider or worker outcomes; the log discards oldest entries when its configured size is reached.
 - Payment selection does not alter accounting or prove payment.
 - Replacing stored media commits the new reference before best-effort deletion of the previous object.
 - Provider-specific adapters format and transport messages; business authorization stays in shared application logic.
@@ -158,11 +161,11 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 ## Validation Baseline
 
-Latest local validation on 2026-09-10, from baseline `827a8e473db8660558df85d4a9210ecccbcfdf97` plus the uncommitted feature diff:
+Latest local validation on 2026-09-10, from baseline `96069b4426b756b5c92e369e7b8ce3db7706d976` plus the diagnostic-log and worker-startup diff:
 
 ```text
-PYTHONPATH=.test-deps /home/sbachman/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -B -m unittest
-145 tests passed in 180.209s
+PYTHONPATH=/tmp/group-test-tracker-test-deps-20260910 /home/sbachman/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -B -m unittest
+148 tests passed in 179.352s
 ```
 
 This local result is recorded in project history but is not backed by a GitHub Actions check. The provider/network paths use mocks; production credentials and the real-report evaluation corpus were not exercised.
@@ -210,15 +213,15 @@ After each edit phase:
 ## Current Change Record
 
 - **Date:** 2026-09-10
-- **Scope:** Implement the approved automated result-analysis workflow and document administration/deployment.
-- **Target files/modules:** `app/models.py`, a new `app/result_analysis/` package, `app/storage.py`, `app/routes.py`, `app/__init__.py`, admin templates, one additive migration, focused tests, `requirements.txt`, `README.md`, and `ADMIN_QUICK_START.md`.
-- **Intended behavior:** Queue new eligible uploads, support manual upload/link analysis, extract through an explicitly selected OpenAI/Grok/Claude adapter, require administrator review, fill only blank Group Test results, add canonical Public Result rows, and append approved metadata to a managed description block.
-- **Assumptions:** Existing JSON result structures remain authoritative; provider calls run only in the worker; stored object reads remain private; historical records are not automatically backfilled.
-- **Security risks/checks:** SSRF and redirect rebinding, decompression/PDF bombs, prompt injection, secret exposure, authorization/CSRF, cross-provider transmission, unsafe link schemes, and concurrent overwrite checks.
-- **Reliability risks/checks:** Queue deduplication, atomic leasing, retries/timeouts, source supersession, schema validation, idempotent apply, source deletion/change, and worker crash recovery.
-- **Optimization checks:** Bound file/HTML/page/pixel sizes, hash sources before paid calls, render once, cap worker concurrency, and avoid provider work in request handlers.
-- **Validation plan:** Migration/schema tests; focused analysis/source/provider/route tests; existing security and storage suites; full `python -m unittest`; `git diff --check`.
-- **Applied changes:** Added analysis run/finding models and migration; provider-neutral contracts and taxonomy; OpenAI, Grok, and Claude adapters; bounded upload/link acquisition; durable worker leasing/retries; administrator settings, queue, review, and apply routes/templates; post-commit upload triggers; worker deployment entry; focused tests; and administrator/developer documentation.
-- **Security/reliability/optimization review:** Enforced administrator authorization and CSRF, masked credentials and safe errors, rejected private/nonstandard URL targets with redirect/peer checks, bounded bytes/pages/pixels/HTML, disabled provider tools/storage features, used leases/retries/deduplication, fixed provider selection per run, and rechecked row state during atomic apply.
-- **Validation:** Focused result-analysis tests passed (10); schema/migration tests passed against an actual Alembic upgrade (3); combined security/storage/schema/analysis regression passed (80); full discovery passed (145 in 180.209s); and `git diff --check` passed. The first bare discovery attempt found 0 tests; adding `tests/__init__.py` made package discovery explicit and the rerun passed.
-- **Remaining rollout work:** Apply the migration, supply provider credentials, start the worker, run real-report fixture evaluations for each enabled provider, and enable automatic uploads only after accuracy/cost review.
+- **Scope:** Add safe provider diagnostic logging, display it on the administrator-only Result Analysis Settings page, and harden DigitalOcean worker startup.
+- **Target files/modules:** New `app/result_analysis/diagnostics.py`, provider error normalization, worker and connection-test call sites, Discord lifecycle helpers, `Procfile`, the settings template, focused tests, `README.md`, and `ADMIN_QUICK_START.md`.
+- **Intended behavior:** Record enough structured context to diagnose provider failures while excluding secrets, report content, and raw responses; display recent entries only to administrators; ensure Discord lifecycle callbacks have Flask context; and invoke the analysis worker through explicit Flask factory discovery.
+- **Assumptions:** The deployment filesystem is writable at the application instance path; logs are operational diagnostics rather than durable audit records.
+- **Security risks/checks:** API-key leakage, provider-response leakage, report-content exposure, HTML injection, unauthorized log access, control characters, and oversized attacker-controlled fields.
+- **Reliability risks/checks:** Concurrent web/worker writes, logging failures masking provider failures, malformed existing log data, deterministic pruning, Flask context availability in long-running Discord callbacks, and worker command discovery in App Platform components.
+- **Optimization checks:** Cap each entry and the complete file, retain only recent complete lines, avoid database growth, and perform no extra provider calls.
+- **Validation plan:** Focused diagnostics/provider/route tests, existing result-analysis and security tests, full `python -m unittest`, and `git diff --check`.
+- **Applied changes:** Added structured SDK-error normalization; a sanitized JSON-lines diagnostic writer/reader; bounded, locked retention; connection-test success/failure entries; worker failure entries; administrator-only display on Result Analysis Settings; a narrow ignore rule for the runtime diagnostic file; context-safe Discord lifecycle logging/status delivery; an explicit `python -m flask --app app:create_app` worker command; and unambiguous DigitalOcean Run Command documentation.
+- **Security/reliability/optimization review:** Credential patterns are redacted, all fields are single-line and length bounded, unexpected internal errors omit details, template output is auto-escaped, logging failures are isolated, Linux web/worker writes use file locks, the default file cap is 128 KiB, and configuration is hard-capped at 1 MiB.
+- **Validation:** The deployment follow-up passed a 13-test focused suite, confirmed CLI registration, completed an empty `result-analysis-worker --once` run, cleanly exercised Discord's missing-token startup path, and passed all 148 tests in 179.352s. `git diff --check` passed.
+- **Remaining operational note:** The log is intentionally non-durable and component-local unless `RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH` points to shared persistent storage; separately deployed web and worker components may therefore show different local files.

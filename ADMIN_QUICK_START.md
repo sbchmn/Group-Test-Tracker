@@ -118,13 +118,15 @@ Automated analysis extracts reported laboratory values into an administrator rev
 4. Enable only configured providers and verify the model identifiers.
 5. Choose the active provider used for automatic upload runs.
 6. Keep automatic analysis disabled initially and run the provider's Connection Test. It sends minimal text, not a report.
+   - If it fails, inspect Recent Provider Diagnostics on the same page for the sanitized HTTP status, provider code, parameter, and request ID.
 7. Deploy/start the separate worker process:
-`flask --app app result-analysis-worker`
+`python -m flask --app app:create_app result-analysis-worker`
 8. Upload a synthetic/sample report, use Analyze Uploaded File on its edit page, and review the extracted suggestions.
 9. Enable automatic analysis after the dry run behaves correctly.
 
 DigitalOcean/Procfile process type:
-- `result-analysis-worker: flask --app app result-analysis-worker`
+- Procfile entry: `result-analysis-worker: python -m flask --app app:create_app result-analysis-worker --poll-seconds 5`
+- DigitalOcean Run Command: `python -m flask --app app:create_app result-analysis-worker --poll-seconds 5` (omit the `result-analysis-worker:` Procfile label)
 
 Daily review behavior:
 
@@ -238,9 +240,10 @@ Migrations fail:
 Result analysis remains queued or fails:
 1. Confirm the `result-analysis-worker` process is running.
 2. Confirm the run's selected provider is enabled and configured.
-3. Run `flask --app app result-analysis-worker --once` for one safe status check.
+3. Run `python -m flask --app app:create_app result-analysis-worker --once` for one safe status check.
 4. Confirm the worker can read the private object-storage bucket.
 5. For linked sources, confirm the page is public and does not require login, cookies, or anti-bot interaction.
+6. Review Recent Provider Diagnostics under Admin Settings -> Result Analysis. The log excludes credentials/report content and automatically drops old entries at 128 KiB by default (1 MiB hard maximum).
 
 ## 11) Pre-Release Admin Checklist
 

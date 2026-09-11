@@ -84,6 +84,7 @@ from .storage import (
 from .version import APP_NAME, APP_RELEASE, APP_VERSION
 from .result_analysis.providers import build_provider
 from .result_analysis.providers.base import ProviderError
+from .result_analysis.diagnostics import append_provider_diagnostic, read_provider_diagnostics
 from .result_analysis.service import AnalysisConflict, apply_analysis_run, enqueue_analysis, latest_run_for_target
 from .result_analysis.settings import ENV_KEYS, PROVIDERS, get_analysis_settings, provider_config
 
@@ -3711,6 +3712,7 @@ def result_analysis_config():
         form=form,
         environment_keys=ENV_KEYS,
         configured={provider: bool(effective['providers'][provider]['api_key']) for provider in PROVIDERS},
+        diagnostic_log=read_provider_diagnostics(),
     )
 
 
@@ -3720,11 +3722,15 @@ def result_analysis_config():
 def test_result_analysis_provider(provider):
     if provider not in PROVIDERS:
         abort(404)
+    config = None
     try:
         config = provider_config(provider)
         health = build_provider(config).test_connection()
+        append_provider_diagnostic(provider, 'connection_test', config['model'], 'success')
         flash(f'{provider.title()}: {health.message}', 'success')
     except (ValueError, RuntimeError, ProviderError) as exc:
+        model = config['model'] if config else get_analysis_settings()['providers'][provider]['model']
+        append_provider_diagnostic(provider, 'connection_test', model, 'failed', exception=exc)
         safe_message = getattr(exc, 'safe_message', str(exc))
         flash(f'{provider.title()} connection test failed: {safe_message}', 'danger')
     return redirect(url_for('main.result_analysis_config'))

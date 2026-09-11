@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,8 @@ from app.models import (
 )
 from app.result_analysis.service import apply_analysis_run, enqueue_analysis, persist_extraction
 from app.result_analysis.jobs import process_next_run
+from app.result_analysis.diagnostics import append_provider_diagnostic, read_provider_diagnostics
+from app.result_analysis.providers.base import classify_sdk_error
 from app.result_analysis.sources import SourceError, _safe_public_url, prepare_document
 from app.result_analysis.taxonomy import canonical_types_for_row, canonicalize_label
 from app.result_analysis.types import AnalysisDocument, AnalysisExtraction, ProviderCapabilities, validate_extraction
@@ -49,10 +52,13 @@ class ResultAnalysisTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         db_path = Path(self.temp_dir.name) / 'test.db'
+        self.diagnostic_log_path = Path(self.temp_dir.name) / 'result-analysis-diagnostics.log'
         self.app = create_app({
             'TESTING': True,
             'SQLALCHEMY_DATABASE_URI': f'sqlite:///{db_path}',
             'WTF_CSRF_ENABLED': False,
+            'RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH': str(self.diagnostic_log_path),
+            'RESULT_ANALYSIS_DIAGNOSTIC_LOG_MAX_BYTES': 4096,
         })
         self.context = self.app.app_context()
         self.context.push()
@@ -231,6 +237,62 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         saved_key = NotificationConfig.query.filter_by(key='result_analysis_openai_api_key').first()
         self.assertEqual(saved_key.value, 'test-key')
+
+    def test_provider_diagnostic_log_redacts_secrets_and_stays_bounded(self):
+        class FakeBadRequest(Exception):
+            status_code = 400
+            request_id = 'req_diagnostic_123'
+            body = {
+                'error': {
+                    'code': 'unsupported_parameter',
+                    'param': 'max_output_tokens',
+                    'message': 'Bad request using sk-proj-supersecret1234567890',
+                },
+            }
+
+        error = classify_sdk_error(FakeBadRequest('Bearer another-secret-value'))
+        append_provider_diagnostic('openai', 'connection_test', 'gpt-test', 'failed', exception=error)
+        contents = read_provider_diagnostics()
+        entry = json.loads(contents.strip())
+        self.assertEqual(entry['status_code'], 400)
+        self.assertEqual(entry['error_code'], 'unsupported_parameter')
+        self.assertEqual(entry['error_param'], 'max_output_tokens')
+        self.assertEqual(entry['request_id'], 'req_diagnostic_123')
+        self.assertIn('[REDACTED]', entry['detail'])
+        self.assertNotIn('supersecret', contents)
+
+        for index in range(100):
+            append_provider_diagnostic(
+                'openai', 'connection_test', 'gpt-test', 'failed',
+                exception=ValueError(f'bounded-entry-{index}-' + ('x' * 500)),
+            )
+        self.assertLessEqual(self.diagnostic_log_path.stat().st_size, 4096)
+        self.assertIn('bounded-entry-99', read_provider_diagnostics())
+
+    @patch('app.routes.build_provider')
+    def test_connection_failure_diagnostic_is_admin_visible(self, build_provider):
+        class FakeNotFound(Exception):
+            status_code = 404
+            request_id = 'req_visible_456'
+            body = {
+                'error': {
+                    'code': 'model_not_found',
+                    'message': 'Model is unavailable. <script>alert(1)</script>',
+                },
+            }
+
+        build_provider.return_value.test_connection.side_effect = classify_sdk_error(FakeNotFound())
+        client = self.app.test_client()
+        client.post('/login', data={'username': self.user.username, 'password': 'secret-pass'})
+        response = client.post('/admin/settings/result-analysis/test/openai', follow_redirects=True)
+        page = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Recent Provider Diagnostics', page)
+        self.assertIn('req_visible_456', page)
+        self.assertIn('model_not_found', page)
+        self.assertIn('Model is unavailable.', page)
+        self.assertNotIn('<script>alert(1)</script>', page)
+        self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', page)
 
     def test_admin_can_queue_link_and_open_review_without_provider_call(self):
         result = PublicResult(

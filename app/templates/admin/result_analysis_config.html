@@ -50,4 +50,12 @@
         </form>
     {% endfor %}
 </div>
+
+<div class="card mt-4">
+    <div class="card-header">Recent Provider Diagnostics</div>
+    <div class="card-body">
+        <p class="text-muted small">Sanitized connection tests and analysis failures. The local file is size-bounded and retains only recent entries. If web and worker processes use separate filesystems, this page shows the web component's local entries.</p>
+        <pre class="mb-0 small" style="max-height: 24rem; overflow: auto; white-space: pre-wrap; word-break: break-word;">{{ diagnostic_log or 'No provider diagnostics yet.' }}</pre>
+    </div>
+</div>
 {% endblock %}

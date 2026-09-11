@@ -119,6 +119,9 @@ MAX_CONTENT_LENGTH_MB=12
 OPENAI_API_KEY=
 XAI_API_KEY=
 ANTHROPIC_API_KEY=
+# Optional diagnostic-log overrides (defaults to instance/result_analysis_diagnostics.log at 128 KiB):
+RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH=
+RESULT_ANALYSIS_DIAGNOSTIC_LOG_MAX_BYTES=131072
 ```
 
 Notes:
@@ -148,10 +151,10 @@ python run.py
 Run the result-analysis worker in a separate terminal/process when automated analysis is enabled:
 
 ```bash
-flask --app app result-analysis-worker
+python -m flask --app app:create_app result-analysis-worker
 ```
 
-Use `flask --app app result-analysis-worker --once` for a single-job operational check. The included `Procfile` defines `result-analysis-worker` as a separate process type.
+Use `python -m flask --app app:create_app result-analysis-worker --once` for a single-job operational check. The included `Procfile` defines `result-analysis-worker` as a separate process type. In DigitalOcean's Run Command field, enter only the command after the Procfile process label; do not include `result-analysis-worker:`.
 
 ## Feature How-To (By Role)
 
@@ -356,6 +359,8 @@ Workflow:
 - Public Result analysis proposes canonical rows and does not replace an existing canonical result.
 - Explicit laboratory Net, Average, or Batch Average values are preferred. The application never calculates a missing average from vial readings.
 - Provider selection is fixed on each run. A provider failure never silently sends the report to another provider.
+- Recent sanitized provider diagnostics appear on Admin Settings -> Result Analysis. Entries contain bounded status/code/request-ID context, not API keys, report contents, or raw responses.
+- The diagnostic file defaults to 128 KiB, is hard-capped at 1 MiB even if misconfigured, and discards its oldest complete entries when full. It is operational and may reset on a redeploy or differ between separately deployed web/worker filesystems.
 
 Supported sources and limits:
 
@@ -608,8 +613,15 @@ Check Admin -> Storage Config:
 
 1. Confirm the `result-analysis-worker` process is running.
 2. Confirm the selected provider is enabled and has a valid API key/model under Admin Settings -> Result Analysis.
-3. Run `flask --app app result-analysis-worker --once` and inspect the safe run status shown on the edit page.
+3. Run `python -m flask --app app:create_app result-analysis-worker --once` and inspect the safe run status shown on the edit page.
 4. Confirm object storage credentials can read uploaded reports; the web preview alone does not prove worker read access.
+
+### Result Analysis Provider Test Fails
+
+1. Open Admin Settings -> Result Analysis and review Recent Provider Diagnostics.
+2. Use `status_code`, `error_code`, `error_param`, and `request_id` to distinguish credentials, model access, request validation, rate limits, and provider outages.
+3. Confirm settings were saved before testing; connection-test buttons use persisted settings.
+4. Diagnostic details are sanitized and bounded. Consult the deployment component's platform logs if its local filesystem is separate from the web component.
 
 ### Linked Result Cannot Be Analyzed
 
@@ -623,6 +635,7 @@ Check Admin -> Storage Config:
 - [app/models.py](app/models.py): SQLAlchemy models.
 - [app/routes.py](app/routes.py): forms, routes, business rules.
 - [app/storage.py](app/storage.py): S3-compatible image upload, validation, URL construction.
+- [app/result_analysis/diagnostics.py](app/result_analysis/diagnostics.py): sanitized, size-bounded provider diagnostics.
 - [app/result_analysis](app/result_analysis): source acquisition, provider adapters, durable worker, extraction validation, matching, and reviewed application.
 - [app/notifications.py](app/notifications.py): notification rendering and transport.
 - [app/templates](app/templates): UI templates.

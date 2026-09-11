@@ -28,6 +28,18 @@ from .public_results_bot import public_result_tag_page, public_results_for_tag_p
 APP = create_app()
 
 
+def _append_bot_log(message, debug=False):
+    """Write through Flask-backed notification logging from bot lifecycle hooks."""
+    with APP.app_context():
+        return append_notification_log(message, debug=debug)
+
+
+def _send_bot_status_message(body):
+    """Send a configured status message from outside a Flask request context."""
+    with APP.app_context():
+        return send_discord_status_channel_message(body)
+
+
 def _config_value(key, default=None):
     with APP.app_context():
         item = NotificationConfig.query.filter_by(key=key).first()
@@ -514,7 +526,7 @@ def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id,
 
 class DiscordBot(commands.Bot):
     async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        append_notification_log(f"discord: application command failed: {type(error).__name__}")
+        _append_bot_log(f"discord: application command failed: {type(error).__name__}")
         message = "Discord could not complete that command. Please try again shortly."
         if interaction.response.is_done():
             await interaction.edit_original_response(content=message)
@@ -630,7 +642,7 @@ class DiscordBot(commands.Bot):
         for template in templates:
             command_name = _normalize_command_name(template.command)
             if not command_name or command_name in reserved_names:
-                append_notification_log(f"discord: skipped dynamic command collision or invalid name: {template.command}", debug=True)
+                _append_bot_log(f"discord: skipped dynamic command collision or invalid name: {template.command}", debug=True)
                 continue
 
             def _make_dynamic_command(template):
@@ -670,7 +682,7 @@ class DiscordBot(commands.Bot):
 async def _run_bot():
     token = str(_config_value('discord_bot_token') or '').strip()
     if not token:
-        append_notification_log('discord: bot token missing, bot process exiting')
+        _append_bot_log('discord: bot token missing, bot process exiting')
         return
 
     intents = discord.Intents.default()
@@ -678,11 +690,11 @@ async def _run_bot():
 
     @bot.event
     async def on_ready():
-        append_notification_log(f'discord: bot ready as {bot.user}')
+        _append_bot_log(f'discord: bot ready as {bot.user}')
         try:
             channel_id = str(_config_value('discord_status_channel_id') or '').strip()
             if channel_id:
-                send_discord_status_channel_message('Discord bot connected and ready.')
+                _send_bot_status_message('Discord bot connected and ready.')
         except Exception:
             pass
 

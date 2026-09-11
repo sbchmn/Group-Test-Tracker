@@ -8,6 +8,7 @@ from .. import db
 from ..models import ResultAnalysisRun
 from .providers import build_provider
 from .providers.base import ProviderError
+from .diagnostics import append_provider_diagnostic
 from .service import persist_extraction
 from .settings import get_analysis_settings, provider_config
 from .sources import SourceError, acquire_run_source
@@ -106,11 +107,23 @@ def process_run(run):
         run.lease_token = None
         run.lease_expires_at = None
         db.session.commit()
-    except (SourceError, ProviderError) as exc:
+    except SourceError as exc:
         _fail_run(run, exc.code, exc.safe_message, transient=exc.transient)
-    except ValueError:
+    except ProviderError as exc:
+        append_provider_diagnostic(
+            run.provider, 'report_analysis', run.provider_model, 'failed', exception=exc, run_id=run.id,
+        )
+        _fail_run(run, exc.code, exc.safe_message, transient=exc.transient)
+    except ValueError as exc:
+        append_provider_diagnostic(
+            run.provider, 'report_analysis', run.provider_model, 'failed', exception=exc, run_id=run.id,
+        )
         _fail_run(run, 'invalid_provider_response', 'The provider returned an invalid structured response.')
     except Exception as exc:
+        append_provider_diagnostic(
+            run.provider, 'report_analysis', run.provider_model, 'failed', exception=exc, run_id=run.id,
+            include_detail=False,
+        )
         current_app.logger.warning('Result analysis run %s failed with %s', run.id, exc.__class__.__name__)
         _fail_run(run, 'analysis_internal_error', 'The analysis worker encountered an internal error.')
     return run

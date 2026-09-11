@@ -1450,3 +1450,56 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Full discovery passed 145 tests in 180.209 seconds using the bundled Python runtime with dependencies installed into a temporary local target.
 - `git diff --check` passed. Remaining warnings are existing Python/SQLAlchemy deprecations around `datetime.utcnow`, `Query.get`, and Flask-Migrate `get_engine`.
 - Live provider calls and accuracy/cost evaluation were intentionally not run without production credentials; provider/network tests use mocks.
+
+## Bounded Result Analysis Provider Diagnostics
+
+### Applied Changes
+
+- Added a dedicated JSON-lines diagnostic log for provider connection tests and report-analysis failures.
+- Preserved structured SDK context across safe provider errors: exception class, HTTP status, provider error code/parameter, and request ID.
+- Displayed recent diagnostics inside the existing administrator-only Result Analysis Settings page.
+- Added optional `RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH` and `RESULT_ANALYSIS_DIAGNOSTIC_LOG_MAX_BYTES` operational overrides.
+- Added a narrow `.gitignore` rule so runtime diagnostics are not accidentally committed.
+
+### Security / Reliability / Performance Review
+
+- No API key, report body, report text, or raw provider response is intentionally retained.
+- Known OpenAI/xAI/Anthropic and bearer credential patterns are redacted; every field is normalized to one line and length bounded.
+- Unexpected internal worker exceptions record their class but omit their detail to reduce report-content exposure risk.
+- Jinja auto-escaping prevents provider-supplied HTML or script text from executing in the administrator view.
+- The writer uses an exclusive Linux file lock around append/prune operations; read failures and write failures do not alter the provider workflow.
+- The log defaults to 128 KiB, cannot be configured above 1 MiB, and prunes its oldest complete entries after crossing the bound. Reads are bounded as well.
+- The log is operational rather than durable. Separately deployed web and worker components need a shared configured path to expose one combined log.
+
+### Validation Results
+
+- Focused diagnostics/result-analysis suite: 12 tests passed.
+- Combined result-analysis and security suites: 75 tests passed in 97.712 seconds.
+- Full unittest discovery: 147 tests passed in 191.616 seconds.
+- Final UTC timestamp/redaction refactor: focused 12-test suite passed again.
+- `git diff --check` passed. Existing unrelated SQLAlchemy and `datetime.utcnow` deprecation warnings remain.
+
+## DigitalOcean Worker Startup Hardening
+
+### Applied Changes
+
+- Wrapped Discord lifecycle logging and status delivery in short-lived Flask application contexts so startup, ready, and command-error callbacks can safely use database-backed notification configuration.
+- Changed the result-analysis Procfile process to `python -m flask --app app:create_app` for explicit interpreter and application-factory discovery.
+- Clarified that DigitalOcean's Run Command field accepts only the command after the Procfile label.
+- Added regression coverage for Discord lifecycle helpers invoked outside a request/application context.
+
+### Security / Reliability / Performance Review
+
+- Existing Discord token and channel configuration boundaries are unchanged; the patch only establishes context around existing operations.
+- Contexts are scoped to individual log/status calls instead of being retained for the lifetime of the asynchronous bot.
+- Explicit module invocation avoids reliance on a shell-installed `flask` executable and makes factory discovery deterministic.
+- No new network calls, retries, persistent loops, or material hot-path overhead were added.
+
+### Validation Results
+
+- Flask CLI help exposed `result-analysis-worker` using the explicit factory invocation.
+- Focused Discord lifecycle and result-analysis coverage passed 13 tests.
+- A migrated temporary SQLite database completed `result-analysis-worker --once` successfully.
+- The Discord module's missing-token path exited cleanly without an application-context error.
+- Full post-fix unittest discovery passed 148 tests in 179.352 seconds.
+- `git diff --check` passed; only existing Python, SQLAlchemy, and Flask-Migrate deprecation warnings remain.

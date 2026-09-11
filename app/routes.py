@@ -72,6 +72,7 @@ from .notifications import (
     send_telegram_command_response,
     send_telegram_interactive_message,
     download_telegram_photo,
+    normalize_telegram_thread_id,
 )
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
 from .storage import (
@@ -1820,10 +1821,10 @@ def _custom_command_chat_scope_allowed(template, chat_id, chat_type, message_thr
     chat_id = str(chat_id or '').strip()
     thread_value = None
     if message_thread_id is not None and str(message_thread_id).strip() != '':
-        try:
-            thread_value = str(int(message_thread_id))
-        except (TypeError, ValueError):
+        thread_id = normalize_telegram_thread_id(message_thread_id)
+        if thread_id is None:
             return False
+        thread_value = str(thread_id)
 
     if chat_type != 'private' and not bool(template.allow_non_private):
         return False

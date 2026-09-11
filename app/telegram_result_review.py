@@ -113,7 +113,8 @@ def handle_review_callback(user, chat_id, thread_id, data):
     if not result or result.publication_status != 'needs_review' or run.status != 'needs_review':
         return False, 'This review is no longer active.'
     expected_chat, expected_thread = _review_location(result)
-    if str(chat_id) != str(expected_chat) or str(thread_id or '') != str(expected_thread or ''):
+    incoming_thread = normalize_telegram_thread_id(thread_id)
+    if str(chat_id) != str(expected_chat) or incoming_thread != expected_thread:
         return False, 'This review belongs to a different chat or thread.'
     state = _state(result)
     action = parts[1]
@@ -214,7 +215,8 @@ def handle_review_reply(user, chat_id, thread_id, message):
     for result in candidates:
         expected_chat, expected_thread = _review_location(result)
         state = _state(result)
-        if str(expected_chat) != str(chat_id) or str(expected_thread or '') != str(thread_id or ''):
+        incoming_thread = normalize_telegram_thread_id(thread_id)
+        if str(expected_chat) != str(chat_id) or incoming_thread != expected_thread:
             continue
         title = str(message.get('text') or '').strip()
         if not title or len(title) > 200:

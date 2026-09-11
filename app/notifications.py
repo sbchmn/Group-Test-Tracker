@@ -637,7 +637,9 @@ def send_telegram_interactive_message(
     if reply_markup is not None:
         payload['reply_markup'] = reply_markup
     if reply_to_message_id is not None:
-        payload['reply_parameters'] = {'message_id': int(reply_to_message_id)}
+        reply_id = normalize_telegram_thread_id(reply_to_message_id)
+        if reply_id is not None:
+            payload['reply_parameters'] = {'message_id': reply_id}
     ok, response = _telegram_api_post('sendMessage', payload)
     result = response.get('result') if ok and isinstance(response, dict) else None
     return str(result.get('message_id')) if isinstance(result, dict) and result.get('message_id') is not None else None
@@ -659,17 +661,23 @@ def answer_telegram_callback_query(callback_query_id):
 
 
 def delete_telegram_message(chat_id, message_id):
+    message_id = normalize_telegram_thread_id(message_id)
+    if message_id is None:
+        return False
     ok, _ = _telegram_api_post('deleteMessage', {
         'chat_id': str(chat_id or ''),
-        'message_id': int(message_id),
+        'message_id': message_id,
     })
     return ok
 
 
 def edit_telegram_message(chat_id, message_id, body, reply_markup=None):
+    message_id = normalize_telegram_thread_id(message_id)
+    if message_id is None:
+        return False
     payload = {
         'chat_id': str(chat_id or ''),
-        'message_id': int(message_id),
+        'message_id': message_id,
         'text': body,
     }
     if reply_markup is not None:

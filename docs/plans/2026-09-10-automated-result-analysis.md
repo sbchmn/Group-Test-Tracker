@@ -146,6 +146,7 @@ Methods: HPLC, LC-MS, LAL
 - Convert the first GIF frame to a still image for analysis; ignore later frames.
 - Enforce the lower of the storage upload limit and the 20 MB analysis limit.
 - Reject PDFs over 25 pages before provider submission.
+- Parse PDFs tolerantly and use the existing page renderer as a fallback for structurally imperfect files that standard viewers can open.
 
 ### Direct files and public webpages
 
@@ -185,7 +186,7 @@ All adapters use the same conservative JSON Schema subset, prompt intent, output
 
 - Store the selected provider and configured model on every run before it is leased.
 - An automatic upload uses the active provider at queue time; later settings changes do not alter that run.
-- A manual rerun may explicitly select another configured provider and creates a separate auditable run.
+- A manual rerun may explicitly select a configured provider, bypass completed-source deduplication, and create a separate auditable run.
 - Do not automatically fail over between providers. Cross-provider fallback could transmit a report to an unapproved processor, obscure cost/audit history, and change extraction behavior.
 - A provider connection test validates credentials and model access with a minimal text-only schema request; it never transmits a report.
 
@@ -303,8 +304,8 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 
 - A successful new upload or upload replacement queues one run after the owning database transaction commits.
 - A manual POST action queues the explicitly selected upload or link.
-- Source hash, target, provider, and schema version form the idempotency identity.
-- A duplicate queued/analyzing/reviewable run returns the existing run instead of creating another.
+- Source hash, target, provider, and schema version form the automatic-analysis idempotency identity.
+- Concurrent queued/analyzing runs are deduplicated, while an explicit administrator rerun may reanalyze a completed source.
 - A new source supersedes older unapplied runs for that target/source kind.
 
 ### Worker
@@ -374,7 +375,7 @@ The schema forbids additional properties and bounds all arrays and strings. Prov
 - Maximum generic HTML: 2 MB.
 - Maximum three redirects.
 - Two retries and two concurrent analyses per worker by default.
-- Avoid duplicate provider calls through source hashing and active-run deduplication.
+- Avoid duplicate automatic provider calls through source hashing and active-run deduplication; honor explicit administrator reruns.
 - Store usage metadata for cost monitoring without storing document text.
 - Render or decode only pages/frames needed by the selected provider input path.
 
@@ -503,7 +504,7 @@ Work:
 6. Known laboratory resolvers never bypass authentication, CAPTCHAs, or anti-bot restrictions and return `upload_required` when safe retrieval is unavailable.
 7. Private, loopback, link-local, reserved, metadata-service, or redirect-to-private URLs are rejected before content is processed.
 8. Eligible upload types come from the effective storage format allowlist; GIF analysis uses only the first frame.
-9. Sources over 20 MB, PDFs over 25 pages, and HTML over 2 MB fail safely without a provider call.
+9. Sources over 20 MB, PDFs over 25 pages, and HTML over 2 MB fail safely without a provider call; structurally imperfect but readable PDFs are parsed tolerantly.
 10. OpenAI receives acquired file/image content through the Responses API with strict JSON-schema output and `store=False`.
 11. Provider credentials and raw provider responses never appear in logs or UI errors.
 12. Every proposed result includes a source label, verbatim value, confidence, and evidence; page number is included when available.

@@ -170,6 +170,7 @@ class ResultAnalysisRun(db.Model):
     provider = db.Column(db.String(20), nullable=False)
     provider_model = db.Column(db.String(120), nullable=False)
     schema_version = db.Column(db.String(20), nullable=False, default='1')
+    bypass_duplicate_check = db.Column(db.Boolean, nullable=False, default=False)
     status = db.Column(db.String(30), nullable=False, default='queued', index=True)
     attempt_count = db.Column(db.Integer, nullable=False, default=0)
     max_attempts = db.Column(db.Integer, nullable=False, default=3)

@@ -85,27 +85,28 @@ def process_run(run):
         run.source_sha256 = document.sha256
         run.source_content_type = document.content_type
         run.source_size_bytes = len(document.raw_bytes)
-        duplicate_query = ResultAnalysisRun.query.filter(
-            ResultAnalysisRun.id != run.id,
-            ResultAnalysisRun.source_sha256 == document.sha256,
-            ResultAnalysisRun.provider == run.provider,
-            ResultAnalysisRun.schema_version == run.schema_version,
-            ResultAnalysisRun.status.in_(('needs_review', 'applied')),
-        )
-        if run.group_test_id is not None:
-            duplicate_query = duplicate_query.filter(ResultAnalysisRun.group_test_id == run.group_test_id)
-        else:
-            duplicate_query = duplicate_query.filter(ResultAnalysisRun.public_result_id == run.public_result_id)
-        duplicate = duplicate_query.first()
-        if duplicate:
-            run.status = 'superseded'
-            run.completed_at = datetime.utcnow()
-            run.error_code = 'duplicate_source'
-            run.error_message = f'An equivalent analysis already exists as run {duplicate.id}.'
-            run.lease_token = None
-            run.lease_expires_at = None
-            db.session.commit()
-            return run
+        if not run.bypass_duplicate_check:
+            duplicate_query = ResultAnalysisRun.query.filter(
+                ResultAnalysisRun.id != run.id,
+                ResultAnalysisRun.source_sha256 == document.sha256,
+                ResultAnalysisRun.provider == run.provider,
+                ResultAnalysisRun.schema_version == run.schema_version,
+                ResultAnalysisRun.status.in_(('needs_review', 'applied')),
+            )
+            if run.group_test_id is not None:
+                duplicate_query = duplicate_query.filter(ResultAnalysisRun.group_test_id == run.group_test_id)
+            else:
+                duplicate_query = duplicate_query.filter(ResultAnalysisRun.public_result_id == run.public_result_id)
+            duplicate = duplicate_query.first()
+            if duplicate:
+                run.status = 'superseded'
+                run.completed_at = datetime.utcnow()
+                run.error_code = 'duplicate_source'
+                run.error_message = f'An equivalent analysis already exists as run {duplicate.id}.'
+                run.lease_token = None
+                run.lease_expires_at = None
+                db.session.commit()
+                return run
         extraction = provider.analyze(document, _target_context(run))
         persist_extraction(run, extraction)
         run.lease_token = None

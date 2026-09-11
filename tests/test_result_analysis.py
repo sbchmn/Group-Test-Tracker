@@ -1,18 +1,20 @@
 import io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
+from pypdf import PdfWriter
 
 from app import create_app, db
 from app.models import (
     GroupTest, NotificationConfig, PublicResult, ResultAnalysisRun, User,
 )
-from app.result_analysis.service import apply_analysis_run, enqueue_analysis, persist_extraction
-from app.result_analysis.jobs import process_next_run
+from app.result_analysis.service import AnalysisConflict, apply_analysis_run, enqueue_analysis, persist_extraction
+from app.result_analysis.jobs import process_next_run, process_run
 from app.result_analysis.diagnostics import append_provider_diagnostic, read_provider_diagnostics
 from app.result_analysis.providers.base import classify_sdk_error
 from app.result_analysis.sources import SourceError, _safe_public_url, prepare_document
@@ -150,6 +152,75 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(test.lab_test_details[1]['result'], 'Pass')
         self.assertIn('<!-- result-analysis:start -->', test.description)
 
+    def test_group_test_can_create_unmatched_canonical_row_but_not_unknown(self):
+        test = self._group_test()
+        run = ResultAnalysisRun(
+            group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
+            provider='openai', provider_model='test-model', status='analyzing', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        payload = extraction_payload([
+            finding('Endotoxin (USP <85>)', 'Endotoxin', '1.158 EU/mL'),
+            finding('Fentanyl Screen', 'Unknown', 'Not Detected'),
+        ])
+        persist_extraction(run, AnalysisExtraction(payload, 'test-model'))
+        db.session.commit()
+
+        create = next(item for item in run.findings if item.canonical_type == 'Endotoxin')
+        unknown = next(item for item in run.findings if item.canonical_type is None)
+        self.assertEqual(create.proposed_action, 'create')
+        self.assertEqual(unknown.proposed_action, 'unrecognized')
+
+        count = apply_analysis_run(
+            run,
+            {
+                create.id: {'accepted': True},
+                unknown.id: {'accepted': True},
+            },
+            self.user.id,
+        )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(test.lab_test_details[-1], {
+            'name': 'Endotoxin',
+            'price': 0.0,
+            'vials_needed': 0,
+            'result': '1.158 EU/mL',
+        })
+        self.assertEqual(unknown.review_decision, 'rejected')
+
+    def test_group_test_create_is_unchecked_and_rechecks_for_duplicate_rows(self):
+        test = self._group_test()
+        run = ResultAnalysisRun(
+            group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
+            provider='openai', provider_model='test-model', status='analyzing', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        persist_extraction(run, AnalysisExtraction(
+            extraction_payload([finding('Appearance', 'Appearance', 'Good')]),
+            'test-model',
+        ))
+        db.session.commit()
+        create = next(iter(run.findings))
+
+        client = self.app.test_client()
+        client.post('/login', data={'username': self.user.username, 'password': 'secret-pass'})
+        response = client.get(f'/admin/result-analysis/{run.id}')
+        html = response.get_data(as_text=True)
+        checkbox = f'name="accept_{create.id}" value="yes"'
+        self.assertIn(checkbox, html)
+        self.assertNotIn(f'{checkbox} checked', html)
+
+        test.lab_test_details = [
+            *test.lab_test_details,
+            {'name': 'Appearance', 'price': 25.0, 'vials_needed': 0},
+        ]
+        db.session.commit()
+        with self.assertRaises(AnalysisConflict):
+            apply_analysis_run(run, {create.id: {'accepted': True}}, self.user.id)
+
     def test_public_result_adds_only_new_canonical_rows(self):
         result = PublicResult(
             title='Public Tirzepatide', summary='Manual note', results_link='https://example.com/report.pdf',
@@ -201,6 +272,37 @@ class ResultAnalysisTests(unittest.TestCase):
         document = prepare_document(output.getvalue(), 'image/gif', settings)
         self.assertEqual(document.content_type, 'image/png')
         self.assertTrue(document.raw_bytes.startswith(b'\x89PNG'))
+
+    def test_pdf_analysis_accepts_recoverable_cross_reference_errors(self):
+        output = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=100, height=100)
+        writer.write(output)
+        recoverable_pdf = re.sub(br'startxref\n\d+', b'startxref\n0', output.getvalue())
+
+        document = prepare_document(
+            recoverable_pdf,
+            'application/pdf',
+            {'max_document_mb': 20, 'max_pages': 25},
+        )
+
+        self.assertEqual(document.content_type, 'application/pdf')
+        self.assertEqual(document.raw_bytes, recoverable_pdf)
+
+    @patch('pypdf.PdfReader', side_effect=ValueError('unsupported PDF structure'))
+    def test_pdf_analysis_falls_back_to_page_renderer(self, _pdf_reader):
+        output = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=100, height=100)
+        writer.write(output)
+
+        document = prepare_document(
+            output.getvalue(),
+            'application/pdf',
+            {'max_document_mb': 20, 'max_pages': 25},
+        )
+
+        self.assertEqual(document.content_type, 'application/pdf')
 
     def test_analysis_admin_routes_require_admin_and_preserve_masked_secret(self):
         member = User(username='analysis-member', email='member@example.com')
@@ -311,6 +413,7 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         run = ResultAnalysisRun.query.filter_by(public_result_id=result.id).one()
         self.assertEqual(run.status, 'queued')
+        self.assertTrue(run.bypass_duplicate_check)
         review = client.get(f'/admin/result-analysis/{run.id}')
         self.assertEqual(review.status_code, 200)
         self.assertIn(f'Run {run.id}', review.get_data(as_text=True))
@@ -399,6 +502,55 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(processed.source_sha256, 'a' * 64)
         self.assertEqual(processed.usage_json['request_id'], 'request-1')
         self.assertEqual(len(processed.findings), 1)
+
+    @patch('app.result_analysis.jobs.acquire_run_source')
+    @patch('app.result_analysis.jobs.build_provider')
+    def test_manual_run_bypasses_completed_source_duplicate(self, build_provider, acquire_source):
+        test = self._group_test()
+        prior = ResultAnalysisRun(
+            group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
+            source_sha256='a' * 64, provider='openai', provider_model='test-model',
+            schema_version='1', status='applied', max_attempts=3,
+        )
+        db.session.add(prior)
+        db.session.commit()
+        run = enqueue_analysis(
+            test, 'upload', self.user.id, provider='openai', bypass_duplicate_check=True,
+        )
+        document = AnalysisDocument('image/png', b'png-bytes', 'a' * 64)
+        acquire_source.return_value = document
+        provider = build_provider.return_value
+        provider.capabilities = ProviderCapabilities(True, ('image/png',))
+        provider.analyze.return_value = AnalysisExtraction(
+            extraction_payload([finding('Purity', 'Purity', '99.4%')]),
+            'test-model',
+        )
+
+        process_run(run)
+
+        self.assertEqual(run.status, 'needs_review')
+        provider.analyze.assert_called_once()
+
+    @patch('app.result_analysis.jobs.acquire_run_source')
+    @patch('app.result_analysis.jobs.build_provider')
+    def test_automatic_run_still_deduplicates_completed_source(self, build_provider, acquire_source):
+        test = self._group_test()
+        prior = ResultAnalysisRun(
+            group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
+            source_sha256='a' * 64, provider='openai', provider_model='test-model',
+            schema_version='1', status='applied', max_attempts=3,
+        )
+        db.session.add(prior)
+        db.session.commit()
+        run = enqueue_analysis(test, 'upload', self.user.id, provider='openai')
+        acquire_source.return_value = AnalysisDocument('image/png', b'png-bytes', 'a' * 64)
+        build_provider.return_value.capabilities = ProviderCapabilities(True, ('image/png',))
+
+        process_run(run)
+
+        self.assertEqual(run.status, 'superseded')
+        self.assertEqual(run.error_code, 'duplicate_source')
+        build_provider.return_value.analyze.assert_not_called()
 
 
 if __name__ == '__main__':

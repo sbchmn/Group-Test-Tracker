@@ -3109,7 +3109,13 @@ def queue_result_analysis(target_type, target_id, source_kind):
     target = _analysis_target(target_type, target_id)
     provider = (request.form.get('provider') or get_analysis_settings()['provider']).strip().lower()
     try:
-        run = enqueue_analysis(target, source_kind, requested_by_id=current_user.id, provider=provider)
+        run = enqueue_analysis(
+            target,
+            source_kind,
+            requested_by_id=current_user.id,
+            provider=provider,
+            bypass_duplicate_check=True,
+        )
         flash(f'Result analysis run {run.id} queued with {provider}.', 'success')
     except (ValueError, RuntimeError) as exc:
         flash(str(exc), 'danger')

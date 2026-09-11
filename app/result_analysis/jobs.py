@@ -120,9 +120,13 @@ def process_run(run):
             try:
                 from ..telegram_result_review import notify_review_ready
                 notify_review_ready(run)
-            except Exception:
+            except Exception as exc:
                 db.session.rollback()
-                current_app.logger.warning('Unable to send Telegram review for analysis run %s.', run.id)
+                current_app.logger.exception(
+                    'Unable to send Telegram review for analysis run %s: %s',
+                    run.id,
+                    exc,
+                )
     except SourceError as exc:
         _fail_run(run, exc.code, exc.safe_message, transient=exc.transient)
     except ProviderError as exc:

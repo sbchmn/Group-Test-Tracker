@@ -1,0 +1,55 @@
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Automated Result Analysis</span>
+        {% if analysis_run %}
+            <span class="badge text-bg-{{ 'success' if analysis_run.status == 'applied' else ('warning' if analysis_run.status == 'needs_review' else ('danger' if analysis_run.status == 'failed' else 'secondary')) }}">
+                {{ analysis_run.status|replace('_', ' ')|title }}
+            </span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <p class="small text-muted">Analysis creates suggestions only. An administrator must review them before any result or description changes.</p>
+        {% if analysis_run %}
+            <div class="small mb-3">
+                Run {{ analysis_run.id }} · {{ analysis_run.provider }} / {{ analysis_run.provider_model }} · {{ analysis_run.source_kind }}
+                {% if analysis_run.error_message %}<div class="text-danger mt-1">{{ analysis_run.error_message }}</div>{% endif %}
+            </div>
+            {% if analysis_run.status == 'needs_review' %}
+                <a class="btn btn-sm btn-warning mb-3" href="{{ url_for('main.review_result_analysis', run_id=analysis_run.id) }}">Review Findings</a>
+            {% elif analysis_run.status in ('applied', 'failed', 'superseded') %}
+                <a class="btn btn-sm btn-outline-secondary mb-3" href="{{ url_for('main.review_result_analysis', run_id=analysis_run.id) }}">View Run</a>
+            {% endif %}
+        {% endif %}
+        <form method="POST" action="{{ url_for('main.queue_result_analysis', target_type=analysis_target_type, target_id=analysis_target.id, source_kind='upload') }}" class="d-flex flex-wrap gap-2 align-items-end mb-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div>
+                <label class="form-label small mb-1">Provider</label>
+                <select name="provider" class="form-select form-select-sm">
+                    {% for key, label in [('openai', 'OpenAI'), ('xai', 'xAI Grok'), ('anthropic', 'Anthropic Claude')] %}
+                        {% if analysis_settings.providers.get(key, {}).get('enabled') %}
+                            <option value="{{ key }}" {% if analysis_settings.provider == key %}selected{% endif %}>{{ label }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" type="submit" {% if not analysis_target.results_image_key %}disabled{% endif %}>Analyze Uploaded File</button>
+        </form>
+        <form method="POST" action="{{ url_for('main.queue_result_analysis', target_type=analysis_target_type, target_id=analysis_target.id, source_kind='link') }}" class="d-flex flex-wrap gap-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div>
+                <label class="form-label small mb-1">Provider</label>
+                <select name="provider" class="form-select form-select-sm">
+                    {% for key, label in [('openai', 'OpenAI'), ('xai', 'xAI Grok'), ('anthropic', 'Anthropic Claude')] %}
+                        {% if analysis_settings.providers.get(key, {}).get('enabled') %}
+                            <option value="{{ key }}" {% if analysis_settings.provider == key %}selected{% endif %}>{{ label }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" type="submit" {% if not analysis_target.results_link %}disabled{% endif %}>Analyze Linked Result</button>
+        </form>
+        {% if not (analysis_settings.providers.get('openai', {}).get('enabled') or analysis_settings.providers.get('xai', {}).get('enabled') or analysis_settings.providers.get('anthropic', {}).get('enabled')) %}
+            <div class="small text-warning mt-2">Configure a provider under Admin Settings → Result Analysis.</div>
+        {% endif %}
+    </div>
+</div>

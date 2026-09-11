@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Result Analysis Settings{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h3 class="mb-1">Result Analysis Settings</h3>
+        <p class="text-muted mb-0">Configure report extraction providers. Every extracted value still requires administrator review.</p>
+    </div>
+    <a href="{{ url_for('main.admin_settings') }}" class="btn btn-outline-secondary">Back to Settings</a>
+</div>
+
+<form method="POST" novalidate>
+    {{ form.hidden_tag() }}
+    <div class="card mb-3"><div class="card-body">
+        <div class="form-check mb-3">{{ form.enabled(class="form-check-input") }} {{ form.enabled.label(class="form-check-label") }}</div>
+        <div class="mb-3">{{ form.active_provider.label(class="form-label") }}{{ form.active_provider(class="form-select") }}</div>
+        <div class="row g-3">
+            <div class="col-md-3">{{ form.max_document_mb.label(class="form-label") }}{{ form.max_document_mb(class="form-control") }}</div>
+            <div class="col-md-3">{{ form.max_pdf_pages.label(class="form-label") }}{{ form.max_pdf_pages(class="form-control") }}</div>
+            <div class="col-md-3">{{ form.download_timeout_seconds.label(class="form-label") }}{{ form.download_timeout_seconds(class="form-control") }}</div>
+            <div class="col-md-3">{{ form.max_attempts.label(class="form-label") }}{{ form.max_attempts(class="form-control") }}</div>
+        </div>
+    </div></div>
+
+    {% for key, title in [('openai', 'OpenAI'), ('xai', 'xAI Grok'), ('anthropic', 'Anthropic Claude')] %}
+        {% set enabled_field = form[key + '_enabled'] %}
+        {% set key_field = form[key + '_api_key'] %}
+        {% set model_field = form[key + '_model'] %}
+        {% set is_configured = configured.get(key) if configured is defined else false %}
+        <div class="card mb-3"><div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">{{ title }}</h5>
+                <span class="badge text-bg-{{ 'success' if is_configured else 'secondary' }}">{{ 'Configured' if is_configured else 'Needs key' }}</span>
+            </div>
+            <div class="form-check mb-3">{{ enabled_field(class="form-check-input") }} {{ enabled_field.label(class="form-check-label") }}</div>
+            <div class="row g-3">
+                <div class="col-md-6">{{ key_field.label(class="form-label") }}{{ key_field(class="form-control", autocomplete="new-password") }}<div class="form-text">Environment override: {{ environment_keys[key] }}</div></div>
+                <div class="col-md-6">{{ model_field.label(class="form-label") }}{{ model_field(class="form-control") }}</div>
+            </div>
+        </div></div>
+    {% endfor %}
+    {{ form.submit(class="btn btn-primary") }}
+</form>
+
+<div class="mt-3 d-flex gap-2 flex-wrap">
+    {% for key, title in [('openai', 'OpenAI'), ('xai', 'xAI Grok'), ('anthropic', 'Anthropic Claude')] %}
+        <form method="POST" action="{{ url_for('main.test_result_analysis_provider', provider=key) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Test {{ title }}</button>
+        </form>
+    {% endfor %}
+</div>
+
+<div class="card mt-4">
+    <div class="card-header">Recent Provider Diagnostics</div>
+    <div class="card-body">
+        <p class="text-muted small">Sanitized connection tests and analysis failures. The local file is size-bounded and retains only recent entries. If web and worker processes use separate filesystems, this page shows the web component's local entries.</p>
+        <pre class="mb-0 small" style="max-height: 24rem; overflow: auto; white-space: pre-wrap; word-break: break-word;">{{ diagnostic_log or 'No provider diagnostics yet.' }}</pre>
+    </div>
+</div>
+{% endblock %}

@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from sqlalchemy import inspect, text
+from flask_migrate import upgrade
 
 from app import create_app, db
 
@@ -56,6 +57,12 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("telegram_command_templates", table_names)
             self.assertIn("telegram_command_invocations", table_names)
             self.assertIn("discord_command_invocations", table_names)
+            self.assertIn("result_analysis_runs", table_names)
+            self.assertIn("result_analysis_findings", table_names)
+            analysis_columns = [column["name"] for column in inspector.get_columns("result_analysis_runs")]
+            self.assertIn("source_sha256", analysis_columns)
+            self.assertIn("lease_expires_at", analysis_columns)
+            self.assertIn("provider_model", analysis_columns)
             self.assertIn("allow_non_private", telegram_command_columns)
             self.assertIn("allowed_chat_ids", telegram_command_columns)
             self.assertIn("allowed_thread_ids", telegram_command_columns)
@@ -91,6 +98,19 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("allow_non_private", migration_text)
         self.assertIn("allowed_chat_ids", migration_text)
         self.assertIn("allowed_thread_ids", migration_text)
+        self.assertIn("result_analysis_runs", migration_text)
+        self.assertIn("result_analysis_findings", migration_text)
+
+    def test_alembic_upgrade_creates_result_analysis_schema(self):
+        migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
+        with self.app.app_context():
+            upgrade(directory=str(migration_dir))
+            inspector = inspect(db.engine)
+            tables = set(inspector.get_table_names())
+            self.assertIn('result_analysis_runs', tables)
+            self.assertIn('result_analysis_findings', tables)
+            run_indexes = {item['name'] for item in inspector.get_indexes('result_analysis_runs')}
+            self.assertIn('ix_result_analysis_status_queue', run_indexes)
 
 
 if __name__ == "__main__":

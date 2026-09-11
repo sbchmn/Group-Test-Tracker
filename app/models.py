@@ -156,6 +156,102 @@ class PublicResult(db.Model):
         return f'<PublicResult {self.title}>'
 
 
+class ResultAnalysisRun(db.Model):
+    __tablename__ = 'result_analysis_runs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_test_id = db.Column(db.Integer, db.ForeignKey('group_tests.id', ondelete='CASCADE'), nullable=True, index=True)
+    public_result_id = db.Column(db.Integer, db.ForeignKey('public_results.id', ondelete='CASCADE'), nullable=True, index=True)
+    source_kind = db.Column(db.String(20), nullable=False)
+    source_reference = db.Column(db.String(500), nullable=False)
+    source_sha256 = db.Column(db.String(64), nullable=True, index=True)
+    source_content_type = db.Column(db.String(100), nullable=True)
+    source_size_bytes = db.Column(db.Integer, nullable=True)
+    provider = db.Column(db.String(20), nullable=False)
+    provider_model = db.Column(db.String(120), nullable=False)
+    schema_version = db.Column(db.String(20), nullable=False, default='1')
+    status = db.Column(db.String(30), nullable=False, default='queued', index=True)
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    max_attempts = db.Column(db.Integer, nullable=False, default=3)
+    next_attempt_at = db.Column(db.DateTime, nullable=True, index=True)
+    lease_token = db.Column(db.String(64), nullable=True, index=True)
+    lease_expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    error_code = db.Column(db.String(60), nullable=True)
+    error_message = db.Column(db.String(500), nullable=True)
+    metadata_json = db.Column(db.JSON, nullable=True)
+    usage_json = db.Column(db.JSON, nullable=True)
+    requested_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    queued_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    findings = db.relationship(
+        'ResultAnalysisFinding',
+        backref='run',
+        lazy='select',
+        cascade='all, delete-orphan',
+        order_by='ResultAnalysisFinding.id',
+    )
+    group_test = db.relationship('GroupTest', backref=db.backref('analysis_runs', lazy='dynamic', cascade='all, delete-orphan'))
+    public_result = db.relationship('PublicResult', backref=db.backref('analysis_runs', lazy='dynamic', cascade='all, delete-orphan'))
+    requested_by = db.relationship('User', foreign_keys=[requested_by_id])
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_id])
+
+    __table_args__ = (
+        db.CheckConstraint(
+            '(group_test_id IS NOT NULL AND public_result_id IS NULL) OR '
+            '(group_test_id IS NULL AND public_result_id IS NOT NULL)',
+            name='ck_result_analysis_exactly_one_target',
+        ),
+        db.CheckConstraint("source_kind IN ('upload', 'link')", name='ck_result_analysis_source_kind'),
+        db.CheckConstraint(
+            "status IN ('queued', 'analyzing', 'needs_review', 'applied', 'failed', 'superseded')",
+            name='ck_result_analysis_status',
+        ),
+        db.CheckConstraint("provider IN ('openai', 'xai', 'anthropic')", name='ck_result_analysis_provider'),
+        db.Index('ix_result_analysis_status_queue', 'status', 'next_attempt_at', 'queued_at'),
+    )
+
+    @property
+    def target(self):
+        return self.group_test or self.public_result
+
+
+class ResultAnalysisFinding(db.Model):
+    __tablename__ = 'result_analysis_findings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    analysis_run_id = db.Column(db.Integer, db.ForeignKey('result_analysis_runs.id', ondelete='CASCADE'), nullable=False, index=True)
+    canonical_type = db.Column(db.String(80), nullable=True, index=True)
+    source_label = db.Column(db.String(200), nullable=False)
+    reported_value = db.Column(db.String(500), nullable=False)
+    evidence_text = db.Column(db.String(1000), nullable=False)
+    page_number = db.Column(db.Integer, nullable=True)
+    confidence = db.Column(db.Float, nullable=False)
+    is_reported_aggregate = db.Column(db.Boolean, nullable=False, default=False)
+    proposed_action = db.Column(db.String(20), nullable=False)
+    target_row_key = db.Column(db.String(120), nullable=True)
+    review_decision = db.Column(db.String(20), nullable=False, default='pending')
+    reviewed_value = db.Column(db.String(500), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "proposed_action IN ('fill', 'create', 'conflict', 'unrecognized')",
+            name='ck_result_analysis_finding_action',
+        ),
+        db.CheckConstraint(
+            "review_decision IN ('pending', 'accepted', 'rejected')",
+            name='ck_result_analysis_finding_review',
+        ),
+        db.CheckConstraint('confidence >= 0 AND confidence <= 1', name='ck_result_analysis_confidence'),
+    )
+
+
 class NotificationTemplate(db.Model):
     __tablename__ = 'notification_templates'
 

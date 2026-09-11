@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
+from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
@@ -525,6 +526,19 @@ class NotificationTests(unittest.TestCase):
         self.assertTrue(result)
         request = mock_urlopen.call_args.args[0]
         self.assertIn("https://discord.com/api/v10/channels/999888777/messages", request.full_url)
+
+    def test_discord_bot_lifecycle_helpers_push_application_context(self):
+        from app import discord_bot
+
+        def assert_context(value, **kwargs):
+            self.assertIs(current_app._get_current_object(), self.app)
+            return value
+
+        with patch.object(discord_bot, "APP", self.app), \
+             patch.object(discord_bot, "append_notification_log", side_effect=assert_context), \
+             patch.object(discord_bot, "send_discord_status_channel_message", side_effect=assert_context):
+            self.assertEqual(discord_bot._append_bot_log("ready"), "ready")
+            self.assertEqual(discord_bot._send_bot_status_message("connected"), "connected")
 
     def test_send_discord_status_channel_message_disables_mentions_in_payload(self):
         with self.app.app_context():

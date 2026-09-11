@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Review Result Analysis{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h3 class="mb-1">Review Result Analysis</h3>
+        <p class="text-muted mb-0">Run {{ run.id }} · {{ run.provider }} / {{ run.provider_model }} · {{ run.status|replace('_', ' ')|title }}</p>
+    </div>
+    {% if run.group_test_id %}<a class="btn btn-outline-secondary" href="{{ url_for('main.edit_test', test_id=run.group_test_id) }}">Back</a>{% else %}<a class="btn btn-outline-secondary" href="{{ url_for('main.edit_public_result', result_id=run.public_result_id) }}">Back</a>{% endif %}
+</div>
+
+{% if run.error_message %}<div class="alert alert-danger">{{ run.error_message }}</div>{% endif %}
+{% if run.metadata_json %}
+<div class="card mb-3"><div class="card-body">
+    <h5>Report Metadata</h5>
+    <dl class="row small mb-2">
+        {% for key in ['compound', 'laboratory', 'batch_lot', 'report_date', 'sample_id', 'methods'] %}
+            {% if run.metadata_json.get(key) %}<dt class="col-sm-3">{{ key|replace('_', ' ')|title }}</dt><dd class="col-sm-9">{{ run.metadata_json.get(key)|join(', ') if run.metadata_json.get(key) is not string else run.metadata_json.get(key) }}</dd>{% endif %}
+        {% endfor %}
+    </dl>
+</div></div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('main.apply_result_analysis', run_id=run.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card"><div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Accept</th><th>Test</th><th>Proposed Result</th><th>Evidence</th><th>State</th></tr></thead>
+            <tbody>
+            {% for finding in run.findings %}
+                <tr>
+                    <td>{% if run.status == 'needs_review' and finding.proposed_action in ('fill', 'create') %}<input type="checkbox" name="accept_{{ finding.id }}" value="yes" checked>{% else %}—{% endif %}</td>
+                    <td><strong>{{ finding.canonical_type or 'Unrecognized' }}</strong><div class="small text-muted">{{ finding.source_label }}{% if finding.page_number %} · page {{ finding.page_number }}{% endif %} · {{ '%.0f'|format(finding.confidence * 100) }}%</div></td>
+                    <td><input class="form-control form-control-sm" name="value_{{ finding.id }}" value="{{ finding.reviewed_value or finding.reported_value }}" {% if run.status != 'needs_review' %}disabled{% endif %}></td>
+                    <td class="small">{{ finding.evidence_text }}</td>
+                    <td><span class="badge text-bg-{{ 'warning' if finding.proposed_action == 'conflict' else ('secondary' if finding.proposed_action == 'unrecognized' else 'info') }}">{{ finding.proposed_action }}</span></td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="text-muted p-3">No findings were extracted.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div></div>
+    {% if run.status == 'needs_review' %}
+        <div class="form-check my-3"><input class="form-check-input" type="checkbox" name="include_metadata" value="yes" id="includeMetadata"><label class="form-check-label" for="includeMetadata">Append approved report metadata to the description/summary</label></div>
+        <button class="btn btn-primary" type="submit">Apply Reviewed Findings</button>
+    {% endif %}
+</form>
+{% endblock %}

@@ -104,18 +104,60 @@ Secure access behavior:
 - Public result images are accessible only to logged-in users.
 - Image links are signed on demand and expire automatically.
 
-## 4) Daily Operating Flow
+## 4) Optional: Enable Automated Result Analysis
+
+Automated analysis extracts reported laboratory values into an administrator review queue. It never publishes a value without review and does not provide medical interpretation.
+
+1. Apply the latest database migration:
+`flask --app app db upgrade head`
+2. Add the API key for each provider you intend to use to the deployment environment:
+- `OPENAI_API_KEY`
+- `XAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+3. Open Admin Settings -> Result Analysis.
+4. Enable only configured providers and verify the model identifiers.
+5. Choose the active provider used for automatic upload runs.
+6. Keep automatic analysis disabled initially and run the provider's Connection Test. It sends minimal text, not a report.
+   - If it fails, inspect Recent Provider Diagnostics on the same page for the sanitized HTTP status, provider code, parameter, and request ID.
+7. Deploy/start the separate worker process:
+`python -m flask --app app:create_app result-analysis-worker`
+8. Upload a synthetic/sample report, use Analyze Uploaded File on its edit page, and review the extracted suggestions.
+9. Enable automatic analysis after the dry run behaves correctly.
+
+DigitalOcean/Procfile process type:
+- Procfile entry: `result-analysis-worker: python -m flask --app app:create_app result-analysis-worker --poll-seconds 5`
+- DigitalOcean Run Command: `python -m flask --app app:create_app result-analysis-worker --poll-seconds 5` (omit the `result-analysis-worker:` Procfile label)
+
+Daily review behavior:
+
+- New eligible uploads queue after the Group Test or Public Result record commits.
+- Links never queue automatically. Use Analyze Linked Result on the edit page.
+- Open Review Findings, verify the evidence and confidence, accept/reject each row, correct accepted text if needed, and optionally append metadata.
+- Group Tests only fill blank existing test rows.
+- Public Results can add recognized canonical rows.
+- Non-empty values are never overwritten. Unrecognized and conflicting findings remain review-only.
+- Explicit report Net/Average/Batch Average values are preferred; no average is calculated by the app.
+- A failed provider run never silently switches to a different provider.
+
+Source boundaries:
+
+- Upload formats are inherited from Storage Config. PDF, JPEG, PNG, WebP, and first-frame GIF analysis are supported when allowed there.
+- Public HTTP/HTTPS PDF, image, and static HTML links are supported within the configured limits.
+- Login-required, cookie-dependent, authenticated, CAPTCHA, anti-bot, private-network, and nonstandard-port sources are rejected. Download and upload those reports manually.
+- Default ceilings: 20 MB, 25 PDF pages, 2 MB HTML, three redirects, and three worker attempts.
+
+## 5) Daily Operating Flow
 
 1. Create tests from Admin -> Create Test.
 2. Keep recruiting tests open while collecting requests.
 3. Move to ready_for_payment when you want payment options shown before active testing.
-4. Use Admin -> Action Queue to approve/deny quickly across tests.
+4. Use Admin -> Action Queue for result-analysis review/failures and participant approval/denial across tests.
 5. Use Manage Participants inside each test for detailed per-user updates.
 6. Send participant notifications from test detail pages.
 7. Move tests to testing and then closed when complete.
 8. Publish broader results from Admin -> Public Results.
 
-## 5) Group Test Setup Checklist
+## 6) Group Test Setup Checklist
 
 1. Title, description, dates.
 2. Vendor, batch, compound, size.
@@ -130,7 +172,7 @@ Secure access behavior:
 7. Optional tags for search/grouping.
 8. Optional result file upload (image or PDF) when closed.
 
-## 6) Payment Options Quick Setup
+## 7) Payment Options Quick Setup
 
 1. Open Admin -> Payment Options.
 2. Add one option per method/payee combination.
@@ -139,7 +181,7 @@ Secure access behavior:
 5. Activate/deactivate options as needed; in-use options are protected by safe-delete behavior.
 6. Assign relevant options per test in Create Test or Edit Test.
 
-## 7) Public Results Checklist
+## 8) Public Results Checklist
 
 1. Title and optional summary.
 2. Required results link.
@@ -153,7 +195,7 @@ Result image behavior:
 - Modal includes download action.
 - Replacing file removes old file best-effort.
 
-## 8) User and Access Management
+## 9) User and Access Management
 
 1. Admin -> Manage Users for account changes.
 2. Use Toggle Active for temporary access control.
@@ -173,7 +215,7 @@ Telegram account-linking notes:
 - `/status <test_id>` returns their current status for a specific test, including denied records. For closed tests where they are marked paid, it returns the results URL.
 - Active admin-created custom commands also appear in `/help` under Custom commands.
 
-## 9) Troubleshooting Quick Hits
+## 10) Troubleshooting Quick Hits
 
 Storage upload fails:
 1. Verify Storage Config is enabled.
@@ -195,7 +237,15 @@ Migrations fail:
 2. Re-run flask --app app db upgrade head.
 3. Verify DATABASE_URL and DB access.
 
-## 10) Pre-Release Admin Checklist
+Result analysis remains queued or fails:
+1. Confirm the `result-analysis-worker` process is running.
+2. Confirm the run's selected provider is enabled and configured.
+3. Run `python -m flask --app app:create_app result-analysis-worker --once` for one safe status check.
+4. Confirm the worker can read the private object-storage bucket.
+5. For linked sources, confirm the page is public and does not require login, cookies, or anti-bot interaction.
+6. Review Recent Provider Diagnostics under Admin Settings -> Result Analysis. The log excludes credentials/report content and automatically drops old entries at 128 KiB by default (1 MiB hard maximum).
+
+## 11) Pre-Release Admin Checklist
 
 1. Run tests:
 python -m unittest
@@ -209,6 +259,7 @@ python -m unittest
 - Telegram Commands
 - Storage Config
 - Public Results
+- Result Analysis settings and review page
 
 3. Verify one end-to-end dry run:
 - Create recruiting test
@@ -217,6 +268,7 @@ python -m unittest
 - Switch test to ready_for_payment and verify payment panel/link/QR renders correctly
 - Close test and set results link
 - Confirm appearance in My Results
+- Upload a sample report, process it with `result-analysis-worker --once`, review findings, and confirm existing values are not overwritten
 
 4. Verify Telegram flow:
 - Generate Telegram link from a user profile
@@ -224,7 +276,7 @@ python -m unittest
 - Trigger a status update and confirm channel post formatting
 - Trigger password reset via Telegram for linked user
 
-## 11) Security Best Practices
+## 12) Security Best Practices
 
 1. Use strong SECRET_KEY and rotate when required.
 2. Use least-privilege object storage credentials.
@@ -232,3 +284,5 @@ python -m unittest
 4. Keep debug logging disabled in normal production operations.
 5. Limit number of admin users and review access regularly.
 6. Use webhook IP allowlists where possible and re-check after infrastructure changes.
+7. Keep unused analysis providers disabled and store provider keys in deployment secrets.
+8. Review every extracted value and its evidence before applying it.

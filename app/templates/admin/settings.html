@@ -86,5 +86,20 @@
             </div>
         </div>
     </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                    <div>
+                        <h5 class="card-title"><i class="bi bi-file-earmark-medical"></i> Result Analysis</h5>
+                        <p class="card-text text-muted">Configure OpenAI, xAI Grok, or Anthropic Claude extraction with administrator review.</p>
+                    </div>
+                    <span class="badge text-bg-{{ 'success' if settings_status.result_analysis else 'secondary' }}">{{ 'Enabled' if settings_status.result_analysis else 'Disabled' }}</span>
+                </div>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.result_analysis_config') }}">Open Result Analysis</a>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

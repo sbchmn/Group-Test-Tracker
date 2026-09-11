@@ -21,8 +21,9 @@ from datetime import datetime, date
 from datetime import timedelta
 from functools import wraps
 from itertools import zip_longest
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload, selectinload
 import secrets
 import ipaddress
 import html
@@ -50,6 +51,7 @@ from .models import (
     TelegramStatusDigestEvent,
     UserDigestEvent,
     PaymentOption,
+    ResultAnalysisRun,
 )
 from .export import generate_test_export
 from .notifications import (
@@ -81,6 +83,11 @@ from .storage import (
     upload_telegram_animation,
 )
 from .version import APP_NAME, APP_RELEASE, APP_VERSION
+from .result_analysis.providers import build_provider
+from .result_analysis.providers.base import ProviderError
+from .result_analysis.diagnostics import append_provider_diagnostic, read_provider_diagnostics
+from .result_analysis.service import AnalysisConflict, apply_analysis_run, enqueue_analysis, latest_run_for_target
+from .result_analysis.settings import ENV_KEYS, PROVIDERS, get_analysis_settings, provider_config
 
 main_bp = Blueprint('main', __name__)
 
@@ -161,6 +168,27 @@ class PublicResultForm(FlaskForm):
     results_link = StringField('Results Link', validators=[DataRequired(), Length(max=500)])
     tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     submit = SubmitField('Save Public Result')
+
+
+class ResultAnalysisSettingsForm(FlaskForm):
+    enabled = BooleanField('Enable automatic analysis for new uploads')
+    active_provider = SelectField('Active Provider', choices=[
+        ('openai', 'OpenAI'), ('xai', 'xAI Grok'), ('anthropic', 'Anthropic Claude'),
+    ], validators=[DataRequired()])
+    openai_enabled = BooleanField('Enable OpenAI')
+    openai_api_key = PasswordField('OpenAI API Key', validators=[Optional(), Length(max=500)])
+    openai_model = StringField('OpenAI Model', validators=[DataRequired(), Length(max=120)])
+    xai_enabled = BooleanField('Enable xAI Grok')
+    xai_api_key = PasswordField('xAI API Key', validators=[Optional(), Length(max=500)])
+    xai_model = StringField('Grok Model', validators=[DataRequired(), Length(max=120)])
+    anthropic_enabled = BooleanField('Enable Anthropic Claude')
+    anthropic_api_key = PasswordField('Anthropic API Key', validators=[Optional(), Length(max=500)])
+    anthropic_model = StringField('Claude Model', validators=[DataRequired(), Length(max=120)])
+    max_document_mb = StringField('Maximum document size (MB)', validators=[DataRequired(), Length(max=3)])
+    max_pdf_pages = StringField('Maximum PDF pages', validators=[DataRequired(), Length(max=3)])
+    download_timeout_seconds = StringField('Download timeout (seconds)', validators=[DataRequired(), Length(max=3)])
+    max_attempts = StringField('Maximum attempts', validators=[DataRequired(), Length(max=2)])
+    submit = SubmitField('Save Result Analysis Settings')
 
 
 class ParticipationRequestForm(FlaskForm):
@@ -1031,6 +1059,31 @@ def parse_item_results(names, results):
             item['result'] = result_text
         items.append(item)
     return items
+
+
+def _queue_uploaded_result_analysis(target, requested_by_id):
+    """Best-effort post-commit queueing; a queue failure never rolls back the saved result."""
+    if not getattr(target, 'results_image_key', None):
+        return None
+    try:
+        return enqueue_analysis(target, 'upload', requested_by_id=requested_by_id, automatic=True)
+    except Exception as exc:
+        current_app.logger.warning(
+            'Unable to queue result analysis for %s %s: %s',
+            target.__class__.__name__, target.id, exc.__class__.__name__,
+        )
+        return None
+
+
+def _analysis_template_context(target):
+    try:
+        settings = get_analysis_settings()
+    except Exception:
+        settings = {'enabled': False, 'provider': 'openai', 'providers': {}}
+    return {
+        'analysis_run': latest_run_for_target(target),
+        'analysis_settings': settings,
+    }
 
 
 def get_group_test_sort_value(test, sort_by):
@@ -2915,6 +2968,8 @@ def create_test():
         db.session.flush()
         apply_tags_to_record(test, form.tag_names.data)
         db.session.commit()
+        if uploaded_image_key:
+            _queue_uploaded_result_analysis(test, current_user.id)
         try:
             test_url = f"{request.host_url.rstrip('/')}{url_for('main.test_detail', test_id=test.id)}"
             _send_new_test_created_to_telegram(test, test_url=test_url)
@@ -2992,6 +3047,7 @@ def edit_test(test_id):
                     tag_suggestions=get_all_tag_names(),
                     storage_settings=get_storage_settings(),
                     existing_results_image_url=url_for('main.serve_group_test_result_image', test_id=test.id) if test.results_image_key else None,
+                    **_analysis_template_context(test),
                 )
 
             old_key = test.results_image_key
@@ -3022,6 +3078,8 @@ def edit_test(test_id):
             _send_status_update_to_telegram(test, previous_status)
 
         db.session.commit()
+        if has_new_upload and test.results_image_key:
+            _queue_uploaded_result_analysis(test, current_user.id)
         flash('Group test updated.', 'success')
         return redirect(url_for('main.test_detail', test_id=test_id))
     
@@ -3032,7 +3090,85 @@ def edit_test(test_id):
         tag_suggestions=get_all_tag_names(),
         storage_settings=get_storage_settings(),
         existing_results_image_url=url_for('main.serve_group_test_result_image', test_id=test.id) if test.results_image_key else None,
+        **_analysis_template_context(test),
     )
+
+
+def _analysis_target(target_type, target_id):
+    if target_type == 'group-test':
+        return GroupTest.query.get_or_404(target_id)
+    if target_type == 'public-result':
+        return PublicResult.query.get_or_404(target_id)
+    abort(404)
+
+
+@main_bp.route('/admin/result-analysis/<target_type>/<int:target_id>/queue/<source_kind>', methods=['POST'])
+@login_required
+@admin_required
+def queue_result_analysis(target_type, target_id, source_kind):
+    target = _analysis_target(target_type, target_id)
+    provider = (request.form.get('provider') or get_analysis_settings()['provider']).strip().lower()
+    try:
+        run = enqueue_analysis(target, source_kind, requested_by_id=current_user.id, provider=provider)
+        flash(f'Result analysis run {run.id} queued with {provider}.', 'success')
+    except (ValueError, RuntimeError) as exc:
+        flash(str(exc), 'danger')
+    if isinstance(target, GroupTest):
+        return redirect(url_for('main.edit_test', test_id=target.id))
+    return redirect(url_for('main.edit_public_result', result_id=target.id))
+
+
+@main_bp.route('/admin/result-analysis/<int:run_id>')
+@login_required
+@admin_required
+def review_result_analysis(run_id):
+    run = ResultAnalysisRun.query.get_or_404(run_id)
+    return render_template('admin/result_analysis_review.html', run=run, target=run.target)
+
+
+@main_bp.route('/admin/result-analysis/<int:run_id>/acknowledge-failure', methods=['POST'])
+@login_required
+@admin_required
+def acknowledge_result_analysis_failure(run_id):
+    run = ResultAnalysisRun.query.get_or_404(run_id)
+    if run.status != 'failed':
+        flash('Only failed result-analysis runs can be acknowledged.', 'warning')
+    elif run.reviewed_at is not None:
+        flash('This result-analysis failure was already acknowledged.', 'info')
+    else:
+        run.reviewed_by_id = current_user.id
+        run.reviewed_at = datetime.utcnow()
+        db.session.commit()
+        flash(f'Acknowledged result-analysis failure {run.id}.', 'success')
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/result-analysis/<int:run_id>/apply', methods=['POST'])
+@login_required
+@admin_required
+def apply_result_analysis(run_id):
+    run = ResultAnalysisRun.query.get_or_404(run_id)
+    decisions = {}
+    for finding in run.findings:
+        decisions[finding.id] = {
+            'accepted': request.form.get(f'accept_{finding.id}') == 'yes',
+            'value': request.form.get(f'value_{finding.id}', ''),
+        }
+    try:
+        count = apply_analysis_run(
+            run,
+            decisions,
+            reviewed_by_id=current_user.id,
+            include_metadata=request.form.get('include_metadata') == 'yes',
+        )
+        flash(f'Applied {count} reviewed result finding(s).', 'success')
+    except AnalysisConflict as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
+        return redirect(url_for('main.review_result_analysis', run_id=run.id))
+    if run.group_test_id:
+        return redirect(url_for('main.edit_test', test_id=run.group_test_id))
+    return redirect(url_for('main.edit_public_result', result_id=run.public_result_id))
 
 
 @main_bp.route('/admin/manage-participants/<int:test_id>')
@@ -3128,6 +3264,7 @@ def _queue_redirect_params():
         'status': (request.form.get('status') or request.args.get('status') or 'all').strip().lower(),
         'q': (request.form.get('q') or request.args.get('q') or '').strip(),
         'page': request.form.get('page') or request.args.get('page') or 1,
+        'analysis_page': request.form.get('analysis_page') or request.args.get('analysis_page') or 1,
     }
 
 
@@ -3138,11 +3275,14 @@ def action_queue():
     status_filter = (request.args.get('status') or 'all').strip().lower()
     search = (request.args.get('q') or '').strip()
     page = request.args.get('page', default=1, type=int) or 1
+    analysis_page = request.args.get('analysis_page', default=1, type=int) or 1
     per_page = 25
     if status_filter not in {'all', 'recruiting', 'testing', 'closed'}:
         status_filter = 'all'
     if page < 1:
         page = 1
+    if analysis_page < 1:
+        analysis_page = 1
 
     pending_query = _build_pending_queue_query(status_filter, search)
     pending_parts_pagination = pending_query.order_by(Participation.requested_at.asc(), GroupTest.start_date.asc()).paginate(
@@ -3150,13 +3290,30 @@ def action_queue():
         per_page=per_page,
         error_out=False,
     )
+    analysis_runs_pagination = (
+        ResultAnalysisRun.query
+        .options(
+            joinedload(ResultAnalysisRun.group_test),
+            joinedload(ResultAnalysisRun.public_result),
+            selectinload(ResultAnalysisRun.findings),
+        )
+        .filter(or_(
+            ResultAnalysisRun.status == 'needs_review',
+            and_(ResultAnalysisRun.status == 'failed', ResultAnalysisRun.reviewed_at.is_(None)),
+        ))
+        .order_by(ResultAnalysisRun.completed_at.asc(), ResultAnalysisRun.id.asc())
+        .paginate(page=analysis_page, per_page=per_page, error_out=False)
+    )
     return render_template(
         'admin/action_queue.html',
         pending_parts=pending_parts_pagination.items,
         pending_parts_pagination=pending_parts_pagination,
+        analysis_runs=analysis_runs_pagination.items,
+        analysis_runs_pagination=analysis_runs_pagination,
         status_filter=status_filter,
         search=search,
         page=page,
+        analysis_page=analysis_page,
     )
 
 
@@ -3250,7 +3407,13 @@ def approve_filtered_from_queue():
         f'Approved all filtered pending requests: {len(pending_parts)} participant(s) across {len(affected_test_ids)} test(s).',
         'success',
     )
-    return redirect(url_for('main.action_queue', status=status_filter, q=search, page=1))
+    return redirect(url_for(
+        'main.action_queue',
+        status=status_filter,
+        q=search,
+        page=1,
+        analysis_page=request.form.get('analysis_page') or 1,
+    ))
 
 
 @main_bp.route('/admin/action-queue/deny/<int:part_id>', methods=['POST'])
@@ -3499,6 +3662,7 @@ def add_participant_to_test(test_id):
 @admin_required
 def admin_settings():
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
+    analysis_settings = get_analysis_settings()
     return render_template(
         'admin/settings.html',
         settings_status={
@@ -3506,6 +3670,7 @@ def admin_settings():
             'telegram': bool(configs.get('telegram_bot_token')),
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
             'storage': bool(str(configs.get('storage_enabled') or '').lower() == 'true'),
+            'result_analysis': analysis_settings['enabled'],
         },
     )
 
@@ -3515,6 +3680,105 @@ def _save_notification_config_values(values):
         config = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
         config.value = value or None
         db.session.add(config)
+
+
+_ANALYSIS_SECRET_PLACEHOLDER = '••••••••••••'
+
+
+@main_bp.route('/admin/settings/result-analysis', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def result_analysis_config():
+    form = ResultAnalysisSettingsForm()
+    configs = {config.key: config.value for config in NotificationConfig.query.all()}
+    effective = get_analysis_settings()
+
+    if form.validate_on_submit():
+        numeric_fields = {
+            'max_document_mb': (1, 20),
+            'max_pdf_pages': (1, 25),
+            'download_timeout_seconds': (3, 60),
+            'max_attempts': (1, 5),
+        }
+        parsed = {}
+        for name, (minimum, maximum) in numeric_fields.items():
+            try:
+                value = int(getattr(form, name).data)
+            except (TypeError, ValueError):
+                value = 0
+            if not minimum <= value <= maximum:
+                flash(f'{getattr(form, name).label.text} must be between {minimum} and {maximum}.', 'danger')
+                return render_template('admin/result_analysis_config.html', form=form, environment_keys=ENV_KEYS)
+            parsed[name] = value
+
+        values = {
+            'result_analysis_enabled': 'true' if form.enabled.data else 'false',
+            'result_analysis_provider': form.active_provider.data,
+            'result_analysis_max_document_mb': str(parsed['max_document_mb']),
+            'result_analysis_max_pdf_pages': str(parsed['max_pdf_pages']),
+            'result_analysis_download_timeout_seconds': str(parsed['download_timeout_seconds']),
+            'result_analysis_max_attempts': str(parsed['max_attempts']),
+        }
+        for provider in PROVIDERS:
+            values[f'result_analysis_{provider}_enabled'] = 'true' if getattr(form, f'{provider}_enabled').data else 'false'
+            values[f'result_analysis_{provider}_model'] = getattr(form, f'{provider}_model').data.strip()
+            submitted_key = (getattr(form, f'{provider}_api_key').data or '').strip()
+            existing_key = str(configs.get(f'result_analysis_{provider}_api_key') or '')
+            if submitted_key == _ANALYSIS_SECRET_PLACEHOLDER:
+                submitted_key = existing_key
+            values[f'result_analysis_{provider}_api_key'] = submitted_key
+        active = form.active_provider.data
+        active_key = os.environ.get(ENV_KEYS[active]) or values.get(f'result_analysis_{active}_api_key')
+        if form.enabled.data and values.get(f'result_analysis_{active}_enabled') != 'true':
+            flash('The active provider must be enabled before automatic analysis can be enabled.', 'danger')
+            return render_template('admin/result_analysis_config.html', form=form, environment_keys=ENV_KEYS)
+        if form.enabled.data and not active_key:
+            flash('The active provider needs an API key before automatic analysis can be enabled.', 'danger')
+            return render_template('admin/result_analysis_config.html', form=form, environment_keys=ENV_KEYS)
+        _save_notification_config_values(values)
+        db.session.commit()
+        flash('Result Analysis settings saved.', 'success')
+        return redirect(url_for('main.result_analysis_config'))
+
+    if not form.is_submitted():
+        form.enabled.data = effective['enabled']
+        form.active_provider.data = effective['provider']
+        form.max_document_mb.data = str(effective['max_document_mb'])
+        form.max_pdf_pages.data = str(effective['max_pdf_pages'])
+        form.download_timeout_seconds.data = str(effective['download_timeout_seconds'])
+        form.max_attempts.data = str(effective['max_attempts'])
+        for provider in PROVIDERS:
+            item = effective['providers'][provider]
+            getattr(form, f'{provider}_enabled').data = item['enabled']
+            getattr(form, f'{provider}_model').data = item['model']
+            getattr(form, f'{provider}_api_key').data = _ANALYSIS_SECRET_PLACEHOLDER if item['api_key'] else ''
+    return render_template(
+        'admin/result_analysis_config.html',
+        form=form,
+        environment_keys=ENV_KEYS,
+        configured={provider: bool(effective['providers'][provider]['api_key']) for provider in PROVIDERS},
+        diagnostic_log=read_provider_diagnostics(),
+    )
+
+
+@main_bp.route('/admin/settings/result-analysis/test/<provider>', methods=['POST'])
+@login_required
+@admin_required
+def test_result_analysis_provider(provider):
+    if provider not in PROVIDERS:
+        abort(404)
+    config = None
+    try:
+        config = provider_config(provider)
+        health = build_provider(config).test_connection()
+        append_provider_diagnostic(provider, 'connection_test', config['model'], 'success')
+        flash(f'{provider.title()}: {health.message}', 'success')
+    except (ValueError, RuntimeError, ProviderError) as exc:
+        model = config['model'] if config else get_analysis_settings()['providers'][provider]['model']
+        append_provider_diagnostic(provider, 'connection_test', model, 'failed', exception=exc)
+        safe_message = getattr(exc, 'safe_message', str(exc))
+        flash(f'{provider.title()} connection test failed: {safe_message}', 'danger')
+    return redirect(url_for('main.result_analysis_config'))
 
 
 def _builtin_config_value(key, default=None):
@@ -4486,6 +4750,8 @@ def manage_public_results():
         db.session.flush()
         apply_tags_to_record(result, form.tag_names.data)
         db.session.commit()
+        if uploaded_image_key:
+            _queue_uploaded_result_analysis(result, current_user.id)
         flash('Public result created.', 'success')
         return redirect(url_for('main.manage_public_results'))
 
@@ -4535,6 +4801,7 @@ def edit_public_result(result_id):
                     tag_suggestions=get_all_tag_names(),
                     storage_settings=get_storage_settings(),
                     editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
+                    **_analysis_template_context(result),
                 )
 
             old_key = result.results_image_key
@@ -4548,6 +4815,8 @@ def edit_public_result(result_id):
 
         apply_tags_to_record(result, form.tag_names.data)
         db.session.commit()
+        if has_new_upload and result.results_image_key:
+            _queue_uploaded_result_analysis(result, current_user.id)
         flash('Public result updated.', 'success')
         return redirect(url_for('main.manage_public_results'))
 
@@ -4560,6 +4829,7 @@ def edit_public_result(result_id):
         tag_suggestions=get_all_tag_names(),
         storage_settings=get_storage_settings(),
         editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
+        **_analysis_template_context(result),
     )
 
 

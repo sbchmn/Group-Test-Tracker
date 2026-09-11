@@ -16,6 +16,10 @@ class StorageUploadError(RuntimeError):
     """Raised when an upload fails validation or transport."""
 
 
+class StorageReadError(RuntimeError):
+    """Raised when a private object cannot be read safely."""
+
+
 _DEFAULT_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "PDF"}
 _IMAGE_FORMAT_META = {
     "JPEG": ("jpg", "image/jpeg"),
@@ -298,6 +302,32 @@ def generate_result_image_presigned_url(object_key, expires_in=None):
     except Exception as exc:
         current_app.logger.exception("Failed generating presigned result image URL")
         raise StorageUploadError("Unable to generate secure image URL.") from exc
+
+
+def read_result_file(object_key, max_bytes):
+    """Read a private result object with a hard byte limit for worker processing."""
+    if not object_key:
+        raise StorageReadError('No result file is available.')
+    settings = get_storage_settings()
+    _assert_configured(settings)
+    client = _build_client(settings)
+    try:
+        response = client.get_object(Bucket=settings['bucket'], Key=object_key)
+        declared_length = int(response.get('ContentLength') or 0)
+        if declared_length and declared_length > max_bytes:
+            raise StorageReadError('The result file exceeds the analysis size limit.')
+        body = response['Body']
+        payload = body.read(max_bytes + 1)
+        if len(payload) > max_bytes:
+            raise StorageReadError('The result file exceeds the analysis size limit.')
+        if not payload:
+            raise StorageReadError('The result file is empty.')
+        return payload, str(response.get('ContentType') or '')
+    except StorageReadError:
+        raise
+    except Exception as exc:
+        current_app.logger.warning('Unable to read result object for analysis: %s', exc.__class__.__name__)
+        raise StorageReadError('Unable to read the result file from storage.') from exc
 
 
 def delete_result_image(object_key):

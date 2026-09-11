@@ -193,6 +193,11 @@ window.addEventListener('DOMContentLoaded', function() {
                 </form>
             </div>
         </div>
+        {% if editing_result %}
+            {% set analysis_target = editing_result %}
+            {% set analysis_target_type = 'public-result' %}
+            {% include 'admin/_result_analysis_card.html' %}
+        {% endif %}
     </div>
 
     <div class="col-lg-7">

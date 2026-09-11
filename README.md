@@ -34,6 +34,7 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 	- [Manually Add Participant](#manually-add-participant)
 	- [Set Results Link Quickly](#set-results-link-quickly)
 	- [Manage Public Results](#manage-public-results)
+	- [Configure and Review Automated Result Analysis](#configure-and-review-automated-result-analysis)
 	- [Manage Users](#manage-users)
 	- [Manage Payment Options](#manage-payment-options)
 	- [Notification Templates](#notification-templates)
@@ -68,6 +69,7 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 - Dashboard controls for search, grouping, sorting, and hide/unhide.
 - My Results page that combines closed group-test results and public results.
 - Public Results CRUD for admins, including itemized lab values.
+- Automated extraction of laboratory values from new uploads or administrator-selected public links, with OpenAI, xAI Grok, and Anthropic Claude adapters and mandatory administrator review.
 - Result file upload with S3-compatible object storage (AWS S3 or DigitalOcean Spaces), including image and PDF support.
 - Payment option matrix with method-aware payment links, destinations, and QR payload previews.
 - Telegram bot account linking, webhook processing, status channel posts, digest mode, and Telegram password reset delivery for linked users.
@@ -113,6 +115,10 @@ Optional values:
 FLASK_ENV=development
 NOTIFICATION_LOG_MAX_BYTES=200000
 MAX_CONTENT_LENGTH_MB=12
+# Configure only the analysis providers you intend to enable:
+OPENAI_API_KEY=
+XAI_API_KEY=
+ANTHROPIC_API_KEY=
 ```
 
 Notes:
@@ -138,6 +144,14 @@ flask --app app create-admin --username admin --email admin@example.com --passwo
 ```bash
 python run.py
 ```
+
+Run the result-analysis worker in a separate terminal/process when automated analysis is enabled:
+
+```bash
+flask --app app result-analysis-worker
+```
+
+Use `flask --app app result-analysis-worker --once` for a single-job operational check. The included `Procfile` defines `result-analysis-worker` as a separate process type.
 
 ## Feature How-To (By Role)
 
@@ -317,6 +331,38 @@ If the user was previously denied for that test, the record is reactivated and a
 4. Save.
 5. Use Edit to update values/image.
 6. Use Delete to remove entries.
+
+### Configure and Review Automated Result Analysis
+
+Result analysis extracts what a laboratory report states; it does not make medical or safety judgments. Nothing is written into published result fields until an administrator reviews and applies it.
+
+Initial setup:
+
+1. Apply the latest migration with `flask --app app db upgrade head`.
+2. Open Admin Settings -> Result Analysis.
+3. Configure one or more providers: OpenAI, xAI Grok, or Anthropic Claude. Environment variables are preferred over database-stored keys.
+4. Keep unused providers disabled and choose one active provider.
+5. Use each provider's text-only connection test. Connection tests do not transmit a report.
+6. Start the separate `result-analysis-worker` process.
+7. Enable automatic analysis only after the selected provider passes the fixture/operational checks.
+
+Workflow:
+
+- A newly uploaded eligible Group Test or Public Result file is queued after the record commits when automatic analysis is enabled.
+- Saving or changing a result link does not queue it automatically.
+- On an edit page, use Analyze Uploaded File or Analyze Linked Result to force a run. A manual run can explicitly use any enabled provider.
+- Open Review Findings when processing completes. Accept or reject individual suggestions, edit accepted values if necessary, and optionally append report metadata to the description/summary.
+- Group Test analysis fills only blank existing lab-test rows. It never creates a Group Test row or overwrites a non-empty result.
+- Public Result analysis proposes canonical rows and does not replace an existing canonical result.
+- Explicit laboratory Net, Average, or Batch Average values are preferred. The application never calculates a missing average from vial readings.
+- Provider selection is fixed on each run. A provider failure never silently sends the report to another provider.
+
+Supported sources and limits:
+
+- Uploaded PDF/JPEG/PNG/WebP/GIF files use the effective Storage Config format allowlist. GIF analysis uses the first frame.
+- Regular public HTTP/HTTPS PDF, image, and bounded static HTML pages are supported. Login-required, cookie-dependent, authenticated, CAPTCHA, and anti-bot bypass workflows are not supported.
+- Defaults are 20 MB per report, 25 PDF pages, 2 MB HTML, three redirects, and three worker attempts. The admin settings may lower the document/page limits but not raise their safety ceilings.
+- Grok receives locally extracted PDF text and ordered PNG page renders. Claude receives inline base64 PDF/image blocks. Provider Files APIs and external search/tools are not used.
 
 ### Manage Users
 
@@ -525,6 +571,7 @@ Useful focused runs:
 python -m unittest tests.test_schema_migration tests.test_security
 python -m unittest tests.test_participant_removal
 python -m unittest tests.test_notifications
+python -m unittest tests.test_result_analysis tests.test_schema_migration
 ```
 
 ## Troubleshooting
@@ -557,12 +604,26 @@ Check Admin -> Storage Config:
 2. Run `flask --app app db upgrade head`.
 3. Confirm DB URL credentials and network access.
 
+### Result Analysis Stays Queued
+
+1. Confirm the `result-analysis-worker` process is running.
+2. Confirm the selected provider is enabled and has a valid API key/model under Admin Settings -> Result Analysis.
+3. Run `flask --app app result-analysis-worker --once` and inspect the safe run status shown on the edit page.
+4. Confirm object storage credentials can read uploaded reports; the web preview alone does not prove worker read access.
+
+### Linked Result Cannot Be Analyzed
+
+- Only public HTTP/HTTPS destinations are allowed; private, loopback, link-local, reserved, credential-bearing, and nonstandard-port URLs are rejected.
+- Login/cookie-dependent pages and anti-bot challenges must be downloaded by an administrator and uploaded as a result file instead.
+- The server must be able to resolve and download the source within the configured timeout and size limits.
+
 ## Key Files
 
 - [app/__init__.py](app/__init__.py): app factory, extension wiring, config, CLI.
 - [app/models.py](app/models.py): SQLAlchemy models.
 - [app/routes.py](app/routes.py): forms, routes, business rules.
 - [app/storage.py](app/storage.py): S3-compatible image upload, validation, URL construction.
+- [app/result_analysis](app/result_analysis): source acquisition, provider adapters, durable worker, extraction validation, matching, and reviewed application.
 - [app/notifications.py](app/notifications.py): notification rendering and transport.
 - [app/templates](app/templates): UI templates.
 - [migrations/versions](migrations/versions): schema migration history.

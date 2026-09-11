@@ -200,6 +200,24 @@ def create_app(config_overrides=None):
         with app.app_context():
             result = send_due_user_digests()
             click.echo(f"Digest delivery complete: users={result.get('users', 0)} events={result.get('events', 0)}")
+
+    @app.cli.command('result-analysis-worker')
+    @click.option('--once', is_flag=True, help='Process at most one queued run and exit.')
+    @click.option('--poll-seconds', type=click.IntRange(1, 60), default=5, show_default=True)
+    def result_analysis_worker(once, poll_seconds):
+        """Process durable laboratory result-analysis jobs."""
+        import time
+        from .result_analysis.jobs import process_next_run
+
+        with app.app_context():
+            while True:
+                run = process_next_run()
+                if run:
+                    click.echo(f'Result analysis run {run.id}: {run.status}')
+                if once:
+                    return
+                if not run:
+                    time.sleep(poll_seconds)
     
     # === Shell context for easy debugging ===
     @app.shell_context_processor

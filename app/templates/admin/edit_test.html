@@ -192,4 +192,7 @@ window.onload = function() {
     <button type="submit" class="btn btn-primary">Save Changes</button>
     <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-secondary">Cancel</a>
 </form>
+{% set analysis_target = test %}
+{% set analysis_target_type = 'group-test' %}
+{% include 'admin/_result_analysis_card.html' %}
 {% endblock %}

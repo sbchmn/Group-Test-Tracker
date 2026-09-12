@@ -80,6 +80,21 @@ Implemented and debugged the Telegram `/submitcoa` workflow and improved the ded
 - Added a fresh-message fallback when `editMessageText` is rejected, and preserved callback forum-thread IDs during Public Results pagination.
 - Final focused validation passed: 3 Public Results tests in 2.902s, including image-only navigation and edit-failure recovery.
 
+## 2026-09-12 - Confirmed Hash Placeholder URL Fix
+
+- Production diagnostics confirmed that bot-created results could contain `results_link="#"`.
+- Because `#` is truthy, the fallback page URL was skipped and Telegram rejected the inline keyboard with `URL '#' is invalid: URL host is empty`.
+- Treat `#`, `None`, `null`, blank, and `about:blank` as missing links so the result uses the HTTPS `/public-results/<id>` fallback.
+- Added a regression test for the exact `#` value.
+- Focused validation passed: 2 tests in 1.989s.
+
+## 2026-09-12 - File-Only Public Result Form Support
+
+- Made the Public Result link optional when an image/PDF is uploaded.
+- Added route-level validation requiring at least one source during create and edit.
+- Validated the prospective edit state before deleting or replacing an existing stored file.
+- Added focused tests for file-only creation and missing-source rejection; 2 tests passed in 1.996s.
+
 ### Regression Tests Added
 
 - Added coverage that approval is rejected until a Public Result name is set.

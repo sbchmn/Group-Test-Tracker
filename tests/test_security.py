@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import unittest
@@ -944,6 +945,54 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("not linked", unlinked_send.call_args.args[1].lower())
 
+    @patch("app.routes._queue_uploaded_result_analysis")
+    @patch("app.routes.upload_result_image", return_value="result-images/public-results/file-only.pdf")
+    def test_public_result_form_allows_file_without_link(self, upload_image, queue_analysis):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="file-form-admin", email="file-form-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "file-form-admin", "password": "secret"})
+        response = self.client.post(
+            "/admin/public-results",
+            data={
+                "title": "File-only result",
+                "results_link": "",
+                "summary": "",
+                "tag_names": "",
+                "results_image": (io.BytesIO(b"pdf-bytes"), "certificate.pdf"),
+                "submit": "Save Public Result",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        upload_image.assert_called_once()
+        with self.app.app_context():
+            result = PublicResult.query.filter_by(title="File-only result").one()
+            self.assertIsNone(result.results_link)
+            self.assertEqual(result.results_image_key, "result-images/public-results/file-only.pdf")
+
+    def test_public_result_form_rejects_missing_link_and_file(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="empty-form-admin", email="empty-form-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "empty-form-admin", "password": "secret"})
+        response = self.client.post(
+            "/admin/public-results",
+            data={"title": "Missing source", "results_link": "", "summary": "", "tag_names": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Provide a results link or upload an image/PDF.", response.get_data(as_text=True))
+
     def test_telegram_public_results_tag_click_handles_image_only_certificate(self):
         with self.app.app_context():
             db.create_all()
@@ -982,6 +1031,41 @@ class SecurityTests(unittest.TestCase):
         edit_message.assert_called_once()
         markup = edit_message.call_args.kwargs["reply_markup"]
         result_button = markup["inline_keyboard"][0][0]
+        self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
+        self.assertTrue(result_button["url"].startswith("https://"))
+
+    def test_telegram_public_results_treats_hash_link_as_missing(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="hash-link-admin", email="hash-link-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            user = User(username="hash-link-user", email="hash-link-user@example.com", telegram_chat_id="741", telegram_user_id="841")
+            user.set_password("secret")
+            tag = Tag(name="Hash Link", normalized_name="hash-link")
+            db.session.add_all([admin, user, tag])
+            db.session.flush()
+            result = PublicResult(title="Hash Link COA", results_link="#", created_by=admin.id, tags=[tag])
+            db.session.add(result)
+            db.session.commit()
+            tag_id = tag.id
+            result_id = result.id
+
+        with patch("app.routes.edit_telegram_message") as edit_message, \
+                patch("app.routes.answer_telegram_callback_query"):
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "callback-hash-link",
+                        "from": {"id": 841},
+                        "message": {"message_id": 56, "chat": {"id": 741, "type": "private"}},
+                        "data": f"pr:results:{tag_id}:1",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result_button = edit_message.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]
         self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
 
     def test_telegram_public_results_sends_new_message_when_edit_fails(self):

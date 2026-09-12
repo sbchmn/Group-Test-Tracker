@@ -2371,6 +2371,13 @@ def telegram_webhook():
             _submit_telegram_coa(message, potential_user, chat_id, chat_type, message_thread_id)
         db.session.commit()
         return jsonify({'ok': True})
+
+    if text:
+        from .telegram_result_review import handle_review_reply
+        if handle_review_reply(potential_user, chat_id, message_thread_id, message):
+            db.session.commit()
+            return jsonify({'ok': True})
+
     if not chat_id or not text:
         if _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=message_thread_id):
             db.session.commit()
@@ -2479,10 +2486,6 @@ def telegram_webhook():
     if chat_id != (linked_user.telegram_chat_id or '').strip():
         linked_user.telegram_chat_id = chat_id
     db.session.commit()
-
-    from .telegram_result_review import handle_review_reply
-    if handle_review_reply(linked_user, chat_id, message_thread_id, message):
-        return jsonify({'ok': True})
 
     if lower == '/help':
         send_telegram_chat_message(chat_id, _telegram_help_message())

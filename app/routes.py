@@ -2004,10 +2004,14 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
         return False
     body, keyboard = _public_results_telegram_view(tag_id=tag_id, page=page)
     if message_id is None:
-        send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
+        delivered = send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
     else:
-        edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
-    return True
+        delivered = edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
+    if not delivered:
+        append_notification_log(
+            f'telegram: publicresults update failed chat={chat_id} message={message_id} tag={tag_id} page={page}',
+        )
+    return bool(delivered)
 
 
 def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=None):
@@ -2342,8 +2346,11 @@ def telegram_webhook():
                         callback_user, callback_chat_id, callback_chat_type,
                         tag_id=int(parts[2]), page=int(parts[3]), message_id=callback_message_id,
                     )
+                if not handled:
+                    callback_notice = 'Unable to load that Public Results page. Check the bot log.'
             except (TypeError, ValueError):
                 handled = False
+                callback_notice = 'Invalid Public Results navigation request.'
         answer_telegram_callback_query(callback_query.get('id'), callback_notice)
         if handled:
             db.session.commit()

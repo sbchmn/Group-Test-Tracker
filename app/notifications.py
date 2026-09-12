@@ -686,7 +686,13 @@ def edit_telegram_message(chat_id, message_id, body, reply_markup=None):
     }
     if reply_markup is not None:
         payload['reply_markup'] = reply_markup
-    ok, _ = _telegram_api_post('editMessageText', payload)
+    ok, response = _telegram_api_post('editMessageText', payload)
+    if not ok:
+        detail = response.get('description', 'unknown Telegram API error') if isinstance(response, dict) else 'unknown Telegram API error'
+        detail = str(detail).replace('\r', ' ').replace('\n', ' ')[:500]
+        append_notification_log(
+            f'telegram: editMessageText failed chat={chat_id} message={message_id}: {detail}',
+        )
     return ok
 
 
@@ -729,6 +735,7 @@ def send_root_message(body):
 def _telegram_api_post(method_name, payload):
     bot_token = str(_get_config("telegram_bot_token") or "").strip()
     if not bot_token:
+        append_notification_log(f'telegram: {method_name} failed: bot token is not configured')
         return False, {"description": "Telegram bot token is not configured."}
 
     safe_token = quote(bot_token, safe="")
@@ -746,6 +753,10 @@ def _telegram_api_post(method_name, payload):
             response_body = response.read().decode("utf-8", errors="replace")
         parsed_response = json.loads(response_body) if response_body else {}
         ok = isinstance(parsed_response, dict) and parsed_response.get("ok") is True
+        if not ok:
+            detail = parsed_response.get('description') if isinstance(parsed_response, dict) else response_body
+            detail = str(detail or 'empty response').replace('\r', ' ').replace('\n', ' ')[:500]
+            append_notification_log(f'telegram: {method_name} failed: {detail}')
         return ok, parsed_response if isinstance(parsed_response, dict) else {"description": response_body}
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
         detail = str(exc)
@@ -754,6 +765,8 @@ def _telegram_api_post(method_name, payload):
                 detail = exc.read().decode("utf-8", errors="replace") or str(exc)
             except Exception:
                 detail = str(exc)
+        detail = str(detail).replace('\r', ' ').replace('\n', ' ')[:500]
+        append_notification_log(f'telegram: {method_name} request failed: {detail}')
         return False, {"description": detail}
 
 

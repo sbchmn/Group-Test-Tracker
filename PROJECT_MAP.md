@@ -269,6 +269,7 @@ After each edit phase:
 - **Remaining risk:** Very large tag catalogs may require paginated Telegram tag selection in a later refinement.
 - **Public Results fix:** Telegram tag result buttons now fall back to the authenticated dedicated Public Result page when a published certificate has no external `results_link`, preventing Telegram from rejecting a keyboard containing a null URL.
 - **Validation:** Image-only certificate tag navigation and linked-user Public Results behavior passed two focused security tests in 2.322s on 2026-09-11.
+- **Diagnostics:** Telegram API failures now write bounded single-line method/error details to the notification log; Public Results edit failures also include chat, message, tag, and page context, and Telegram shows a callback alert.
 
 ## Follow-up Change Record: Paginated Tags and Dual COA Sources
 

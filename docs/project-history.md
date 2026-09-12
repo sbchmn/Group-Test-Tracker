@@ -70,6 +70,14 @@ Implemented and debugged the Telegram `/submitcoa` workflow and improved the ded
 - Added a security regression test covering an image-only bot-created certificate selected from a tag.
 - Focused validation passed: `tests.test_security.SecurityTests.test_telegram_public_results_tag_click_handles_image_only_certificate` and the existing linked-private-user Public Results test, 2 tests in 2.322s.
 
+## 2026-09-11 - Public Results Callback Diagnostics
+
+- Added bounded, single-line Telegram API failure logging for `sendMessage`, `editMessageText`, and related API calls.
+- Public Results callback updates now propagate `editMessageText` failure instead of returning success unconditionally.
+- Logged chat ID, message ID, tag ID, and page number for failed Public Results updates without logging bot tokens or report contents.
+- Added a Telegram callback alert directing the administrator to the bot log when a tag-result page cannot be loaded.
+- Focused image-only and linked-user Public Results tests passed; the broader notification test invocation produced an incomplete terminal result and should be rerun in a fully provisioned environment.
+
 ### Regression Tests Added
 
 - Added coverage that approval is rejected until a Public Result name is set.

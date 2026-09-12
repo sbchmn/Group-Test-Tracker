@@ -2007,6 +2007,16 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
         delivered = send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
     else:
         delivered = edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
+        if not delivered:
+            append_notification_log(
+                f'telegram: publicresults edit fallback send chat={chat_id} message={message_id} tag={tag_id} page={page}',
+            )
+            delivered = send_telegram_chat_message(
+                chat_id,
+                body,
+                message_thread_id=message_thread_id,
+                reply_markup=keyboard,
+            )
     if not delivered:
         append_notification_log(
             f'telegram: publicresults update failed chat={chat_id} message={message_id} tag={tag_id} page={page}',
@@ -2339,11 +2349,13 @@ def telegram_webhook():
                 elif parts[1] == 'tags' and len(parts) == 3:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
+                        message_thread_id=callback_message.get('message_thread_id'),
                         tag_id=None, page=int(parts[2]), message_id=callback_message_id,
                     )
                 elif parts[1] == 'results' and len(parts) == 4:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
+                        message_thread_id=callback_message.get('message_thread_id'),
                         tag_id=int(parts[2]), page=int(parts[3]), message_id=callback_message_id,
                     )
                 if not handled:

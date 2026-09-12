@@ -9,6 +9,7 @@ from unittest.mock import patch
 from app import create_app, db
 from app.models import BotCommandMessage, GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
 from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
+from app.routes import _process_public_results_telegram
 
 
 class SecurityTests(unittest.TestCase):
@@ -982,6 +983,31 @@ class SecurityTests(unittest.TestCase):
         markup = edit_message.call_args.kwargs["reply_markup"]
         result_button = markup["inline_keyboard"][0][0]
         self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
+
+    def test_telegram_public_results_sends_new_message_when_edit_fails(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="fallback-admin", email="fallback-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            user = User(username="fallback-user", email="fallback-user@example.com", telegram_chat_id="731", telegram_user_id="831")
+            user.set_password("secret")
+            tag = Tag(name="Fallback Tag", normalized_name="fallback-tag")
+            db.session.add_all([admin, user, tag])
+            db.session.flush()
+            result = PublicResult(title="Fallback COA", results_link=None, created_by=admin.id, tags=[tag])
+            db.session.add(result)
+            db.session.commit()
+            tag_id = tag.id
+
+        with patch("app.routes.edit_telegram_message", return_value=False), \
+                patch("app.routes.send_telegram_chat_message", return_value=True) as send_message:
+            with self.app.test_request_context('/telegram/webhook'):
+                handled = _process_public_results_telegram(
+                    User.query.filter_by(telegram_user_id="831").first(),
+                    "731", "private", tag_id=tag_id, page=1, message_id=55,
+                )
+        self.assertTrue(handled)
+        send_message.assert_called_once()
 
     def test_telegram_public_results_allows_scoped_group_user_without_link(self):
         with self.app.app_context():

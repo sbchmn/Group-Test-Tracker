@@ -77,6 +77,8 @@ Implemented and debugged the Telegram `/submitcoa` workflow and improved the ded
 - Logged chat ID, message ID, tag ID, and page number for failed Public Results updates without logging bot tokens or report contents.
 - Added a Telegram callback alert directing the administrator to the bot log when a tag-result page cannot be loaded.
 - Focused image-only and linked-user Public Results tests passed; the broader notification test invocation produced an incomplete terminal result and should be rerun in a fully provisioned environment.
+- Added a fresh-message fallback when `editMessageText` is rejected, and preserved callback forum-thread IDs during Public Results pagination.
+- Final focused validation passed: 3 Public Results tests in 2.902s, including image-only navigation and edit-failure recovery.
 
 ### Regression Tests Added
 

@@ -48,6 +48,14 @@
                 {{ form.publicresults_allowed_thread_ids.label(class="form-label") }}
                 {{ form.publicresults_allowed_thread_ids(class="form-control", placeholder="2,14") }}
             </div>
+            <hr>
+            <div class="fw-semibold mb-2">COA submission and review</div>
+            <div class="form-check mb-2">{{ form.submitcoa_enabled(class="form-check-input") }} {{ form.submitcoa_enabled.label(class="form-check-label") }}</div>
+            <div class="form-check mb-3">{{ form.submitcoa_allow_non_private(class="form-check-input") }} {{ form.submitcoa_allow_non_private.label(class="form-check-label") }}</div>
+            <div class="mb-3">{{ form.submitcoa_allowed_chat_ids.label(class="form-label") }}{{ form.submitcoa_allowed_chat_ids(class="form-control") }}</div>
+            <div class="mb-3">{{ form.submitcoa_allowed_thread_ids.label(class="form-label") }}{{ form.submitcoa_allowed_thread_ids(class="form-control") }}</div>
+            <div class="mb-3">{{ form.submitcoa_review_chat_id.label(class="form-label") }}{{ form.submitcoa_review_chat_id(class="form-control") }}<div class="form-text">Leave blank to keep review in the invoking DM, group, or thread.</div></div>
+            <div class="mb-3">{{ form.submitcoa_review_thread_id.label(class="form-label") }}{{ form.submitcoa_review_thread_id(class="form-control") }}</div>
             <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
             <a href="{{ url_for('main.bot_commands') }}" class="btn btn-outline-secondary">Back to Command Registry</a>
         </form>

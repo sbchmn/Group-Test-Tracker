@@ -19,7 +19,10 @@ from app.result_analysis.diagnostics import append_provider_diagnostic, read_pro
 from app.result_analysis.providers.base import classify_sdk_error
 from app.result_analysis.sources import SourceError, _safe_public_url, prepare_document
 from app.result_analysis.taxonomy import canonical_types_for_row, canonicalize_label
-from app.result_analysis.types import AnalysisDocument, AnalysisExtraction, ProviderCapabilities, validate_extraction
+from app.result_analysis.types import (
+    SCHEMA_VERSION, AnalysisDocument, AnalysisExtraction, ProviderCapabilities, validate_extraction,
+)
+from app.telegram_result_review import handle_review_callback, handle_review_reply, notify_review_ready
 
 
 def extraction_payload(findings=None):
@@ -100,6 +103,14 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertEqual(canonicalize_label('LAL endotoxin'), 'Endotoxin')
         self.assertEqual(canonical_types_for_row('MASS, PURITY + ID'), ['Identity', 'Purity', 'Mass'])
         self.assertIsNone(canonicalize_label('Unknown custom panel'))
+
+    def test_taxonomy_recognizes_common_coa_labels_contextually(self):
+        self.assertEqual(canonicalize_label('FTIR Identification and Composition Analysis'), 'Identity')
+        self.assertEqual(canonicalize_label('HPLC Purity of Peptide Assay'), 'Purity')
+        self.assertEqual(canonicalize_label('HPLC Potency Assay'), 'Net Content')
+        self.assertEqual(canonical_types_for_row('HPLC Potency Assay'), ['Net Content'])
+        self.assertEqual(canonicalize_label('Bacterial Endotoxins Test (USP <85>)'), 'Endotoxin')
+        self.assertIsNone(canonicalize_label('Peptide-to-Excipients Ratio'))
 
     def test_extraction_validation_rejects_extra_fields_and_bounds_confidence(self):
         payload = extraction_payload([finding('Purity', 'Purity', '99.4%')])
@@ -254,6 +265,53 @@ class ResultAnalysisTests(unittest.TestCase):
         ])
         self.assertIn('Manual note', result.summary)
         self.assertIn('Analysis metadata:', result.summary)
+
+    @patch('app.telegram_result_review.edit_telegram_message', return_value=True)
+    @patch('app.telegram_result_review.delete_telegram_message', return_value=True)
+    @patch('app.telegram_result_review.send_telegram_interactive_message')
+    def test_telegram_public_result_review_names_edits_and_publishes_in_thread(
+            self, send_message, delete_message, edit_message):
+        result = PublicResult(
+            title='Pending COA review', results_link='https://example.com/coa.pdf', item_results=[],
+            created_by=self.user.id, publication_status='needs_review', submission_platform='telegram',
+            submission_chat_id='-10042', submission_thread_id='7', submission_message_id='10',
+            review_state_json={'selected': {}, 'messages': [], 'submission_messages': ['11']},
+        )
+        db.session.add(result)
+        db.session.flush()
+        run = ResultAnalysisRun(
+            public_result_id=result.id, source_kind='link', source_reference=result.results_link,
+            provider='openai', provider_model='test-model', status='analyzing', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        persist_extraction(run, AnalysisExtraction(
+            extraction_payload([finding('HPLC Potency Assay', 'Net Content', '67.9 mg')]),
+            'test-model',
+        ))
+        db.session.commit()
+        send_message.side_effect = ['20', '21', '22']
+        self.assertTrue(notify_review_ready(run))
+
+        ok, _ = handle_review_callback(self.user, '-10042', 7, f'ra:n:{run.id}')
+        self.assertTrue(ok)
+        self.assertTrue(handle_review_reply(self.user, '-10042', 7, {
+            'message_id': 30, 'text': 'Tirzepatide BT Labs',
+            'reply_to_message': {'message_id': 21},
+        }))
+        finding_row = run.findings[0]
+        ok, _ = handle_review_callback(self.user, '-10042', 7, f'ra:t:{run.id}:{finding_row.id}')
+        self.assertTrue(ok)
+        ok, _ = handle_review_callback(self.user, '-10042', 7, f'ra:a:{run.id}')
+        self.assertTrue(ok)
+
+        self.assertEqual(result.publication_status, 'published')
+        self.assertEqual(result.title, 'Tirzepatide BT Labs')
+        self.assertEqual(result.item_results, [{'name': 'Net Content', 'result': '67.9 mg'}])
+        deleted = {(str(call.args[0]), str(call.args[1])) for call in delete_message.call_args_list}
+        self.assertIn(('-10042', '10'), deleted)
+        self.assertIn(('-10042', '11'), deleted)
+        self.assertTrue(edit_message.called)
 
     @patch('app.result_analysis.sources.socket.getaddrinfo')
     def test_link_validation_rejects_private_resolution(self, getaddrinfo):
@@ -510,7 +568,7 @@ class ResultAnalysisTests(unittest.TestCase):
         prior = ResultAnalysisRun(
             group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
             source_sha256='a' * 64, provider='openai', provider_model='test-model',
-            schema_version='1', status='applied', max_attempts=3,
+            schema_version=SCHEMA_VERSION, status='applied', max_attempts=3,
         )
         db.session.add(prior)
         db.session.commit()
@@ -538,7 +596,7 @@ class ResultAnalysisTests(unittest.TestCase):
         prior = ResultAnalysisRun(
             group_test_id=test.id, source_kind='upload', source_reference=test.results_image_key,
             source_sha256='a' * 64, provider='openai', provider_model='test-model',
-            schema_version='1', status='applied', max_attempts=3,
+            schema_version=SCHEMA_VERSION, status='applied', max_attempts=3,
         )
         db.session.add(prior)
         db.session.commit()

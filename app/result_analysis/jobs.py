@@ -71,6 +71,8 @@ def _fail_run(run, code, message, transient=False):
     else:
         run.status = 'failed'
         run.completed_at = datetime.utcnow()
+        if run.public_result and run.public_result.submission_platform == 'telegram':
+            run.public_result.publication_status = 'failed'
     db.session.commit()
 
 
@@ -109,9 +111,22 @@ def process_run(run):
                 return run
         extraction = provider.analyze(document, _target_context(run))
         persist_extraction(run, extraction)
+        if run.public_result and run.public_result.submission_platform == 'telegram':
+            run.public_result.publication_status = 'needs_review'
         run.lease_token = None
         run.lease_expires_at = None
         db.session.commit()
+        if run.public_result and run.public_result.submission_platform == 'telegram':
+            try:
+                from ..telegram_result_review import notify_review_ready
+                notify_review_ready(run)
+            except Exception as exc:
+                db.session.rollback()
+                current_app.logger.exception(
+                    'Unable to send Telegram review for analysis run %s: %s',
+                    run.id,
+                    exc,
+                )
     except SourceError as exc:
         _fail_run(run, exc.code, exc.safe_message, transient=exc.transient)
     except ProviderError as exc:

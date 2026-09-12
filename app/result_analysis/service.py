@@ -235,7 +235,7 @@ def _managed_description(current, metadata):
     return f'{base}\n\n{block}'.strip() if base else block
 
 
-def apply_analysis_run(run, decisions, reviewed_by_id, include_metadata=False):
+def apply_analysis_run(run, decisions, reviewed_by_id, include_metadata=False, commit=True):
     if run.status != 'needs_review':
         raise AnalysisConflict('Only runs awaiting review can be applied.')
     target = run.target
@@ -298,5 +298,8 @@ def apply_analysis_run(run, decisions, reviewed_by_id, include_metadata=False):
     run.status = 'applied'
     run.reviewed_by_id = reviewed_by_id
     run.reviewed_at = now
-    db.session.commit()
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
     return len(accepted)

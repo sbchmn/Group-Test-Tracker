@@ -363,6 +363,7 @@ Workflow:
 - Explicit laboratory Net, Average, or Batch Average values are preferred. The application never calculates a missing average from vial readings.
 - Provider selection is fixed on each run. A provider failure never silently sends the report to another provider.
 - Recent sanitized provider diagnostics appear on Admin Settings -> Result Analysis. Entries contain bounded status/code/request-ID context, not API keys, report contents, or raw responses.
+- When enabled under Built-in Bot Commands, linked Telegram users can submit a PDF/image or public link with `/submitcoa`. Reviews stay in the invoking chat/thread unless a review chat/thread is configured. A linked active administrator names the result, selects or edits findings and metadata, then publishes or rejects it from the inline review; temporary messages are deleted best-effort and the retained review message links to the published Tracker result.
 - The diagnostic file defaults to 128 KiB, is hard-capped at 1 MiB even if misconfigured, and discards its oldest complete entries when full. It is operational and may reset on a redeploy or differ between separately deployed web/worker filesystems.
 
 Supported sources and limits:

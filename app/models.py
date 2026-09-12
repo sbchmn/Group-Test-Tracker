@@ -131,13 +131,20 @@ class PublicResult(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     summary = db.Column(db.Text, nullable=True)
-    results_link = db.Column(db.String(500), nullable=False)
+    results_link = db.Column(db.String(500), nullable=True)
     results_image_key = db.Column(db.String(500), nullable=True)
     item_results = db.Column(db.JSON, nullable=True)
     posted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    publication_status = db.Column(db.String(20), nullable=False, default='published', index=True)
+    submission_platform = db.Column(db.String(20), nullable=True)
+    submission_chat_id = db.Column(db.String(120), nullable=True)
+    submission_thread_id = db.Column(db.String(80), nullable=True)
+    submission_message_id = db.Column(db.String(80), nullable=True)
+    review_message_id = db.Column(db.String(80), nullable=True)
+    review_state_json = db.Column(db.JSON, nullable=True)
 
     tags = db.relationship(
         'Tag',

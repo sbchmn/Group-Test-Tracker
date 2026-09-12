@@ -217,8 +217,8 @@ def _pdf_page_count(payload):
         raise SourceError('PDF analysis dependencies are not installed.') from exc
     except Exception:
         try:
-            import fitz
-            document = fitz.open(stream=payload, filetype='pdf')
+            import pymupdf
+            document = pymupdf.open(stream=payload, filetype='pdf')
             if document.needs_pass:
                 document.close()
                 raise SourceError('Encrypted PDF reports are not supported.')
@@ -239,15 +239,15 @@ def _pdf_page_count(payload):
 
 def _render_pdf_pages(payload, max_pages):
     try:
-        import fitz
+        import pymupdf
     except ImportError as exc:
         raise SourceError('PDF rendering dependencies are not installed.') from exc
     pages = []
     rendered_total = 0
     try:
-        document = fitz.open(stream=payload, filetype='pdf')
+        document = pymupdf.open(stream=payload, filetype='pdf')
         for index in range(min(document.page_count, max_pages)):
-            pixmap = document.load_page(index).get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+            pixmap = document.load_page(index).get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), alpha=False)
             image_bytes = pixmap.tobytes('png')
             if len(image_bytes) > 20 * 1024 * 1024:
                 raise SourceError('A rendered PDF page exceeds the provider image limit.')

@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = '1'
+SCHEMA_VERSION = '2'
 MAX_FINDINGS = 50
 MAX_EVIDENCE_LENGTH = 1000
 CANONICAL_TYPES = (

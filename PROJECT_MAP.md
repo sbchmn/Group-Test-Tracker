@@ -5,7 +5,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
-- **Current branch baseline:** `Test-Updates` at `cc700412f387e8680720584016dbd4f023ebf2a4`.
+- **Current branch baseline:** `Test-Updates` at `6994778`.
 - **Application version:** `3.2` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
@@ -46,6 +46,12 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Use an explicit OpenAI, xAI Grok, or Anthropic Claude provider per run without cross-provider fallback.
 - Fill only blank existing Group Test rows, create canonical non-duplicate Public Result rows, and preserve evidence and audit history.
 - Prefer explicit laboratory Net/Average values without calculating an aggregate, and append approved metadata in an idempotent managed description block.
+- Accept Telegram `/submitcoa` submissions from linked users with a PDF/image attachment or public report link.
+- Route submitted COAs through durable analysis and administrator review, including finding selection, value correction, evidence display, result naming, metadata inclusion, approval, and rejection.
+- Support configurable Telegram review chat/thread destinations and preserve review state across worker restarts.
+- Display callback feedback for review actions and accept name/value replies in configured private chats, groups, and forum threads.
+- Normalize unset or malformed Telegram thread and message IDs so stale configuration or persisted state cannot raise integer-conversion errors.
+- Provide a dedicated Public Result page with a Back to My Results button and inline PDF/image report rendering below the result details.
 
 ### Payments
 
@@ -150,6 +156,8 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Payment selection does not alter accounting or prove payment.
 - Replacing stored media commits the new reference before best-effort deletion of the previous object.
 - Provider-specific adapters format and transport messages; business authorization stays in shared application logic.
+- Optional Telegram thread IDs are normalized at configuration, persistence, matching, and transport boundaries; invalid values are treated as unset.
+- Telegram review replies are processed before non-private command filtering, while administrator, chat, thread, and pending-action checks remain enforced.
 
 ## Optimization Guidance
 
@@ -194,6 +202,8 @@ Record future results with the exact command, pass/fail count, date, environment
 - The large `app/routes.py` and shared configuration table concentrate responsibilities and raise regression risk.
 - Discord dynamic commands still inherit Telegram-oriented persistence names and incomplete provider-specific coverage.
 - Historical validation was run across mixed Windows and Linux command environments.
+- Telegram COA review delivery is still an external API operation; a failed notification can leave an analysis run in `needs_review` until delivery is retried.
+- Inline report rendering depends on the browser being able to display the secured PDF/image response; the authenticated open-report link remains available as fallback.
 
 ## Change Protocol
 
@@ -225,3 +235,16 @@ After each edit phase:
 - **Security/reliability/optimization review:** The Action Queue and acknowledgment endpoint remain administrator-only; acknowledgment is POST-only and CSRF-protected; provider/error strings remain auto-escaped; acknowledged failures retain their failed status and audit metadata; and eager loading plus 25-row pagination bounds database and rendering work.
 - **Validation:** Focused result-analysis and participation suites passed 26 tests in 32.336s; full discovery passed 149 tests in 158.283s; the final pagination-context adjustment passed its two targeted tests; and `git diff --check` passed. Existing deprecation warnings remain.
 - **Product invariant:** Any present or future state requiring administrator approval or attention must surface in the Admin Action Queue until resolved.
+
+## Tonight's Change Record
+
+- **Date:** 2026-09-11
+- **Scope:** Implement, debug, and document the Telegram `/submitcoa` submission/review workflow and improve dedicated Public Result navigation and report display.
+- **Target files/modules:** `app/routes.py`, `app/notifications.py`, `app/result_analysis/jobs.py`, `app/telegram_result_review.py`, `app/templates/public_result_detail.html`, and related result-analysis/storage behavior.
+- **Intended behavior:** Linked Telegram users can submit a COA; administrators receive a review message, set a result name, review findings, and approve or reject; replies work in private chats and configured group/forum threads; published Public Results expose their attached report on the dedicated page.
+- **Security risks/checks:** Preserve linked-user and administrator checks, configured chat/thread scope checks, authenticated result access, signed storage URLs, CSRF boundaries, and no secret disclosure in diagnostics.
+- **Reliability risks/checks:** Keep analysis committed before notification; retain `needs_review` state when Telegram delivery fails; log the underlying notification exception; normalize sentinel IDs; avoid crashes from stale reply, edit, or delete message references.
+- **Optimization checks:** Reuse the existing result-image access route and file-kind helper; avoid duplicating report storage or download logic; bound Telegram callback/reply text and existing review message content.
+- **Applied changes:** Added `/submitcoa` attachment/link intake and queued analysis handoff; added Telegram interactive review state and approval/rejection workflow; added worker traceback logging; normalized optional thread/message IDs; moved review reply handling before non-private command filtering; displayed callback notices; added resilient prompt/review-message correlation; and added Public Result back navigation plus inline PDF/image rendering.
+- **Validation:** `python -m py_compile app/routes.py app/notifications.py app/telegram_result_review.py app/result_analysis/jobs.py` passed; `git diff --check` passed for the dedicated page change. Full suite validation was not performed for this documentation update.
+- **Remaining follow-up:** Add focused webhook tests for `/submitcoa`, group/forum-thread replies, callback notices, name persistence, and inline Public Result report rendering; provide an explicit retry path for review notifications that remain in `needs_review`.

@@ -2,6 +2,48 @@
 
 > Archived from the original `PROJECT_MAP.md` on 2026-09-10. This file preserves the chronological engineering record. For the maintained current-state map, see [`../PROJECT_MAP.md`](../PROJECT_MAP.md).
 
+## 2026-09-11 - Telegram COA Review and Public Result Detail Improvements
+
+### Scope
+
+Implemented and debugged the Telegram `/submitcoa` workflow and improved the dedicated Public Result page. The work spans commits `13ca082`, `3bdc7d3`, `05aa163`, `e556370`, and `6994778`, plus the current dedicated-page edits.
+
+### Implemented Changes
+
+- Added linked-user Telegram COA intake for PDF/image attachments and public HTTP/HTTPS report links.
+- Created queued `PublicResult` submissions and durable result-analysis runs for Telegram COAs.
+- Added Telegram review presentation with finding selection, corrected values, evidence viewing, result naming, optional metadata, approval, and rejection.
+- Preserved administrator-only review authorization and configured review chat/thread routing.
+- Added worker exception logging with the underlying error and traceback when review notification delivery fails.
+- Fixed optional Telegram thread handling when settings or persisted records contain `None`, `"None"`, `"null"`, blank, or malformed values.
+- Hardened Telegram reply-to, edit, and delete message ID handling against invalid persisted values.
+- Moved review reply processing before the non-private command filter so configured group/forum-thread administrators can complete reviews.
+- Added callback feedback so Telegram users can see messages such as the required-name error instead of receiving a silent callback.
+- Made name and finding-value replies correlate against both the generated prompt and the main review message to tolerate Telegram reply-shape differences.
+- Added a dedicated Public Result Back to My Results button.
+- Added inline rendering of attached image reports and embedded PDF reports below the Public Result details, with an authenticated open-report fallback link.
+
+### Security, Reliability, and Performance Review
+
+- Existing linked-user, active-user, administrator, destination-chat, and destination-thread checks remain in the review path.
+- Report previews continue to use the authenticated result-image route and short-lived signed storage URLs rather than exposing object-storage keys.
+- Analysis state remains committed before Telegram notification delivery; notification failure does not discard extracted findings.
+- Invalid Telegram IDs are ignored or treated as unset instead of causing worker/webhook exceptions.
+- Review text and callback notices remain bounded by existing Telegram message limits.
+- The dedicated page reuses the existing secured storage route and file-kind helper without adding a second download path.
+
+### Validation
+
+- Passed: `python -m py_compile app/routes.py app/notifications.py app/telegram_result_review.py app/result_analysis/jobs.py` on 2026-09-11.
+- Passed: `git diff --check` for the dedicated Public Result page change.
+- Full automated test validation was not performed for this change set. Focused webhook and review-flow regression tests remain recommended.
+
+### Remaining Risks
+
+- A Telegram API delivery failure can still leave a run in `needs_review` until an explicit notification retry path is used.
+- The current review reply path would benefit from direct tests using private, group, and forum-thread Telegram update payloads.
+- Browser PDF support varies; the dedicated page retains an open-report link for clients that cannot embed PDFs.
+
 ## Target Files and Modules
 - app/models.py
 - app/routes.py

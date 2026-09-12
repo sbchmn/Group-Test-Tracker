@@ -2612,7 +2612,11 @@ def public_result_detail(result_id):
     result = PublicResult.query.get_or_404(result_id)
     if result.publication_status != 'published' and not current_user.is_admin:
         abort(404)
-    return render_template('public_result_detail.html', result=result)
+    return render_template(
+        'public_result_detail.html',
+        result=result,
+        result_file_kind=_result_file_kind(result.results_image_key),
+    )
 
 
 @main_bp.route('/test/<int:test_id>', methods=['GET', 'POST'])

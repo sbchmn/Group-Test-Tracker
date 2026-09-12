@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from unittest.mock import patch
 from app import create_app, db
 from app.models import BotCommandMessage, GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
 from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
+from app.routes import _process_public_results_telegram
 
 
 class SecurityTests(unittest.TestCase):
@@ -942,6 +944,154 @@ class SecurityTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertIn("not linked", unlinked_send.call_args.args[1].lower())
+
+    @patch("app.routes._queue_uploaded_result_analysis")
+    @patch("app.routes.upload_result_image", return_value="result-images/public-results/file-only.pdf")
+    def test_public_result_form_allows_file_without_link(self, upload_image, queue_analysis):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="file-form-admin", email="file-form-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "file-form-admin", "password": "secret"})
+        response = self.client.post(
+            "/admin/public-results",
+            data={
+                "title": "File-only result",
+                "results_link": "",
+                "summary": "",
+                "tag_names": "",
+                "results_image": (io.BytesIO(b"pdf-bytes"), "certificate.pdf"),
+                "submit": "Save Public Result",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        upload_image.assert_called_once()
+        with self.app.app_context():
+            result = PublicResult.query.filter_by(title="File-only result").one()
+            self.assertIsNone(result.results_link)
+            self.assertEqual(result.results_image_key, "result-images/public-results/file-only.pdf")
+
+    def test_public_result_form_rejects_missing_link_and_file(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="empty-form-admin", email="empty-form-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "empty-form-admin", "password": "secret"})
+        response = self.client.post(
+            "/admin/public-results",
+            data={"title": "Missing source", "results_link": "", "summary": "", "tag_names": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Provide a results link or upload an image/PDF.", response.get_data(as_text=True))
+
+    def test_telegram_public_results_tag_click_handles_image_only_certificate(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="image-only-tg", email="image-only-tg@example.com", telegram_chat_id="721", telegram_user_id="821")
+            user.set_password("secret")
+            admin = User(username="image-only-admin", email="image-only-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add_all([user, admin])
+            db.session.flush()
+            tag = Tag(name="Image Only", normalized_name="image-only")
+            result = PublicResult(
+                title="Bot Certificate", results_link=None,
+                results_image_key="result-images/public-results/certificate.pdf",
+                created_by=admin.id, publication_status="published", tags=[tag],
+            )
+            db.session.add(result)
+            db.session.commit()
+            tag_id = tag.id
+            result_id = result.id
+
+        with patch("app.routes.edit_telegram_message") as edit_message, \
+                patch("app.routes.answer_telegram_callback_query"):
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "callback-image-only",
+                        "from": {"id": 821},
+                        "message": {"message_id": 55, "chat": {"id": 721, "type": "private"}},
+                        "data": f"pr:results:{tag_id}:1",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        edit_message.assert_called_once()
+        markup = edit_message.call_args.kwargs["reply_markup"]
+        result_button = markup["inline_keyboard"][0][0]
+        self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
+        self.assertTrue(result_button["url"].startswith("https://"))
+
+    def test_telegram_public_results_treats_hash_link_as_missing(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="hash-link-admin", email="hash-link-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            user = User(username="hash-link-user", email="hash-link-user@example.com", telegram_chat_id="741", telegram_user_id="841")
+            user.set_password("secret")
+            tag = Tag(name="Hash Link", normalized_name="hash-link")
+            db.session.add_all([admin, user, tag])
+            db.session.flush()
+            result = PublicResult(title="Hash Link COA", results_link="#", created_by=admin.id, tags=[tag])
+            db.session.add(result)
+            db.session.commit()
+            tag_id = tag.id
+            result_id = result.id
+
+        with patch("app.routes.edit_telegram_message") as edit_message, \
+                patch("app.routes.answer_telegram_callback_query"):
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "callback-hash-link",
+                        "from": {"id": 841},
+                        "message": {"message_id": 56, "chat": {"id": 741, "type": "private"}},
+                        "data": f"pr:results:{tag_id}:1",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result_button = edit_message.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]
+        self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
+
+    def test_telegram_public_results_sends_new_message_when_edit_fails(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="fallback-admin", email="fallback-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            user = User(username="fallback-user", email="fallback-user@example.com", telegram_chat_id="731", telegram_user_id="831")
+            user.set_password("secret")
+            tag = Tag(name="Fallback Tag", normalized_name="fallback-tag")
+            db.session.add_all([admin, user, tag])
+            db.session.flush()
+            result = PublicResult(title="Fallback COA", results_link=None, created_by=admin.id, tags=[tag])
+            db.session.add(result)
+            db.session.commit()
+            tag_id = tag.id
+
+        with patch("app.routes.edit_telegram_message", return_value=False), \
+                patch("app.routes.send_telegram_chat_message", return_value=True) as send_message:
+            with self.app.test_request_context('/telegram/webhook'):
+                handled = _process_public_results_telegram(
+                    User.query.filter_by(telegram_user_id="831").first(),
+                    "731", "private", tag_id=tag_id, page=1, message_id=55,
+                )
+        self.assertTrue(handled)
+        send_message.assert_called_once()
 
     def test_telegram_public_results_allows_scoped_group_user_without_link(self):
         with self.app.app_context():

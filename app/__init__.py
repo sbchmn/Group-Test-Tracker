@@ -7,6 +7,7 @@ All extensions initialized here without circular imports.
 
 import os
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf import CSRFProtect
@@ -28,6 +29,8 @@ def create_app(config_overrides=None):
     app = Flask(__name__, 
                 template_folder='templates',
                 static_folder='static')
+    # DigitalOcean App Platform and similar proxies terminate TLS upstream.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config['APP_VERSION'] = APP_VERSION
 
     @app.context_processor

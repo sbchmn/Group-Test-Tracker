@@ -11,7 +11,7 @@ from pypdf import PdfWriter
 
 from app import create_app, db
 from app.models import (
-    GroupTest, NotificationConfig, PublicResult, ResultAnalysisRun, User,
+    GroupTest, NotificationConfig, PublicResult, ResultAnalysisRun, Tag, User,
 )
 from app.result_analysis.service import AnalysisConflict, apply_analysis_run, enqueue_analysis, persist_extraction
 from app.result_analysis.jobs import process_next_run, process_run
@@ -293,6 +293,9 @@ class ResultAnalysisTests(unittest.TestCase):
         send_message.side_effect = ['20', '21', '22']
         self.assertTrue(notify_review_ready(run))
 
+        ok, notice = handle_review_callback(self.user, '-10042', 7, f'ra:a:{run.id}')
+        self.assertFalse(ok)
+        self.assertEqual(notice, 'Set the Result name before publishing.')
         ok, _ = handle_review_callback(self.user, '-10042', 7, f'ra:n:{run.id}')
         self.assertTrue(ok)
         self.assertTrue(handle_review_reply(self.user, '-10042', 7, {
@@ -312,6 +315,112 @@ class ResultAnalysisTests(unittest.TestCase):
         self.assertIn(('-10042', '10'), deleted)
         self.assertIn(('-10042', '11'), deleted)
         self.assertTrue(edit_message.called)
+
+    def test_public_result_detail_includes_back_link_and_attached_pdf(self):
+        result = PublicResult(
+            title='Published COA', results_link='https://example.com/coa.pdf',
+            results_image_key='result-images/public-results/report.pdf', item_results=[],
+            created_by=self.user.id, publication_status='published',
+        )
+        db.session.add(result)
+        db.session.commit()
+        client = self.app.test_client()
+        client.post('/login', data={'username': self.user.username, 'password': 'secret-pass'})
+        response = client.get(f'/public-results/{result.id}')
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Back to My Results', body)
+        self.assertIn('iframe', body)
+        self.assertIn(f'/result-image/public/{result.id}', body)
+
+    @patch('app.telegram_result_review.edit_telegram_message', return_value=True)
+    def test_telegram_review_tags_use_paginated_save_workflow(self, edit_message):
+        tags = [Tag(name=f'Tag {index:02d}', normalized_name=f'tag-{index:02d}') for index in range(12)]
+        db.session.add_all(tags)
+        result = PublicResult(
+            title='Pending COA review', results_link='https://example.com/coa.pdf', item_results=[],
+            created_by=self.user.id, publication_status='needs_review', submission_platform='telegram',
+            submission_chat_id='-10042', review_state_json={'selected': {}, 'messages': []},
+        )
+        db.session.add(result)
+        db.session.flush()
+        run = ResultAnalysisRun(
+            public_result_id=result.id, source_kind='link', source_reference=result.results_link,
+            provider='openai', provider_model='test-model', status='needs_review', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        db.session.commit()
+
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:tags:{run.id}:0')
+        self.assertTrue(ok)
+        tag_page = edit_message.call_args.args[2]
+        tag_buttons = [button for row in tag_page['inline_keyboard'] for button in row if button['callback_data'].startswith(f'ra:tag:{run.id}:')]
+        self.assertEqual(len(tag_buttons), 10)
+
+        first_tag_id = tags[0].id
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:tag:{run.id}:0:{first_tag_id}')
+        self.assertTrue(ok)
+        self.assertIn(first_tag_id, result.review_state_json['draft_tag_ids'])
+        self.assertNotIn('tag_ids', result.review_state_json)
+
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:tagsave:{run.id}')
+        self.assertTrue(ok)
+        self.assertEqual(result.review_state_json['tag_ids'], [first_tag_id])
+
+    @patch('app.telegram_result_review.delete_result_image', return_value=True)
+    @patch('app.telegram_result_review.upload_result_image', return_value='result-images/public-results/added.pdf')
+    @patch('app.telegram_result_review.download_telegram_photo')
+    @patch('app.telegram_result_review.edit_telegram_message', return_value=True)
+    @patch('app.telegram_result_review.send_telegram_interactive_message')
+    def test_telegram_review_can_add_complementary_link_and_file(
+            self, send_message, edit_message, download_photo, upload_image, delete_image):
+        result = PublicResult(
+            title='Pending COA review', results_link='https://example.com/original.pdf', item_results=[],
+            created_by=self.user.id, publication_status='needs_review', submission_platform='telegram',
+            submission_chat_id='-10042', review_message_id='20',
+            review_state_json={'title': 'Named COA', 'selected': {}, 'messages': []},
+        )
+        db.session.add(result)
+        db.session.flush()
+        run = ResultAnalysisRun(
+            public_result_id=result.id, source_kind='link', source_reference=result.results_link,
+            provider='openai', provider_model='test-model', status='needs_review', max_attempts=3,
+        )
+        db.session.add(run)
+        db.session.flush()
+        persist_extraction(run, AnalysisExtraction(
+            extraction_payload([finding('Purity', 'Purity', '99.4%')]), 'test-model',
+        ))
+        db.session.commit()
+        send_message.side_effect = ['30', '31']
+        download_photo.return_value = io.BytesIO(b'pdf-bytes')
+        download_photo.return_value.filename = 'added.pdf'
+
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:source:{run.id}')
+        self.assertTrue(ok)
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:link:{run.id}')
+        self.assertTrue(ok)
+        self.assertTrue(handle_review_reply(self.user, '-10042', None, {
+            'message_id': 40, 'text': 'https://example.com/new-report.pdf',
+            'reply_to_message': {'message_id': 30},
+        }))
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:file:{run.id}')
+        self.assertTrue(ok)
+        self.assertTrue(handle_review_reply(self.user, '-10042', None, {
+            'message_id': 41, 'document': {'file_id': 'file-1', 'file_name': 'added.pdf'},
+            'reply_to_message': {'message_id': 31},
+        }))
+        self.assertEqual(result.review_state_json['draft_results_link'], 'https://example.com/new-report.pdf')
+        self.assertEqual(result.review_state_json['draft_results_image_key'], 'result-images/public-results/added.pdf')
+
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:sourcesave:{run.id}')
+        self.assertTrue(ok)
+        ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:a:{run.id}')
+        self.assertTrue(ok)
+        self.assertEqual(result.results_link, 'https://example.com/new-report.pdf')
+        self.assertEqual(result.results_image_key, 'result-images/public-results/added.pdf')
+        self.assertEqual(result.publication_status, 'published')
 
     @patch('app.result_analysis.sources.socket.getaddrinfo')
     def test_link_validation_rejects_private_resolution(self, getaddrinfo):

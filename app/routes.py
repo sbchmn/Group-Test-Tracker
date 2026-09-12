@@ -167,7 +167,7 @@ class GroupTestForm(FlaskForm):
 class PublicResultForm(FlaskForm):
     title = StringField('Result Title', validators=[DataRequired(), Length(max=200)])
     summary = TextAreaField('Summary / Notes', validators=[Optional()])
-    results_link = StringField('Results Link', validators=[DataRequired(), Length(max=500)])
+    results_link = StringField('Results Link (optional when a file is uploaded)', validators=[Optional(), Length(max=500)])
     tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     submit = SubmitField('Save Public Result')
 
@@ -1963,8 +1963,31 @@ def _public_results_telegram_tag_keyboard(tags, page, total_pages):
 
 def _public_results_telegram_result_keyboard(results, tag_id, page, total_pages):
     rows = []
+    config_map = _config_values_map()
+    configured_base = str(config_map.get('service_base_url') or '').strip().rstrip('/')
+    if configured_base.lower().startswith('http://'):
+        configured_base = 'https://' + configured_base[7:]
     for result in results:
-        rows.append([{'text': f'COA: {result.title}'[:64], 'url': result.results_link}])
+        result_url = str(result.results_link or '').strip()
+        if result_url.lower() in {'', '#', 'none', 'null', 'about:blank'}:
+            result_url = ''
+        if not result_url:
+            if configured_base:
+                result_url = f"{configured_base}{url_for('main.public_result_detail', result_id=result.id)}"
+            else:
+                result_url = url_for(
+                    'main.public_result_detail',
+                    result_id=result.id,
+                    _external=True,
+                    _scheme='https',
+                )
+        if not str(result_url).lower().startswith(('https://', 'http://')):
+            append_notification_log(
+                f'telegram: publicresults invalid result URL tag={tag_id} result={result.id} scheme={str(result_url).split(":", 1)[0] if ":" in str(result_url) else "missing"}',
+            )
+            rows.append([{'text': f'COA: {result.title}'[:64], 'callback_data': f'pr:view:{result.id}'}])
+        else:
+            rows.append([{'text': f'COA: {result.title}'[:64], 'url': result_url}])
     navigation = [{'text': 'Back to Tags', 'callback_data': 'pr:tags:1'}]
     if page > 1:
         navigation.append({'text': 'Previous', 'callback_data': f'pr:results:{tag_id}:{page - 1}'})
@@ -2001,10 +2024,24 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
         return False
     body, keyboard = _public_results_telegram_view(tag_id=tag_id, page=page)
     if message_id is None:
-        send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
+        delivered = send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
     else:
-        edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
-    return True
+        delivered = edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
+        if not delivered:
+            append_notification_log(
+                f'telegram: publicresults edit fallback send chat={chat_id} message={message_id} tag={tag_id} page={page}',
+            )
+            delivered = send_telegram_chat_message(
+                chat_id,
+                body,
+                message_thread_id=message_thread_id,
+                reply_markup=keyboard,
+            )
+    if not delivered:
+        append_notification_log(
+            f'telegram: publicresults update failed chat={chat_id} message={message_id} tag={tag_id} page={page}',
+        )
+    return bool(delivered)
 
 
 def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, message_thread_id=None):
@@ -2316,31 +2353,54 @@ def telegram_webhook():
 
         handled = False
         callback_notice = None
-        if callback_data.startswith('ra:') and callback_message_id and callback_chat_id:
-            from .telegram_result_review import handle_review_callback
-            handled, callback_notice = handle_review_callback(
-                callback_user,
-                callback_chat_id,
-                callback_message.get('message_thread_id'),
-                callback_data,
-            )
-        elif callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
-            parts = callback_data.split(':')
-            try:
+        current_app.logger.warning(
+            'Telegram callback received provider=%s chat=%s type=%s message=%s data=%s user=%s',
+            'telegram', callback_chat_id, callback_chat_type, callback_message_id,
+            callback_data[:120], callback_telegram_user_id or 'unknown',
+        )
+        try:
+            if callback_data.startswith('ra:') and callback_message_id and callback_chat_id:
+                from .telegram_result_review import handle_review_callback
+                handled, callback_notice = handle_review_callback(
+                    callback_user,
+                    callback_chat_id,
+                    callback_message.get('message_thread_id'),
+                    callback_data,
+                )
+            elif callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
+                parts = callback_data.split(':')
                 if parts[1] == 'close' and len(parts) == 2:
                     handled = delete_telegram_message(callback_chat_id, callback_message_id)
                 elif parts[1] == 'tags' and len(parts) == 3:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
+                        message_thread_id=callback_message.get('message_thread_id'),
                         tag_id=None, page=int(parts[2]), message_id=callback_message_id,
                     )
                 elif parts[1] == 'results' and len(parts) == 4:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
+                        message_thread_id=callback_message.get('message_thread_id'),
                         tag_id=int(parts[2]), page=int(parts[3]), message_id=callback_message_id,
                     )
-            except (TypeError, ValueError):
-                handled = False
+                elif parts[1] == 'view' and len(parts) == 3:
+                    result = PublicResult.query.get(int(parts[2]))
+                    handled = bool(result and result.publication_status == 'published')
+                    if handled:
+                        callback_notice = 'Configure an HTTPS service base URL to open this certificate from Telegram.'
+                if not handled:
+                    callback_notice = 'Unable to load that Public Results page. Check the bot log.'
+        except (TypeError, ValueError):
+            handled = False
+            callback_notice = 'Invalid Public Results navigation request.'
+            current_app.logger.exception('Telegram callback parsing failed data=%s', callback_data[:120])
+        except Exception:
+            handled = False
+            callback_notice = 'Unable to load that Public Results page. Check the bot log.'
+            current_app.logger.exception(
+                'Telegram callback processing failed chat=%s message=%s data=%s',
+                callback_chat_id, callback_message_id, callback_data[:120],
+            )
         answer_telegram_callback_query(callback_query.get('id'), callback_notice)
         if handled:
             db.session.commit()
@@ -2372,7 +2432,7 @@ def telegram_webhook():
         db.session.commit()
         return jsonify({'ok': True})
 
-    if text:
+    if text or message.get('document') or message.get('photo'):
         from .telegram_result_review import handle_review_reply
         if handle_review_reply(potential_user, chat_id, message_thread_id, message):
             db.session.commit()
@@ -2612,7 +2672,11 @@ def public_result_detail(result_id):
     result = PublicResult.query.get_or_404(result_id)
     if result.publication_status != 'published' and not current_user.is_admin:
         abort(404)
-    return render_template('public_result_detail.html', result=result)
+    return render_template(
+        'public_result_detail.html',
+        result=result,
+        result_file_kind=_result_file_kind(result.results_image_key),
+    )
 
 
 @main_bp.route('/test/<int:test_id>', methods=['GET', 'POST'])
@@ -3146,6 +3210,19 @@ def edit_test(test_id):
         clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
         upload_file = request.files.get('results_image')
         has_new_upload = bool(upload_file and upload_file.filename)
+        if not result_link and not has_new_upload and (clear_existing_image or not result.results_image_key):
+            flash('Provide a results link or upload an image/PDF.', 'danger')
+            public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+            return render_template(
+                'admin/public_results.html',
+                form=form,
+                public_results=public_results,
+                editing_result=result,
+                tag_suggestions=get_all_tag_names(),
+                storage_settings=get_storage_settings(),
+                editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
+                **_analysis_template_context(result),
+            )
         if has_new_upload:
             try:
                 new_key = upload_result_image(upload_file, 'group-tests')
@@ -4869,6 +4946,17 @@ def manage_public_results():
         )
         uploaded_image_key = None
         upload_file = request.files.get('results_image')
+        result_link = (form.results_link.data or '').strip()
+        if not result_link and not (upload_file and upload_file.filename):
+            flash('Provide a results link or upload an image/PDF.', 'danger')
+            public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
+            return render_template(
+                'admin/public_results.html',
+                form=form,
+                public_results=public_results,
+                tag_suggestions=get_all_tag_names(),
+                storage_settings=get_storage_settings(),
+            )
         if upload_file and upload_file.filename:
             try:
                 uploaded_image_key = upload_result_image(upload_file, 'public-results')
@@ -4886,7 +4974,7 @@ def manage_public_results():
         result = PublicResult(
             title=form.title.data,
             summary=form.summary.data,
-            results_link=form.results_link.data.strip(),
+            results_link=result_link or None,
             results_image_key=uploaded_image_key,
             item_results=item_results,
             created_by=current_user.id,
@@ -4927,7 +5015,8 @@ def edit_public_result(result_id):
         )
         result.title = form.title.data
         result.summary = form.summary.data
-        result.results_link = form.results_link.data.strip()
+        result_link = (form.results_link.data or '').strip()
+        result.results_link = result_link or None
 
         clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
         upload_file = request.files.get('results_image')

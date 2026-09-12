@@ -3,7 +3,10 @@
 {% block content %}
 <div class="card">
     <div class="card-body">
-        <h3>{{ result.title }}</h3>
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+            <h3 class="mb-0">{{ result.title }}</h3>
+            <a href="{{ url_for('main.my_results') }}" class="btn btn-outline-secondary btn-sm">Back to My Results</a>
+        </div>
         {% if result.summary %}<p>{{ result.summary }}</p>{% endif %}
         {% if result.item_results %}
         <dl class="row">
@@ -11,7 +14,22 @@
         </dl>
         {% endif %}
         {% if result.results_link %}<a class="btn btn-primary" href="{{ result.results_link }}" rel="noopener noreferrer">Open Source</a>{% endif %}
-        {% if result.results_image_key %}<a class="btn btn-outline-primary" href="{{ url_for('main.serve_public_result_image', result_id=result.id) }}">View COA</a>{% endif %}
     </div>
 </div>
+{% if result.results_image_key %}
+<div class="card mt-4">
+    <div class="card-header">Attached Report</div>
+    <div class="card-body">
+        {% set result_file_url = url_for('main.serve_public_result_image', result_id=result.id) %}
+        {% if result_file_kind == 'pdf' %}
+            <iframe src="{{ result_file_url }}" title="{{ result.title }} report" class="w-100 border rounded" style="height: 720px;"></iframe>
+        {% else %}
+            <img src="{{ result_file_url }}" alt="{{ result.title }} report" class="img-fluid d-block mx-auto" style="max-height: 720px;">
+        {% endif %}
+        <div class="mt-3">
+            <a class="btn btn-outline-primary" href="{{ result_file_url }}" target="_blank" rel="noopener noreferrer">Open Attached Report</a>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

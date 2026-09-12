@@ -4,14 +4,22 @@ from copy import deepcopy
 from datetime import datetime
 
 from . import db
-from .models import NotificationConfig, PublicResult, ResultAnalysisRun
+from .models import NotificationConfig, PublicResult, ResultAnalysisRun, Tag
 from .notifications import (
     delete_telegram_message,
+    download_telegram_photo,
     edit_telegram_message,
     normalize_telegram_thread_id,
     send_telegram_interactive_message,
 )
 from .result_analysis.service import AnalysisConflict, apply_analysis_run
+from .storage import (
+    StorageConfigurationError,
+    StorageUploadError,
+    delete_result_image,
+    get_storage_settings,
+    upload_result_image,
+)
 
 
 def _config(key, default=''):
@@ -27,6 +35,10 @@ def _state(result):
     value = deepcopy(result.review_state_json or {})
     value.setdefault('selected', {})
     value.setdefault('values', {})
+    value.setdefault('tag_ids', [tag.id for tag in result.tags])
+    value.setdefault('draft_tag_ids', list(value['tag_ids']))
+    value.setdefault('draft_results_link', result.results_link)
+    value.setdefault('draft_results_image_key', result.results_image_key)
     value.setdefault('messages', [])
     value.setdefault('submission_messages', [])
     return value
@@ -50,6 +62,7 @@ def _result_url(result):
 def _keyboard(run, result):
     state = _state(result)
     selected = state['selected']
+    selected_tag_ids = {int(tag_id) for tag_id in state.get('tag_ids', []) if str(tag_id).isdigit()}
     rows = []
     for finding in run.findings:
         actionable = finding.proposed_action in {'fill', 'create'}
@@ -61,16 +74,68 @@ def _keyboard(run, result):
         rows.append(row)
     rows.extend([
         [{'text': 'Set Result Name', 'callback_data': f'ra:n:{run.id}'}, {'text': 'View Evidence', 'callback_data': f'ra:e:{run.id}'}],
+        [{'text': f'Tags ({len(selected_tag_ids)})', 'callback_data': f'ra:tags:{run.id}:0'}, {'text': 'Sources', 'callback_data': f'ra:source:{run.id}'}],
         [{'text': f'{"✅" if state.get("include_metadata") else "⬜"} Include Metadata', 'callback_data': f'ra:m:{run.id}'}],
         [{'text': 'Approve & Publish', 'callback_data': f'ra:a:{run.id}'}, {'text': 'Reject', 'callback_data': f'ra:r:{run.id}'}],
     ])
     return {'inline_keyboard': rows}
 
 
+def _tag_keyboard(run, state, page):
+    tags = Tag.query.order_by(Tag.name).all()
+    page_size = 10
+    total_pages = max(1, (len(tags) + page_size - 1) // page_size)
+    page = min(max(int(page), 0), total_pages - 1)
+    selected = {int(tag_id) for tag_id in state.get('draft_tag_ids', []) if str(tag_id).isdigit()}
+    rows = []
+    for tag in tags[page * page_size:(page + 1) * page_size]:
+        marker = '✅ ' if tag.id in selected else ''
+        rows.append([{'text': f'{marker}{tag.name}'[:64], 'callback_data': f'ra:tag:{run.id}:{page}:{tag.id}'}])
+    navigation = []
+    if page > 0:
+        navigation.append({'text': 'Previous', 'callback_data': f'ra:tags:{run.id}:{page - 1}'})
+    navigation.append({'text': f'Page {page + 1}/{total_pages}', 'callback_data': f'ra:tags:{run.id}:{page}'})
+    if page + 1 < total_pages:
+        navigation.append({'text': 'Next', 'callback_data': f'ra:tags:{run.id}:{page + 1}'})
+    rows.append(navigation)
+    rows.append([
+        {'text': 'Save Tags', 'callback_data': f'ra:tagsave:{run.id}'},
+        {'text': 'Cancel', 'callback_data': f'ra:tagcancel:{run.id}'},
+    ])
+    return {'inline_keyboard': rows}
+
+
+def _source_keyboard(run, state):
+    link = state.get('draft_results_link')
+    image_key = state.get('draft_results_image_key')
+    rows = [
+        [{'text': 'Add/Change Link', 'callback_data': f'ra:link:{run.id}'}, {'text': 'Add/Change Image/PDF', 'callback_data': f'ra:file:{run.id}'}],
+        [{'text': 'Remove Link', 'callback_data': f'ra:unlink:{run.id}'}, {'text': 'Remove Image/PDF', 'callback_data': f'ra:unfile:{run.id}'}],
+        [{'text': 'Save Sources', 'callback_data': f'ra:sourcesave:{run.id}'}, {'text': 'Cancel', 'callback_data': f'ra:sourcecancel:{run.id}'}],
+    ]
+    rows.insert(0, [{'text': f'Link: {"set" if link else "not set"}', 'callback_data': f'ra:source:{run.id}'}, {'text': f'File: {"set" if image_key else "not set"}', 'callback_data': f'ra:source:{run.id}'}])
+    if link:
+        rows.insert(1, [{'text': 'Open Current Link', 'url': link}])
+    return {'inline_keyboard': rows}
+
+
+def _discard_draft_file(result, state):
+    draft_key = state.get('draft_results_image_key')
+    if draft_key and draft_key != result.results_image_key:
+        delete_result_image(draft_key)
+
+
 def _body(run, result):
     state = _state(result)
     title = state.get('title') or 'Not set'
-    lines = [f'COA Review #{result.id}', '', f'Result name: {title}', f'Analysis run: #{run.id}', '', 'Findings:']
+    source_parts = []
+    if state.get('draft_results_image_key') or result.results_image_key:
+        source_parts.append('uploaded image/PDF')
+    if state.get('draft_results_link') or result.results_link:
+        source_parts.append('submitted link')
+    source = ' + '.join(source_parts) or 'unknown'
+    selected_tags = [tag.name for tag in Tag.query.filter(Tag.id.in_(state.get('tag_ids', []))).order_by(Tag.name).all()] if state.get('tag_ids') else []
+    lines = [f'COA Review #{result.id}', '', f'Result name: {title}', f'Source: {source}', f'Tags: {", ".join(selected_tags) if selected_tags else "None"}', f'Analysis run: #{run.id}', '', 'Findings:']
     selected = state['selected']
     for finding in run.findings:
         actionable = finding.proposed_action in {'fill', 'create'}
@@ -128,6 +193,90 @@ def handle_review_callback(user, chat_id, thread_id, data):
         db.session.commit()
         edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
         return True, 'Selection updated.'
+    if action == 'tags' and len(parts) == 4:
+        try:
+            page = int(parts[3])
+        except (TypeError, ValueError):
+            return False, 'Invalid tag page.'
+        edit_telegram_message(chat_id, result.review_message_id, 'Select tags for this Public Result, then save or cancel.', _tag_keyboard(run, state, page))
+        return True, 'Tag selection opened.'
+    if action == 'tag' and len(parts) == 5:
+        try:
+            page = int(parts[3])
+            tag_id = int(parts[4])
+        except (TypeError, ValueError):
+            return False, 'Invalid tag selection.'
+        if Tag.query.get(tag_id) is None:
+            return False, 'That tag no longer exists.'
+        tag_ids = {int(value) for value in state.get('draft_tag_ids', []) if str(value).isdigit()}
+        if tag_id in tag_ids:
+            tag_ids.remove(tag_id)
+        else:
+            tag_ids.add(tag_id)
+        state['draft_tag_ids'] = sorted(tag_ids)
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, 'Select tags for this Public Result, then save or cancel.', _tag_keyboard(run, state, page))
+        return True, 'Tag selection updated.'
+    if action == 'tagsave' and len(parts) == 3:
+        state['tag_ids'] = list(state.get('draft_tag_ids', []))
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
+        return True, 'Tags saved.'
+    if action == 'tagcancel' and len(parts) == 3:
+        state['draft_tag_ids'] = list(state.get('tag_ids', []))
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
+        return True, 'Tag changes canceled.'
+    if action == 'source' and len(parts) == 3:
+        edit_telegram_message(chat_id, result.review_message_id, 'Manage the COA link and attached image/PDF, then save or cancel.', _source_keyboard(run, state))
+        return True, 'Source selection opened.'
+    if action == 'link' and len(parts) == 3:
+        prompt_id = send_telegram_interactive_message(chat_id, 'Reply with the public HTTP/HTTPS COA link.', thread_id, {'force_reply': True, 'selective': True}, result.review_message_id)
+        if not prompt_id:
+            return False, 'Unable to request a COA link.'
+        state['pending_source_link_prompt'] = prompt_id
+        state['messages'].append(prompt_id)
+        result.review_state_json = state
+        db.session.commit()
+        return True, 'Send the COA link as a reply.'
+    if action == 'file' and len(parts) == 3:
+        prompt_id = send_telegram_interactive_message(chat_id, 'Reply with the COA PDF or image attachment.', thread_id, {'force_reply': True, 'selective': True}, result.review_message_id)
+        if not prompt_id:
+            return False, 'Unable to request a COA attachment.'
+        state['pending_source_file_prompt'] = prompt_id
+        state['messages'].append(prompt_id)
+        result.review_state_json = state
+        db.session.commit()
+        return True, 'Send the COA attachment as a reply.'
+    if action == 'unlink' and len(parts) == 3:
+        state['draft_results_link'] = None
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, 'Manage the COA link and attached image/PDF, then save or cancel.', _source_keyboard(run, state))
+        return True, 'Link removed from the draft.'
+    if action == 'unfile' and len(parts) == 3:
+        _discard_draft_file(result, state)
+        state['draft_results_image_key'] = None
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, 'Manage the COA link and attached image/PDF, then save or cancel.', _source_keyboard(run, state))
+        return True, 'Attachment removed from the draft.'
+    if action == 'sourcesave' and len(parts) == 3:
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
+        return True, 'Sources saved.'
+    if action == 'sourcecancel' and len(parts) == 3:
+        _discard_draft_file(result, state)
+        state['draft_results_link'] = result.results_link
+        state['draft_results_image_key'] = result.results_image_key
+        result.review_state_json = state
+        db.session.commit()
+        edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
+        return True, 'Source changes canceled.'
     if action == 'n':
         prompt_id = send_telegram_interactive_message(
             chat_id, 'Reply to this message with the Public Result name.', thread_id,
@@ -195,9 +344,21 @@ def handle_review_callback(user, chat_id, thread_id, data):
             db.session.rollback()
             return False, str(exc)
         result.title = str(state.get('title') or result.title).strip()[:200]
+        selected_tag_ids = {int(tag_id) for tag_id in state.get('tag_ids', []) if str(tag_id).isdigit()}
+        if action == 'a':
+            result.tags = Tag.query.filter(Tag.id.in_(selected_tag_ids)).order_by(Tag.name).all() if selected_tag_ids else []
+        old_image_key = result.results_image_key
+        draft_image_key = state.get('draft_results_image_key')
+        if action == 'a':
+            result.results_link = state.get('draft_results_link')
+            result.results_image_key = draft_image_key
         result.publication_status = 'published' if action == 'a' else 'rejected'
         result.posted_at = datetime.utcnow()
         db.session.commit()
+        if action == 'a' and old_image_key and old_image_key != result.results_image_key:
+            delete_result_image(old_image_key)
+        if action == 'r' and draft_image_key and draft_image_key != old_image_key:
+            delete_result_image(draft_image_key)
         _complete_review(result, run, user, published=action == 'a')
         return True, 'Review complete.'
     return False, 'Invalid review action.'
@@ -218,20 +379,48 @@ def handle_review_reply(user, chat_id, thread_id, message):
         incoming_thread = normalize_telegram_thread_id(thread_id)
         if str(expected_chat) != str(chat_id) or incoming_thread != expected_thread:
             continue
-        title = str(message.get('text') or '').strip()
-        if not title or len(title) > 200:
-            return False
         prompt_id = str(state.get('pending_name_prompt') or '')
         review_id = str(result.review_message_id or '')
-        if reply_id in {prompt_id, review_id} and prompt_id:
-            state['title'] = title
+        source_link_prompt = str(state.get('pending_source_link_prompt') or '')
+        source_file_prompt = str(state.get('pending_source_file_prompt') or '')
+        reply_text = str(message.get('text') or '').strip()
+        attachment = message.get('document') or {}
+        photos = message.get('photo') or []
+        attachment = attachment or (photos[-1] if photos else {})
+        is_source_reply = False
+        if source_link_prompt and reply_id == source_link_prompt:
+            if not reply_text.startswith(('http://', 'https://')) or len(reply_text) > 500:
+                return False
+            state['draft_results_link'] = reply_text
+            state.pop('pending_source_link_prompt', None)
+            is_source_reply = True
+        elif source_file_prompt and reply_id == source_file_prompt:
+            max_bytes = int(get_storage_settings()['max_upload_size_mb'] * 1024 * 1024)
+            upload = download_telegram_photo(attachment.get('file_id'), max_bytes=max_bytes) if attachment else None
+            if upload is None:
+                return False
+            upload.filename = str((message.get('document') or {}).get('file_name') or upload.filename or 'telegram-coa')
+            try:
+                new_key = upload_result_image(upload, 'public-results')
+            except (StorageConfigurationError, StorageUploadError):
+                return False
+            _discard_draft_file(result, state)
+            state['draft_results_image_key'] = new_key
+            state.pop('pending_source_file_prompt', None)
+            is_source_reply = True
+        elif reply_id in {prompt_id, review_id} and prompt_id:
+            if not reply_text or len(reply_text) > 200:
+                return False
+            state['title'] = reply_text
             state.pop('pending_name_prompt', None)
         elif reply_id in {
             str((state.get('pending_value_prompt') or {}).get('message_id') or ''),
             review_id,
         } and state.get('pending_value_prompt'):
+            if not reply_text or len(reply_text) > 200:
+                return False
             finding_id = str(state['pending_value_prompt']['finding_id'])
-            state['values'][finding_id] = title[:500]
+            state['values'][finding_id] = reply_text[:500]
             state.pop('pending_value_prompt', None)
         else:
             continue
@@ -240,7 +429,10 @@ def handle_review_reply(user, chat_id, thread_id, message):
         db.session.commit()
         run = result.analysis_runs.filter_by(status='needs_review').order_by(ResultAnalysisRun.id.desc()).first()
         if run:
-            edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
+            if is_source_reply:
+                edit_telegram_message(chat_id, result.review_message_id, 'Manage the COA link and attached image/PDF, then save or cancel.', _source_keyboard(run, state))
+            else:
+                edit_telegram_message(chat_id, result.review_message_id, _body(run, result), _keyboard(run, result))
         return True
     return False
 

@@ -44,6 +44,61 @@ Implemented and debugged the Telegram `/submitcoa` workflow and improved the ded
 - The current review reply path would benefit from direct tests using private, group, and forum-thread Telegram update payloads.
 - Browser PDF support varies; the dedicated page retains an open-report link for clients that cannot embed PDFs.
 
+## 2026-09-11 - Paginated Tags and Dual COA Sources
+
+### Implemented Changes
+
+- Replaced the flat Telegram tag list with a paginated submenu showing ten existing tags per page.
+- Added explicit Save Tags and Cancel controls that return to the main review message.
+- Added a Sources submenu with staged link and image/PDF fields, regardless of which source was submitted initially.
+- Added link reply prompts for adding or changing the public COA URL.
+- Added attachment reply prompts for adding or changing the stored PDF/image, using existing Telegram download and object-storage validation.
+- Added remove-link and remove-file controls plus source Save/Cancel behavior.
+- Applied staged link, file, and tag selections only when the administrator approves and publishes the result.
+- Routed attachment-only review replies through the Telegram review handler.
+
+### Validation and Risks
+
+- Passed `python -m py_compile app/routes.py app/telegram_result_review.py app/notifications.py` on 2026-09-11.
+- Passed `git diff --check -- app/routes.py app/telegram_result_review.py`.
+- Newly uploaded draft files are cleaned up on cancel or rejection on a best-effort basis; orphan cleanup and focused webhook tests remain follow-up work.
+
+## 2026-09-11 - Image-Only Public Results Tag Navigation Fix
+
+- Fixed Telegram `/publicresults` result keyboards to use the authenticated `/public-results/<id>` page when a published certificate has no external result link.
+- This prevents Telegram from rejecting the entire tag-result message edit because an inline button contained `url: None`.
+- Added a security regression test covering an image-only bot-created certificate selected from a tag.
+- Focused validation passed: `tests.test_security.SecurityTests.test_telegram_public_results_tag_click_handles_image_only_certificate` and the existing linked-private-user Public Results test, 2 tests in 2.322s.
+
+### Regression Tests Added
+
+- Added coverage that approval is rejected until a Public Result name is set.
+- Added coverage that a valid Telegram name reply persists and can be published.
+- Added coverage for ten-per-page tag navigation and Save state.
+- Added coverage for adding a link and image/PDF to the same COA before approval.
+- Added coverage for the dedicated Public Result page back link and embedded PDF.
+
+### Test Environment Note
+
+The focused test module could not be collected in the active environment because `Pillow` is not installed (`ModuleNotFoundError: No module named 'PIL'`). The dependency is already declared in `requirements.txt` as `Pillow>=10.4.0`. The updated application and test modules compile successfully, and `git diff --check` passes.
+
+## 2026-09-11 - COA Source and Tag Review Controls
+
+### Implemented Changes
+
+- Added source context to Telegram COA review messages.
+- Added a direct `Open Submitted COA Link` button for link-based submissions.
+- Preserved uploaded image/PDF sources on the Public Result for review and later display through existing secured storage access.
+- Added toggle buttons for the existing shared `Tag` catalog.
+- Persisted selected tag IDs in the review state and applied only existing selected tags when an administrator approves the result.
+- Kept tag changes behind the existing administrator-only review callback path; Telegram input cannot create arbitrary tags.
+
+### Validation and Risks
+
+- Passed `python -m py_compile app/telegram_result_review.py app/routes.py app/notifications.py` on 2026-09-11.
+- Passed `git diff --check -- app/telegram_result_review.py`.
+- The review keyboard currently displays the complete existing tag catalog; pagination may be needed if the catalog becomes large.
+
 ## Target Files and Modules
 - app/models.py
 - app/routes.py

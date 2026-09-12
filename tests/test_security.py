@@ -943,6 +943,46 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("not linked", unlinked_send.call_args.args[1].lower())
 
+    def test_telegram_public_results_tag_click_handles_image_only_certificate(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="image-only-tg", email="image-only-tg@example.com", telegram_chat_id="721", telegram_user_id="821")
+            user.set_password("secret")
+            admin = User(username="image-only-admin", email="image-only-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add_all([user, admin])
+            db.session.flush()
+            tag = Tag(name="Image Only", normalized_name="image-only")
+            result = PublicResult(
+                title="Bot Certificate", results_link=None,
+                results_image_key="result-images/public-results/certificate.pdf",
+                created_by=admin.id, publication_status="published", tags=[tag],
+            )
+            db.session.add(result)
+            db.session.commit()
+            tag_id = tag.id
+            result_id = result.id
+
+        with patch("app.routes.edit_telegram_message") as edit_message, \
+                patch("app.routes.answer_telegram_callback_query"):
+            response = self.client.post(
+                "/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "callback-image-only",
+                        "from": {"id": 821},
+                        "message": {"message_id": 55, "chat": {"id": 721, "type": "private"}},
+                        "data": f"pr:results:{tag_id}:1",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        edit_message.assert_called_once()
+        markup = edit_message.call_args.kwargs["reply_markup"]
+        result_button = markup["inline_keyboard"][0][0]
+        self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
+
     def test_telegram_public_results_allows_scoped_group_user_without_link(self):
         with self.app.app_context():
             db.create_all()

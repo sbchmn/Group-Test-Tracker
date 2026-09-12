@@ -1964,7 +1964,10 @@ def _public_results_telegram_tag_keyboard(tags, page, total_pages):
 def _public_results_telegram_result_keyboard(results, tag_id, page, total_pages):
     rows = []
     for result in results:
-        rows.append([{'text': f'COA: {result.title}'[:64], 'url': result.results_link}])
+        result_url = result.results_link
+        if not result_url:
+            result_url = f"{_resolve_service_base_url(_config_values_map())}{url_for('main.public_result_detail', result_id=result.id)}"
+        rows.append([{'text': f'COA: {result.title}'[:64], 'url': result_url}])
     navigation = [{'text': 'Back to Tags', 'callback_data': 'pr:tags:1'}]
     if page > 1:
         navigation.append({'text': 'Previous', 'callback_data': f'pr:results:{tag_id}:{page - 1}'})
@@ -2372,7 +2375,7 @@ def telegram_webhook():
         db.session.commit()
         return jsonify({'ok': True})
 
-    if text:
+    if text or message.get('document') or message.get('photo'):
         from .telegram_result_review import handle_review_reply
         if handle_review_reply(potential_user, chat_id, message_thread_id, message):
             db.session.commit()

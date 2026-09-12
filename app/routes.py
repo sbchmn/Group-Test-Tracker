@@ -2341,7 +2341,7 @@ def telegram_webhook():
                     )
             except (TypeError, ValueError):
                 handled = False
-        answer_telegram_callback_query(callback_query.get('id'))
+        answer_telegram_callback_query(callback_query.get('id'), callback_notice)
         if handled:
             db.session.commit()
         else:

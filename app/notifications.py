@@ -655,8 +655,12 @@ def normalize_telegram_thread_id(value):
         return None
 
 
-def answer_telegram_callback_query(callback_query_id):
-    ok, _ = _telegram_api_post('answerCallbackQuery', {'callback_query_id': str(callback_query_id or '')})
+def answer_telegram_callback_query(callback_query_id, text=None, show_alert=False):
+    payload = {'callback_query_id': str(callback_query_id or '')}
+    if text:
+        payload['text'] = str(text)[:200]
+        payload['show_alert'] = bool(show_alert)
+    ok, _ = _telegram_api_post('answerCallbackQuery', payload)
     return ok
 
 

@@ -221,10 +221,15 @@ def handle_review_reply(user, chat_id, thread_id, message):
         title = str(message.get('text') or '').strip()
         if not title or len(title) > 200:
             return False
-        if str(state.get('pending_name_prompt') or '') == reply_id:
+        prompt_id = str(state.get('pending_name_prompt') or '')
+        review_id = str(result.review_message_id or '')
+        if reply_id in {prompt_id, review_id} and prompt_id:
             state['title'] = title
             state.pop('pending_name_prompt', None)
-        elif str((state.get('pending_value_prompt') or {}).get('message_id') or '') == reply_id:
+        elif reply_id in {
+            str((state.get('pending_value_prompt') or {}).get('message_id') or ''),
+            review_id,
+        } and state.get('pending_value_prompt'):
             finding_id = str(state['pending_value_prompt']['finding_id'])
             state['values'][finding_id] = title[:500]
             state.pop('pending_value_prompt', None)

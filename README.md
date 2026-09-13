@@ -473,6 +473,7 @@ Supported sources and limits:
 - `{{ args }}`
 - `{{ message_text }}`
 - `{{ chat_id }}`
+9. An optional configured command image, GIF, or Telegram-converted MP4 loop is shared with Discord. Discord reads and attaches at most 8 MiB per invocation; larger or unavailable media falls back to the configured text or a temporary-unavailable message.
 9. Save as active.
 
 Notes:

@@ -635,6 +635,134 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(tree.add_command.call_args.args[0].name, 'fresh')
         self.assertEqual(subject._dynamic_command_names, {'fresh'})
 
+    def test_discord_media_only_custom_command_reads_bounded_attachment(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(
+                username='discord-media',
+                email='discord-media@example.com',
+                discord_user_id='4455',
+            )
+            user.set_password('secret')
+            template = TelegramCommandTemplate(
+                command='/groupbuy',
+                reply_text='',
+                response_image_key='result-images/bot-commands/example.mp4',
+                is_active=True,
+            )
+            db.session.add_all([user, template])
+            db.session.commit()
+            template_id = template.id
+
+            with patch.object(
+                discord_bot,
+                'read_result_file',
+                return_value=(b'video-bytes', 'video/mp4'),
+            ) as mock_read:
+                response = discord_bot._run_dynamic_command(
+                    template_id,
+                    '4455',
+                    'Discord Media',
+                    '7788',
+                    None,
+                    '',
+                )
+
+        mock_read.assert_called_once_with(
+            'result-images/bot-commands/example.mp4',
+            discord_bot.DISCORD_COMMAND_MEDIA_MAX_BYTES,
+        )
+        self.assertEqual(response['media_bytes'], b'video-bytes')
+        self.assertEqual(response['content'], '')
+        self.assertEqual(response['media_filename'], 'command-media.mp4')
+
+    def test_discord_custom_command_media_failure_preserves_text_or_fallback(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(
+                username='discord-media-failure',
+                email='discord-media-failure@example.com',
+                discord_user_id='5566',
+            )
+            user.set_password('secret')
+            template = TelegramCommandTemplate(
+                command='/groupbuy',
+                reply_text='',
+                response_image_key='private/command.gif',
+                is_active=True,
+            )
+            text_template = TelegramCommandTemplate(
+                command='/groupbuytext',
+                reply_text='The group buy is open.',
+                response_image_key='private/command.gif',
+                is_active=True,
+            )
+            db.session.add_all([user, template, text_template])
+            db.session.commit()
+
+            with patch.object(
+                discord_bot,
+                'read_result_file',
+                side_effect=discord_bot.StorageReadError('unavailable'),
+            ), patch.object(discord_bot, 'append_notification_log') as mock_log:
+                response = discord_bot._run_dynamic_command(
+                    template.id,
+                    '5566',
+                    'Discord Media',
+                    '8899',
+                    None,
+                    '',
+                )
+                text_response = discord_bot._run_dynamic_command(
+                    text_template.id,
+                    '5566',
+                    'Discord Media',
+                    '8899',
+                    None,
+                    '',
+                )
+
+        self.assertEqual(response, 'The configured command media is temporarily unavailable.')
+        self.assertEqual(text_response, 'The group buy is open.')
+        self.assertEqual(mock_log.call_count, 2)
+        self.assertTrue(all(
+            'StorageReadError' in call.args[0]
+            for call in mock_log.call_args_list
+        ))
+
+    def test_discord_custom_command_response_attaches_media_and_disables_mentions(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        async def edit_response():
+            interaction = Mock()
+            interaction.edit_original_response = AsyncMock()
+            await discord_bot._edit_discord_command_response(
+                interaction,
+                {
+                    'content': '@everyone Group buy',
+                    'media_bytes': b'GIF89a-media',
+                    'media_filename': discord_bot._discord_command_media_filename('../../unsafe.GIF'),
+                },
+            )
+            return interaction
+
+        interaction = asyncio.run(edit_response())
+        kwargs = interaction.edit_original_response.await_args.kwargs
+        self.assertEqual(kwargs['content'], '@everyone Group buy')
+        self.assertEqual(len(kwargs['attachments']), 1)
+        self.assertEqual(kwargs['attachments'][0].filename, 'command-media.gif')
+        self.assertEqual(kwargs['attachments'][0].fp.read(), b'GIF89a-media')
+        self.assertFalse(kwargs['allowed_mentions'].everyone)
+        self.assertFalse(kwargs['allowed_mentions'].users)
+        self.assertFalse(kwargs['allowed_mentions'].roles)
+
     def test_discord_public_results_uses_validated_app_url_fallback(self):
         with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
             from app import discord_bot

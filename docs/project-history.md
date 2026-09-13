@@ -1757,3 +1757,31 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Three focused guild/global and worker-request tests passed in 0.300 seconds.
 - The complete notification suite passed 49 tests in 44.302 seconds.
 - `git diff --check` passed.
+
+## Discord Custom Command Media Parity
+
+### Applied Changes
+
+- Extended shared custom-command execution so Discord sends the image, GIF, or Telegram-converted MP4 configured on the existing command template.
+- Preserved text-only commands and combined text-plus-media responses while making media-only commands valid Discord responses.
+- Read command media from private object storage only after existing identity, scope, argument, and rate-limit checks succeed.
+- Added a useful temporary-unavailable response for media-only storage failures and retained configured text as the fallback for combined responses.
+- Documented Discord custom-command media behavior and its 8 MiB application limit in the README and administrator quick start.
+
+### Security / Reliability / Performance Review
+
+- Private object keys and storage exception messages are not sent to Discord or written to diagnostics.
+- Storage reads are capped at 8 MiB, attachment filenames are generated from an allowlisted extension, reply text is bounded to Discord's content limit, and broad mentions are disabled.
+- Interaction acknowledgement still occurs before database or storage work, and blocking reads run in the existing worker thread rather than the Discord event loop.
+- Text-only commands avoid storage access and media allocation; media commands perform one bounded object read per successful invocation.
+
+### Validation Results
+
+- Three focused media-only, storage-failure, safe-filename, attachment, and mention-suppression tests passed in 2.601 seconds.
+- The complete notification suite passed 52 tests in 46.768 seconds.
+- `git diff --check` passed.
+
+### Remaining Risks
+
+- Discord client and codec support determines whether an MP4 is animated inline or offered as a downloadable attachment.
+- Media larger than 8 MiB intentionally falls back instead of uploading, and the private-storage path still needs deployment verification with the live Discord worker.

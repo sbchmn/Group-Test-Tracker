@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from .models import (
 )
 from .notifications import append_notification_log, render_notification_template, send_discord_status_channel_message
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
+from .storage import StorageConfigurationError, StorageReadError, read_result_file
 
 APP = create_app()
 
@@ -32,6 +34,7 @@ COMMAND_SYNC_REQUEST_KEY = 'discord_command_sync_request_id'
 COMMAND_SYNC_PROCESSED_KEY = 'discord_command_sync_processed_id'
 COMMAND_SYNC_STATUS_KEY = 'discord_command_sync_status'
 COMMAND_SYNC_POLL_SECONDS = 5
+DISCORD_COMMAND_MEDIA_MAX_BYTES = 8 * 1024 * 1024
 
 
 def _append_bot_log(message, debug=False):
@@ -575,6 +578,42 @@ def _render_custom_command_reply(template, interaction, args_text):
     return render_notification_template(template.reply_text, context)
 
 
+def _discord_command_media_filename(object_key):
+    extension = os.path.splitext(str(object_key or '').lower())[1]
+    if extension not in {'.gif', '.jpg', '.jpeg', '.png', '.webp', '.mp4'}:
+        extension = '.bin'
+    return f'command-media{extension}'
+
+
+def _discord_command_content(value):
+    content = str(value or '').strip()
+    if len(content) <= 2000:
+        return content
+    return f'{content[:1997]}...'
+
+
+async def _edit_discord_command_response(interaction, response):
+    if not isinstance(response, dict):
+        response = {'content': response}
+
+    content = _discord_command_content(response.get('content'))
+    media_bytes = response.get('media_bytes')
+    attachments = []
+    if media_bytes:
+        attachments.append(discord.File(
+            io.BytesIO(media_bytes),
+            filename=response.get('media_filename') or 'command-media.bin',
+        ))
+    if not content and not attachments:
+        content = 'Command completed without a configured response.'
+
+    await interaction.edit_original_response(
+        content=content or None,
+        attachments=attachments,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+
 def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id, guild_id, args_text):
     template = db.session.get(TelegramCommandTemplate, template_id)
     if template is None or not template.is_active:
@@ -609,7 +648,25 @@ def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id,
 
     reply_text = _render_custom_command_reply(template, command_interaction, args_text)
     _record_custom_command_invocation(template, channel_id)
-    return reply_text or "Command completed without a configured response."
+    if not template.response_image_key:
+        return reply_text or "Command completed without a configured response."
+
+    try:
+        media_bytes, _ = read_result_file(
+            template.response_image_key,
+            DISCORD_COMMAND_MEDIA_MAX_BYTES,
+        )
+    except (StorageConfigurationError, StorageReadError) as exc:
+        append_notification_log(
+            f'discord: custom command media unavailable: {type(exc).__name__}'
+        )
+        return reply_text or 'The configured command media is temporarily unavailable.'
+
+    return {
+        'content': reply_text,
+        'media_bytes': media_bytes,
+        'media_filename': _discord_command_media_filename(template.response_image_key),
+    }
 
 
 class DiscordBot(commands.Bot):
@@ -756,7 +813,7 @@ class DiscordBot(commands.Bot):
             def _make_dynamic_command(template):
                 async def dynamic_command(interaction: discord.Interaction, args: str | None = None):
                     await interaction.response.defer(ephemeral=True)
-                    text = await _run_db(
+                    response = await _run_db(
                         _run_dynamic_command,
                         template.id,
                         interaction.user.id,
@@ -765,7 +822,7 @@ class DiscordBot(commands.Bot):
                         interaction.guild_id,
                         str(args or "").strip(),
                     )
-                    await interaction.edit_original_response(content=text)
+                    await _edit_discord_command_response(interaction, response)
 
                 return dynamic_command
 

@@ -5,7 +5,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
-- **Current branch baseline:** remote `Test-Updates` at `0e59040` plus the current Discord Public Results callback working tree.
+- **Current branch baseline:** `Test-Updates` including Discord custom-command media parity.
 - **Application version:** `3.2` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
@@ -86,6 +86,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Run native Discord interactions with early deferral and worker-thread database access.
 - Support scoped Public Results browsing with acknowledged component callbacks, validated COA links, and safe file-only-result fallbacks, plus configured dynamic commands.
 - Publish commands globally for bot DMs, copy the same definitions into configured guild trees for immediate server availability, and support durable administrator-requested refreshes without a worker restart.
+- Deliver configured custom-command text and bounded image, GIF, or MP4 attachments from private storage, with mention suppression and useful media-failure fallbacks.
 - Deliver Discord and Root outbound webhook notifications.
 
 ### Administration
@@ -111,7 +112,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 3. **Discord command parity and hardening**
    - Replace Telegram-named command fields and models with provider-neutral or Discord-native ownership.
-   - Expand dedicated tests beyond guild/global synchronization into link conflicts, interaction deferral, rate limiting, media responses, and administrator reply updates.
+   - Expand dedicated tests beyond guild/global synchronization and media delivery into link conflicts, interaction deferral, rate limiting, and administrator reply updates.
    - Validate configured guild/channel IDs and document invite/permission setup.
 
 4. **Provider destination management**
@@ -205,7 +206,7 @@ Record future results with the exact command, pass/fail count, date, environment
 - Telegram animation validation recognizes GIF signatures and MP4 `ftyp` markers but does not fully parse or transcode media containers.
 - Some outbound delivery remains synchronous or process-local and can be lost on process termination.
 - The large `app/routes.py` and shared configuration table concentrate responsibilities and raise regression risk.
-- Discord dynamic commands still inherit Telegram-oriented persistence names and incomplete provider-specific coverage.
+- Discord dynamic commands still inherit Telegram-oriented persistence names and have incomplete provider-specific coverage outside the new media-delivery path.
 - Historical validation was run across mixed Windows and Linux command environments.
 - Telegram COA review delivery is still an external API operation; a failed notification can leave an analysis run in `needs_review` until delivery is retried.
 - Inline report rendering depends on the browser being able to display the secured PDF/image response; the authenticated open-report link remains available as fallback.
@@ -228,6 +229,22 @@ After each edit phase:
 4. Record exact results and remaining risks.
 
 ## Current Change Record
+
+### Discord Custom Command Media Parity
+
+- **Date:** 2026-09-13
+- **Scope:** Deliver images, GIFs, and Telegram-converted MP4 loops configured on shared custom commands when those commands run through Discord.
+- **Target files/modules:** Discord custom-command execution in `app/discord_bot.py`, existing bounded storage reads in `app/storage.py`, focused notification tests, operator documentation, project map, and history.
+- **Intended behavior:** Preserve text-only responses; attach configured media to Discord for media-only and combined responses; render GIF and MP4 attachments inline where Discord supports them; and show a useful fallback instead of the misleading no-response message when storage retrieval fails.
+- **Assumptions:** Discord accepts attachments up to the conservative application cap of 8 MiB, and stored Telegram animations retain a validated `.gif` or `.mp4` extension.
+- **Security risks/checks:** Read private objects only through configured storage credentials, enforce a hard byte limit, derive a safe attachment filename rather than trusting stored paths, disable mentions in custom replies, and avoid logging object keys or response content.
+- **Reliability risks/checks:** Defer before storage I/O, perform blocking storage work off the event loop, record invocations consistently, preserve authorization/rate limits, and degrade to text when media is unavailable.
+- **Optimization checks:** Read at most one bounded media object per invoked command and allocate no media memory for text-only responses.
+- **Validation plan:** Add media-only, text-plus-media, failed-storage, safe filename, and Discord attachment tests; run the full notification suite and `git diff --check`.
+- **Applied edits:** Discord dynamic commands now preserve text-only behavior and return a structured response when media is configured. The deferred interaction reads the private object in the existing worker thread, attaches it with a generated extension-only filename, and edits the original ephemeral response with mentions disabled. Media-only storage failures now return a useful temporary-unavailable message; combined responses retain their text. README and administrator quick-start guidance document shared media behavior and the 8 MiB application limit.
+- **Security/reliability/optimization review:** Private object keys and exception messages are not exposed, attachment names cannot inherit path content, reads are capped at 8 MiB, reply text is capped to Discord's 2,000-character content limit, and all mentions are disabled. Existing linking, scope, argument, and rate-limit checks still run before storage access. Blocking storage I/O remains off the event loop after early interaction deferral, and text-only commands perform no storage read or media allocation.
+- **Validation:** Three focused media-path tests passed in 2.601s. The complete notification suite passed 52 tests in 46.768s. `git diff --check` passed.
+- **Remaining risks:** Discord may render MP4 files as downloadable attachments rather than inline animation depending on the client and codec. Configured media above 8 MiB intentionally falls back instead of being uploaded, and a real DigitalOcean/Discord/private-storage deployment check remains necessary.
 
 ### Discord Direct-Message Command Availability
 

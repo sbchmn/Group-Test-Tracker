@@ -1715,3 +1715,25 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - The full notification suite passed 46 tests in 44.701 seconds.
 - The full security suite ran 70 tests in 76.061 seconds: 68 passed, including the changed administrator workflow, and the same two pre-existing Telegram callback mock-signature assertions failed.
 - Python compilation and `git diff --check` passed.
+
+## Discord Public Results Tag Callback Recovery
+
+### Applied Changes
+
+- Acknowledge Discord tag and pagination button interactions before database work so Discord does not expire the interaction while results load.
+- Validate direct COA links as absolute HTTP(S) URLs and replace blank, placeholder, or invalid values with the configured authenticated Public Result detail URL.
+- Render uploaded-file-only results as unavailable when no application base URL is configured instead of raising during button construction.
+- Preserve navigation for empty tag state and show a generic retry response while logging bounded failure context when callback rendering fails.
+
+### Security / Reliability / Performance Review
+
+- Existing Discord command and destination authorization remains unchanged and is rechecked for every button interaction.
+- Non-web URL schemes and hostless values cannot become Discord link buttons; generated application links retain the existing login requirement.
+- Error responses exclude exception details, and the worker log records only tag/page context and exception type.
+- The change adds no external requests or polling and performs one configuration lookup per rendered result page.
+
+### Validation Results
+
+- Three focused URL fallback, immediate acknowledgement, missing-link rendering, and failure recovery tests passed.
+- The complete notification suite passed 49 tests in 44.194 seconds.
+- `git diff --check` passed.

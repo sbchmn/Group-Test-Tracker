@@ -6,6 +6,7 @@ import asyncio
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import discord
 from discord import app_commands
@@ -206,9 +207,34 @@ def _public_results_discord_page(tag_id=None, page=1):
     lines = [f'Public Results for {tag.name} (page {page}/{total_pages}):']
     for result in results:
         lines.append(f'- {result.title} ({result.created_at.strftime("%Y-%m-%d")})')
+    service_base_url = str(_config_value('service_base_url') or '').strip()
     return '\n'.join(lines), ('results', tag.id, page, total_pages), [
-        (result.title, result.results_link) for result in results
+        (result.title, _discord_public_result_url(result, service_base_url)) for result in results
     ]
+
+
+def _valid_discord_button_url(value):
+    candidate = str(value or '').strip()
+    if candidate.lower() in {'', '#', 'none', 'null', 'about:blank'}:
+        return None
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {'http', 'https'} or not parsed.hostname:
+        return None
+    return candidate
+
+
+def _discord_public_result_url(result, service_base_url=''):
+    direct_url = _valid_discord_button_url(result.results_link)
+    if direct_url:
+        return direct_url
+
+    base_url = _valid_discord_button_url(service_base_url)
+    if not base_url:
+        return None
+    return f"{base_url.rstrip('/')}/public-results/{result.id}"
 
 
 def _run_discord_public_results(user_id, channel_id, guild_id):
@@ -263,9 +289,30 @@ class PublicResultsView(discord.ui.View):
             self.add_item(close)
             return
 
+        if self.state[0] != 'results':
+            back = discord.ui.Button(label='Back to Tags', style=discord.ButtonStyle.secondary)
+            back.callback = self._tags_page_callback(1)
+            self.add_item(back)
+            close = discord.ui.Button(label='Close', style=discord.ButtonStyle.danger)
+            close.callback = self._close_callback()
+            self.add_item(close)
+            return
+
         _, tag_id, page, total_pages, items = self.state
         for title, result_link in items:
-            self.add_item(discord.ui.Button(label=f'COA: {title}'[:80], style=discord.ButtonStyle.link, url=result_link))
+            if result_link:
+                button = discord.ui.Button(
+                    label=f'COA: {title}'[:80],
+                    style=discord.ButtonStyle.link,
+                    url=result_link,
+                )
+            else:
+                button = discord.ui.Button(
+                    label=f'COA unavailable: {title}'[:80],
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+            self.add_item(button)
         back = discord.ui.Button(label='Back to Tags', style=discord.ButtonStyle.secondary)
         back.callback = self._tags_page_callback(1)
         self.add_item(back)
@@ -283,12 +330,34 @@ class PublicResultsView(discord.ui.View):
 
     def _render_callback(self, tag_id, page):
         async def callback(button_interaction):
-            allowed, message = await _run_db(_discord_public_results_access, button_interaction.user.id, button_interaction.channel_id, button_interaction.guild_id)
-            if not allowed:
-                await button_interaction.response.send_message(message, ephemeral=True)
-                return
-            body, state, items = await _run_db(_public_results_discord_page, tag_id, page)
-            await button_interaction.response.edit_message(content=body, view=PublicResultsView((*state, items) if state[0] in {'tags', 'results'} else state))
+            await button_interaction.response.defer()
+            try:
+                allowed, message = await _run_db(
+                    _discord_public_results_access,
+                    button_interaction.user.id,
+                    button_interaction.channel_id,
+                    button_interaction.guild_id,
+                )
+                if not allowed:
+                    await button_interaction.edit_original_response(content=message, view=None)
+                    return
+                body, state, items = await _run_db(_public_results_discord_page, tag_id, page)
+                if state and state[0] in {'tags', 'results'}:
+                    next_view = PublicResultsView((*state, items))
+                elif state:
+                    next_view = PublicResultsView(state)
+                else:
+                    next_view = None
+                await button_interaction.edit_original_response(content=body, view=next_view)
+            except Exception as exc:
+                _append_bot_log(
+                    'discord: publicresults callback failed '
+                    f'tag={tag_id or "tags"} page={page} error={type(exc).__name__}'
+                )
+                await button_interaction.edit_original_response(
+                    content='Discord could not load those Public Results. Please try again.',
+                    view=self,
+                )
         return callback
 
     def _tag_callback(self, tag_id):

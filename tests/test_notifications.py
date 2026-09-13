@@ -629,6 +629,74 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(tree.add_command.call_args.args[0].name, 'fresh')
         self.assertEqual(subject._dynamic_command_names, {'fresh'})
 
+    def test_discord_public_results_uses_validated_app_url_fallback(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        result = Mock(id=42, results_link='#')
+        self.assertEqual(
+            discord_bot._discord_public_result_url(result, 'https://tracker.example'),
+            'https://tracker.example/public-results/42',
+        )
+        self.assertIsNone(discord_bot._discord_public_result_url(result, ''))
+        result.results_link = 'javascript:alert(1)'
+        self.assertIsNone(discord_bot._discord_public_result_url(result, 'not-a-url'))
+
+    def test_discord_public_results_tag_callback_defers_and_handles_missing_links(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        async def run_callback():
+            view = discord_bot.PublicResultsView(('tags', 1, 1, [(7, 'Purity')]))
+            interaction = Mock()
+            interaction.user.id = 11
+            interaction.channel_id = 22
+            interaction.guild_id = 33
+            interaction.response.defer = AsyncMock()
+            interaction.edit_original_response = AsyncMock()
+            with patch.object(
+                discord_bot,
+                '_run_db',
+                new=AsyncMock(side_effect=[
+                    (True, None),
+                    ('Public Results', ('results', 7, 1, 1), [('Uploaded COA', None)]),
+                ]),
+            ):
+                await view.children[0].callback(interaction)
+            return interaction
+
+        interaction = asyncio.run(run_callback())
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.edit_original_response.assert_awaited_once()
+        rendered_view = interaction.edit_original_response.await_args.kwargs['view']
+        self.assertTrue(rendered_view.children[0].disabled)
+        self.assertIn('COA unavailable', rendered_view.children[0].label)
+
+    def test_discord_public_results_callback_reports_failure_after_deferring(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        async def run_callback():
+            view = discord_bot.PublicResultsView(('tags', 1, 1, [(7, 'Purity')]))
+            interaction = Mock()
+            interaction.user.id = 11
+            interaction.channel_id = 22
+            interaction.guild_id = 33
+            interaction.response.defer = AsyncMock()
+            interaction.edit_original_response = AsyncMock()
+            with patch.object(discord_bot, '_run_db', new=AsyncMock(side_effect=RuntimeError)), \
+                 patch.object(discord_bot, '_append_bot_log') as mock_log:
+                await view.children[0].callback(interaction)
+            return interaction, mock_log
+
+        interaction, mock_log = asyncio.run(run_callback())
+        interaction.response.defer.assert_awaited_once_with()
+        self.assertIn(
+            'could not load',
+            interaction.edit_original_response.await_args.kwargs['content'].lower(),
+        )
+        self.assertIn('RuntimeError', mock_log.call_args.args[0])
+
     def test_send_discord_status_channel_message_disables_mentions_in_payload(self):
         with self.app.app_context():
             db.create_all()

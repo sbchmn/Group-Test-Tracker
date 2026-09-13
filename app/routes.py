@@ -104,6 +104,18 @@ def version_info():
     )
 
 
+@main_bp.route('/terms')
+def terms_of_service():
+    """Public terms for the web application and its bot integrations."""
+    return render_template('terms.html')
+
+
+@main_bp.route('/privacy')
+def privacy_policy():
+    """Public privacy notice for the web application and its integrations."""
+    return render_template('privacy.html')
+
+
 # ==================== FORMS ====================
 
 class LoginForm(FlaskForm):

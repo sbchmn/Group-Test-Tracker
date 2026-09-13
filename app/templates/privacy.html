@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy Policy - Group Test Manager{% endblock %}
+
+{% block content %}
+<article class="legal-document mx-auto bg-white rounded p-4 p-md-5 shadow-sm">
+    <h1>Privacy Policy</h1>
+    <p class="text-muted"><strong>Effective date:</strong> {{ legal_effective_date }}</p>
+
+    <p>
+        This Privacy Policy explains how the operator of this Group Test Manager deployment ("Operator," "we," "us,"
+        or "our"), {{ legal_operator_name }}, collects, uses, discloses, and retains information when you use the website, an account, a Telegram
+        or Discord bot, automated report analysis, notifications, or related features (collectively, the "Service").
+        The Operator is responsible for the Service's processing; Telegram, Discord, Google, laboratories, payment
+        providers, and AI providers process information under their own terms for their respective services.
+    </p>
+
+    <div class="alert alert-warning" role="note">
+        <strong>Do not upload personal or medical information in laboratory reports.</strong> The Service is designed
+        for product/sample reports, not patient records, clinical care, or protected health information. It is not
+        represented as HIPAA-compliant.
+    </div>
+
+    <h2>1. Information we collect</h2>
+    <h3>Account and profile information</h3>
+    <p>
+        Username, email address, password hash, optional Telegram and Discord usernames, linked platform user/chat
+        identifiers, notification preferences, digest settings, account status, administrator status, and account dates.
+        We do not store your plaintext password.
+    </p>
+
+    <h3>Group-test and participation information</h3>
+    <p>
+        Participation requests and decisions; participant name or handle; region/state and U.S.-based status; vial-donor,
+        order, verification, shipping, payment, amount owed/paid, payment-method preference, notes, and timestamps; and
+        group-test descriptions, vendors, samples, batches, costs, payment destinations, laboratories, and results.
+        Some payment destinations or wallet addresses entered by administrators may be visible to eligible participants.
+        The Service does not collect payment-card credentials through its own forms.
+    </p>
+
+    <h3>Reports, public results, and analysis records</h3>
+    <p>
+        Uploaded PDF/image files, public report URLs, report titles and descriptions, tags, itemized laboratory values,
+        submission/review state, source fingerprints and technical metadata, AI-proposed findings and confidence values,
+        administrator decisions, provider/model identifiers, request identifiers, token/usage metadata, errors, and
+        bounded diagnostic logs. Public Results are shared with Service users and enabled bot browsing interfaces;
+        group-test results are limited by the Service's access rules.
+    </p>
+
+    <h3>Bot and notification information</h3>
+    <p>
+        Telegram or Discord public profile details supplied by those platforms; stable user, chat, channel, guild,
+        thread, message, callback, and update identifiers; messages, commands, arguments, buttons, files, links, and
+        replies you send to a bot; account-link tokens and their expiry/use timestamps; command invocation timestamps;
+        notification and digest events; webhook delivery metadata; and Telegram webhook source IP addresses. The Service
+        processes only events delivered to its configured bot or webhook endpoints, subject to platform and administrator
+        scope settings.
+    </p>
+
+    <h3>Device, usage, and security information</h3>
+    <p>
+        The hosting platform, reverse proxy, application server, and optional analytics tools may process IP address,
+        request time, requested URL, referring page, browser/device and operating-system information, cookie or session
+        identifiers, approximate location derived from IP address, error records, and security events. Authentication
+        uses a session cookie, and forms use a security token to prevent cross-site request forgery.
+    </p>
+
+    <h2>2. How information is collected</h2>
+    <p>
+        We collect information directly from you and administrators; automatically from use of the website; from your
+        Telegram or Discord interaction; from public report links you submit; from enabled laboratories or third-party
+        services; and from AI providers that return an analysis. If another person enters information about you as an
+        organizer or administrator, they are responsible for having authority to do so.
+    </p>
+
+    <h2>3. How we use information</h2>
+    <ul>
+        <li>create, authenticate, secure, support, and administer accounts;</li>
+        <li>coordinate group tests, participation, cost allocation, payment status, samples, and result access;</li>
+        <li>publish approved Public Results and deliver authorized reports;</li>
+        <li>link messaging identities, execute bot commands, and send transactional notices and digests;</li>
+        <li>extract proposed laboratory values and route them to administrators for review;</li>
+        <li>detect abuse, prevent duplicate processing, investigate errors, enforce terms, and protect users;</li>
+        <li>measure and improve Service reliability and usage; and</li>
+        <li>comply with law, resolve disputes, and protect legal rights.</li>
+    </ul>
+    <p>
+        Where a law requires a legal basis, processing may rely on performance of our agreement with you, legitimate
+        interests in operating and securing the Service, consent for optional technologies or communications, and
+        compliance with legal obligations. You may withdraw consent where processing is based on consent, without
+        affecting earlier processing.
+    </p>
+
+    <h2>4. Telegram bot processing</h2>
+    <p>
+        The Telegram bot can link an account; list tests and results; report status; request participation; execute
+        administrator-configured commands; send password resets, status notices, and digests; accept a public link or
+        PDF/image laboratory report; and support administrator review in a private chat, group, channel, or forum thread.
+        Depending on the chat and Telegram's bot privacy settings, the bot may receive messages directed to it or broader
+        group activity. Other chat members may see your commands and bot replies. Telegram independently processes your
+        Telegram account and messages; review <a href="https://telegram.org/privacy">Telegram's Privacy Policy</a>.
+    </p>
+
+    <h2>5. Discord bot processing</h2>
+    <p>
+        The Discord bot can link an account; provide test, status, participation, and Public Results commands; run
+        administrator-configured commands; and deliver direct or channel messages. It receives interaction data that
+        Discord provides, which may include your Discord user/display name and ID plus guild, channel, thread, command,
+        and interaction identifiers. Other server or channel members may see non-private interactions. Discord
+        independently processes platform data; review <a href="https://discord.com/privacy">Discord's Privacy Policy</a>.
+    </p>
+
+    <h2>6. Root and other webhook notifications</h2>
+    <p>
+        Administrators may configure Discord webhooks and a generic outbound "Root" webhook. The Service sends the
+        rendered notification body and configured sender name to the destination URL. The recipient controls the
+        destination system and may log, display, or redistribute the message. Do not configure a webhook destination
+        unless its operator is authorized to receive the intended notification content.
+    </p>
+
+    <h2>7. Automated analysis providers</h2>
+    <p>
+        If automated analysis is enabled, the Service sends the submitted report content and limited contextual fields
+        needed for extraction to the single AI provider selected by an administrator. The available implementations are
+        OpenAI, xAI (Grok), and Anthropic (Claude). The Service stores the provider/model used, structured response,
+        operational metadata, and administrator review. It does not silently send one report to every provider.
+    </p>
+    <ul>
+        <li>
+            <strong>OpenAI:</strong> API requests are sent with response storage disabled by the application. OpenAI
+            states that API data is not used to train its models unless the customer opts in, while default abuse-monitoring
+            logs may be retained for a limited period. See
+            <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI API data controls</a>.
+        </li>
+        <li>
+            <strong>xAI (Grok):</strong> API processing is governed by the Operator's business/API agreement and xAI's
+            applicable data controls. See <a href="https://x.ai/legal/privacy-policy">xAI's Privacy Policy</a> and privacy resources.
+        </li>
+        <li>
+            <strong>Anthropic (Claude):</strong> API processing and retention are governed by the Operator's commercial
+            terms and workspace settings. See
+            <a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">Anthropic's commercial data-retention notice</a>.
+        </li>
+    </ul>
+    <p>
+        Provider terms, retention, regions, and controls can change. Do not submit personal information in a report,
+        and contact an administrator before submission if you need to know which provider and account controls are active.
+    </p>
+
+    <h2>8. Google Analytics and cookies</h2>
+    <p>
+        The Operator may enable Google Analytics on public or authenticated pages to understand page usage and improve
+        the Service. When enabled, Google Analytics may receive page URLs and titles, referral information, interactions,
+        approximate location, and browser/device/network identifiers, and may use first-party cookies such as
+        <code>_ga</code> and <code>_ga_&lt;container-id&gt;</code> to distinguish users and sessions. The Operator should
+        configure analytics so account fields, report content, laboratory values, bot messages, and other directly
+        identifying or sensitive information are not intentionally sent to Google.
+    </p>
+    <p>
+        This repository does not itself enable a Google tag or advertising features. If a deployment enables Analytics,
+        the Operator must provide any consent control required by applicable law and update this notice if it enables
+        Google Signals, advertising reporting, remarketing, user-ID measurement, or other advertising features. You can
+        reject analytics through the deployment's consent control where offered, restrict or delete cookies in your
+        browser, or use the
+        <a href="https://tools.google.com/dlpage/gaoptout">Google Analytics Opt-out Browser Add-on</a>. Learn how Google
+        processes data at <a href="https://policies.google.com/technologies/partner-sites">Google's partner-sites notice</a>.
+    </p>
+
+    <h2>9. When we disclose information</h2>
+    <p>We disclose information only as reasonably needed:</p>
+    <ul>
+        <li>to users and administrators according to group-test, Public Result, and role-based visibility;</li>
+        <li>to hosting, database, object-storage, email, Telegram, Discord, webhook, AI, analytics, and support providers;</li>
+        <li>to laboratories, organizers, or other parties you direct us to involve;</li>
+        <li>to investigate security incidents, enforce these Terms, protect rights and safety, or prevent fraud;</li>
+        <li>to comply with lawful process or legal obligations; or</li>
+        <li>in a reorganization or transfer of the Service, subject to appropriate confidentiality and notice.</li>
+    </ul>
+    <p>
+        We do not sell personal information for money. We do not knowingly use laboratory-report content or bot messages
+        for cross-context behavioral advertising. Some privacy laws may define certain analytics disclosures as "sharing"
+        even without payment; where applicable, you may opt out using the controls described above or by contacting the
+        site administrator.
+    </p>
+
+    <h2>10. Retention</h2>
+    <p>
+        We retain account, participation, report, review, and configuration records while needed to operate the Service
+        and afterward as reasonably necessary for audit history, disputes, security, backups, and legal obligations.
+        Single-use bot-link tokens expire but their issuance/use records may remain. Command and webhook deduplication
+        metadata, notification events, and analysis records are retained for operational integrity. Diagnostic logs are
+        size-bounded by the application, but hosting and third-party logs follow their own settings. Public content may
+        remain visible until an administrator unpublishes or deletes it. Deletion from active systems may not immediately
+        remove backups or third-party copies.
+    </p>
+    <p>
+        The application does not currently promise a universal automatic deletion schedule. The Operator should adopt
+        and document a deployment-specific retention schedule and delete information when it is no longer reasonably needed.
+    </p>
+
+    <h2>11. Security</h2>
+    <p>
+        The Service uses measures that include password hashing, session and form protections, role-based access,
+        expiring link tokens, webhook verification options, bounded uploads, restricted source retrieval, signed object
+        links, secret redaction, and administrator review. No system is completely secure. Use a unique password, keep
+        bot-link tokens private, avoid sensitive report content, and promptly report suspected compromise.
+    </p>
+
+    <h2>12. International processing</h2>
+    <p>
+        The Operator and service providers may process information in countries other than yours, where privacy laws may
+        differ. Where required, the Operator should use an approved transfer mechanism and appropriate contractual or
+        technical safeguards. Contact the site administrator for deployment-specific hosting and processing locations.
+    </p>
+
+    <h2>13. Your choices and privacy rights</h2>
+    <p>
+        Depending on where you live, you may have rights to request access, correction, deletion, portability, restriction,
+        or objection; withdraw consent; opt out of certain sharing or targeted advertising; or appeal a decision. You can
+        update some account and notification settings in your profile, stop interacting with a bot, leave a chat/server,
+        manage platform privacy settings, and control cookies as described above. Submit other requests to the site
+        administrator through the contact channel supplied for this deployment. We may verify your identity and retain
+        information when an exception applies. You may also complain to your local privacy authority.
+    </p>
+    <p>
+        Browser “Do Not Track” signals are not standardized and the application does not currently respond to them.
+        Where legally required and technically supported by the deployed analytics tooling, the Operator should honor
+        recognized opt-out preference signals such as Global Privacy Control.
+    </p>
+
+    <h2>14. Children</h2>
+    <p>
+        The Service is not directed to children and is limited to users age 18 or older. We do not knowingly collect
+        personal information from children. Contact the site administrator if you believe a child submitted information.
+    </p>
+
+    <h2>15. Changes and contact</h2>
+    <p>
+        We may update this Policy as practices, providers, or laws change. We will revise the effective date and provide
+        additional notice of material changes where required. Privacy questions, requests, or complaints should be sent
+        {% if legal_contact_email %}to <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}
+        to the site administrator through the contact channel supplied for this deployment{% endif %}.
+        {% if legal_mailing_address %}The Operator's mailing address is {{ legal_mailing_address }}.{% endif %}
+    </p>
+</article>
+{% endblock %}

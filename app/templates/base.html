@@ -17,6 +17,10 @@
         .payment-qr-thumb { background: #fff; object-fit: contain; }
         .payment-option-list .list-group-item { border-bottom: 1px solid rgba(0,0,0,.06); }
         .payment-option-list .list-group-item:last-child { border-bottom: none; }
+        .legal-document { max-width: 920px; }
+        .legal-document h2 { margin-top: 2rem; font-size: 1.35rem; }
+        .legal-document h3 { margin-top: 1.35rem; font-size: 1.1rem; }
+        .legal-document li { margin-bottom: .4rem; }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
@@ -93,7 +97,13 @@
 
     <footer class="container mt-5 text-center text-muted small">
         <p>Group Test Manager • Replaces manual spreadsheets • Built for DigitalOcean</p>
-        <p><a class="text-muted" href="{{ url_for('main.version_info') }}">Version {{ app_version }}</a></p>
+        <p>
+            <a class="text-muted" href="{{ url_for('main.terms_of_service') }}">Terms of Service</a>
+            <span aria-hidden="true"> • </span>
+            <a class="text-muted" href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a>
+            <span aria-hidden="true"> • </span>
+            <a class="text-muted" href="{{ url_for('main.version_info') }}">Version {{ app_version }}</a>
+        </p>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

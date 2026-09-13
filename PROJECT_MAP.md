@@ -228,6 +228,22 @@ After each edit phase:
 
 ## Current Change Record
 
+### Public Legal Pages and Bytecode Ignore
+
+- **Date:** 2026-09-12
+- **Scope:** Add public Terms of Service and Privacy Policy pages covering the web application, Telegram and Discord bots, Root webhook notifications, automated OpenAI/xAI/Anthropic result extraction, and optional Google Analytics; add Python bytecode to Git ignore rules.
+- **Target files/modules:** `.gitignore`, `.env.example`, application configuration in `app/__init__.py`, public routes in `app/routes.py`, shared footer/layout in `app/templates/base.html`, registration and new legal templates in `app/templates/`, focused public-route tests in `tests/test_security.py`, and operator setup guidance in `README.md`.
+- **Intended behavior:** Anyone can review the legal pages without an account; every rendered page links to both policies; the disclosures describe the application's actual data flows and clearly distinguish third-party platform processing; newly generated `.pyc` files are ignored.
+- **Assumptions:** The deployed operator's legal name, privacy contact, address, and governing jurisdiction are not present in the repository, so the pages use environment-configurable values with operator-neutral fallbacks and the README identifies those items as a pre-launch legal review requirement. Google Analytics is disclosed conditionally as an operator-enabled service because no Google tag is implemented in this repository.
+- **Security risks/checks:** Keep legal routes read-only and public, preserve template auto-escaping, publish no secrets or configured bot identifiers, avoid asserting that health data is protected by HIPAA, and make clear that users must not submit personal or regulated data in laboratory reports.
+- **Reliability risks/checks:** Keep footer links valid for anonymous and authenticated pages, avoid database dependencies in the policy routes, and ensure the text does not promise deletion schedules the application cannot currently enforce.
+- **Optimization checks:** Serve static templates without database queries or new client-side dependencies; do not add analytics scripts or consent-state code outside the requested policy/footer scope.
+- **Validation plan:** Add focused anonymous-route/footer/disclosure assertions, run `tests.test_security`, run the full unittest suite if the environment supports it, and run `git diff --check`.
+- **Applied changes:** Added ignored `*.pyc`/`__pycache__` patterns; added public Terms and Privacy routes and comprehensive templates; covered Telegram, Discord, Root webhooks, OpenAI, xAI, Anthropic, and optional Google Analytics; added global footer links and a registration acknowledgment; and made operator identity/contact/jurisdiction/effective-date fields configurable by environment.
+- **Security/reliability/optimization review:** Legal routes are read-only and intentionally anonymous; Jinja auto-escaping protects all operator-supplied legal fields; no integration secrets or live identifiers are exposed; policies avoid claiming HIPAA coverage or AI accuracy; static templates add no database queries or external runtime requests. Google Analytics remains unimplemented, so the policy does not falsely imply that a consent banner or tag exists.
+- **Validation:** Three focused legal/footer/escaping tests passed in the final run in 0.203s. The full `tests.test_security` run executed 70 tests in 75.967s with 68 passing and two pre-existing Telegram callback mock-signature failures (`answer_telegram_callback_query(id)` expected versus the current implementation's `(id, None)` call); neither failure touches the files or behavior changed here. Python compilation and `git diff --check` passed.
+- **Remaining requirements:** A qualified attorney should review the policies; production must set the legal environment fields and adopt a specific retention schedule; any future Google Analytics tag must be paired with jurisdiction-appropriate consent controls and policy updates. Adding ignore rules does not remove the 58 `.pyc` files already tracked by Git.
+
 - **Date:** 2026-09-11
 - **Scope:** Make the Admin Action Queue the central inbox for result-analysis review and operational attention.
 - **Target files/modules:** Action Queue query/rendering in `app/routes.py` and `app/templates/admin/action_queue.html`, result-analysis route coverage, administrator documentation, and this project map.

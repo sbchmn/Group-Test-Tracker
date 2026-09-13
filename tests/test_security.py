@@ -56,6 +56,47 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Version 3.2", body)
         self.assertIn("href=\"/version\"", body)
 
+    def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):
+        terms_response = self.client.get("/terms")
+        privacy_response = self.client.get("/privacy")
+        register_response = self.client.get("/register")
+
+        self.assertEqual(terms_response.status_code, 200)
+        self.assertEqual(privacy_response.status_code, 200)
+        self.assertEqual(register_response.status_code, 200)
+
+        terms = terms_response.get_data(as_text=True)
+        privacy = privacy_response.get_data(as_text=True)
+        register = register_response.get_data(as_text=True)
+        for body in (terms, privacy, register):
+            self.assertIn('href="/terms"', body)
+            self.assertIn('href="/privacy"', body)
+
+        self.assertIn("Telegram, Discord, and webhook integrations", terms)
+        self.assertIn("Automated report analysis", terms)
+        self.assertIn("Google Analytics and cookies", privacy)
+        self.assertIn("Telegram bot processing", privacy)
+        self.assertIn("Discord bot processing", privacy)
+        self.assertIn("Root and other webhook notifications", privacy)
+        self.assertIn("OpenAI", privacy)
+        self.assertIn("xAI (Grok)", privacy)
+        self.assertIn("Anthropic (Claude)", privacy)
+
+    def test_legal_operator_fields_are_escaped(self):
+        self.app.config.update({
+            "LEGAL_OPERATOR_NAME": '<script>alert("operator")</script>',
+            "LEGAL_CONTACT_EMAIL": 'privacy@example.com',
+            "LEGAL_GOVERNING_LAW": '<b>Example law</b>',
+        })
+        response = self.client.get("/terms")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('<script>alert("operator")</script>', body)
+        self.assertIn('&lt;script&gt;alert', body)
+        self.assertNotIn('<b>Example law</b>', body)
+        self.assertIn('privacy@example.com', body)
+
     def test_admin_settings_hub_requires_admin_and_groups_configuration_links(self):
         with self.app.app_context():
             db.create_all()

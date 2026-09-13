@@ -16,6 +16,7 @@ Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 	- [3. Apply Migrations](#3-apply-migrations)
 	- [4. Create Initial Admin User](#4-create-initial-admin-user)
 	- [5. Run](#5-run)
+	- [6. Complete the Legal Deployment Fields](#6-complete-the-legal-deployment-fields)
 - [Feature How-To (By Role)](#feature-how-to-by-role)
 - [End User How-To](#end-user-how-to)
 	- [Register and Login](#register-and-login)
@@ -122,6 +123,13 @@ ANTHROPIC_API_KEY=
 # Optional diagnostic-log overrides (defaults to instance/result_analysis_diagnostics.log at 128 KiB):
 RESULT_ANALYSIS_DIAGNOSTIC_LOG_PATH=
 RESULT_ANALYSIS_DIAGNOSTIC_LOG_MAX_BYTES=131072
+# Public legal-policy fields (set these before production launch):
+LEGAL_OPERATOR_NAME=
+LEGAL_CONTACT_EMAIL=
+LEGAL_MAILING_ADDRESS=
+LEGAL_GOVERNING_LAW=
+# Change this only when publishing a reviewed policy revision:
+LEGAL_EFFECTIVE_DATE=September 12, 2026
 ```
 
 Notes:
@@ -155,6 +163,19 @@ python -m flask --app app:create_app result-analysis-worker
 ```
 
 Use `python -m flask --app app:create_app result-analysis-worker --once` for a single-job operational check. The included `Procfile` defines `result-analysis-worker` as a separate process type. In DigitalOcean's Run Command field, enter only the command after the Procfile process label; do not include `result-analysis-worker:`.
+
+### 6. Complete the Legal Deployment Fields
+
+The public `/terms` and `/privacy` pages are linked from every page footer and from account registration. Before production launch:
+
+1. Set `LEGAL_OPERATOR_NAME` to the actual person or legal entity operating the deployment.
+2. Set `LEGAL_CONTACT_EMAIL` to a monitored address for legal notices and privacy requests.
+3. Set `LEGAL_MAILING_ADDRESS` when applicable law or your business practice requires one.
+4. Set `LEGAL_GOVERNING_LAW` only after choosing the correct jurisdiction with counsel.
+5. Have qualified counsel review both policies against the operator's location, users, vendors, retention schedule, and actual practices.
+6. If Google Analytics is added outside this repository, implement a compliant consent mechanism where required and update the policy before enabling advertising features, Google Signals, user-ID measurement, or additional data collection.
+
+The repository does not currently install a Google Analytics tag. The Privacy Policy discloses Analytics conditionally so an operator cannot mistake policy text for an implemented consent or tracking configuration.
 
 ## Feature How-To (By Role)
 

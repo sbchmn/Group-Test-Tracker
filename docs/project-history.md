@@ -1670,3 +1670,25 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Coverage verifies needs-review and failed runs render, resolved runs do not render, participation filters do not hide analysis attention, and acknowledged failures leave the queue while retaining their record.
 - The final pagination-context adjustment passed its two targeted Action Queue tests.
 - `git diff --check` passed; existing Python, SQLAlchemy, and Flask-Migrate deprecation warnings remain.
+
+## Public Terms, Privacy, and Python Bytecode Ignore
+
+### Applied Changes
+
+- Added anonymous `/terms` and `/privacy` pages and linked them from the shared footer and registration form.
+- Documented group-test coordination, public/group reports, Telegram and Discord bots, Root and Discord webhooks, OpenAI/xAI/Anthropic extraction, external services, Google Analytics, retention, privacy rights, acceptable use, liability, and administrator review limitations.
+- Added environment-configurable operator name, privacy contact, mailing address, governing law, and policy effective date with setup guidance.
+- Added `*.pyc` and `__pycache__/` ignore patterns; already tracked bytecode remains tracked until explicitly removed from Git.
+
+### Security / Reliability / Performance Review
+
+- Public legal routes are read-only, perform no database or network work, and rely on Jinja auto-escaping for deployment-provided legal fields.
+- Policies expose no integration credentials or live user/bot identifiers and do not claim HIPAA coverage, AI accuracy, or an automatic retention schedule that the application does not implement.
+- Google Analytics is disclosed conditionally; the repository still contains no Google tag, advertising feature, consent banner, or Analytics runtime request.
+- Static templates and footer links add no material runtime cost.
+
+### Validation Results
+
+- Three focused legal-route, footer, registration, disclosure, and escaping tests passed in the final run in 0.203 seconds.
+- The full security suite ran 70 tests in 75.967 seconds: 68 passed and two existing Telegram callback mock-signature assertions failed because the baseline implementation passes an explicit `None` notice argument.
+- Python compilation, ignore-rule inspection, and `git diff --check` passed.

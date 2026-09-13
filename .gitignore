@@ -1,1 +1,3 @@
 instance/result_analysis_diagnostics.log
+*.pyc
+__pycache__/

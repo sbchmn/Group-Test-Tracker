@@ -13,7 +13,7 @@ from flask_login import LoginManager
 from flask_wtf import CSRFProtect
 from flask_migrate import Migrate
 from dotenv import load_dotenv
-from .version import APP_VERSION
+from .version import APP_NAME, APP_VERSION
 
 # Extensions (initialized in create_app to support factory)
 db = SQLAlchemy()
@@ -32,10 +32,22 @@ def create_app(config_overrides=None):
     # DigitalOcean App Platform and similar proxies terminate TLS upstream.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config['APP_VERSION'] = APP_VERSION
+    app.config['LEGAL_OPERATOR_NAME'] = os.environ.get('LEGAL_OPERATOR_NAME', '').strip()
+    app.config['LEGAL_CONTACT_EMAIL'] = os.environ.get('LEGAL_CONTACT_EMAIL', '').strip()
+    app.config['LEGAL_MAILING_ADDRESS'] = os.environ.get('LEGAL_MAILING_ADDRESS', '').strip()
+    app.config['LEGAL_GOVERNING_LAW'] = os.environ.get('LEGAL_GOVERNING_LAW', '').strip()
+    app.config['LEGAL_EFFECTIVE_DATE'] = os.environ.get('LEGAL_EFFECTIVE_DATE', 'September 12, 2026').strip()
 
     @app.context_processor
     def inject_app_version():
-        return {'app_version': app.config['APP_VERSION']}
+        return {
+            'app_version': app.config['APP_VERSION'],
+            'legal_operator_name': app.config.get('LEGAL_OPERATOR_NAME') or f'{APP_NAME} operator',
+            'legal_contact_email': app.config.get('LEGAL_CONTACT_EMAIL'),
+            'legal_mailing_address': app.config.get('LEGAL_MAILING_ADDRESS'),
+            'legal_governing_law': app.config.get('LEGAL_GOVERNING_LAW'),
+            'legal_effective_date': app.config.get('LEGAL_EFFECTIVE_DATE') or 'September 12, 2026',
+        }
     
     # === Configuration ===
     # SECRET_KEY required for sessions, CSRF, Flask-Login

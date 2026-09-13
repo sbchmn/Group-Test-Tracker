@@ -785,7 +785,12 @@ class DiscordBot(commands.Bot):
             guild = discord.Object(id=int(guild_id))
             self.tree.clear_commands(guild=guild)
             self.tree.copy_global_to(guild=guild)
-            return await self.tree.sync(guild=guild), f'guild {guild_id}'
+            guild_commands = await self.tree.sync(guild=guild)
+            global_commands = await self.tree.sync()
+            return (
+                guild_commands,
+                f'guild {guild_id} and {len(global_commands)} global command(s)',
+            )
         return await self.tree.sync(), 'global scope'
 
     @staticmethod

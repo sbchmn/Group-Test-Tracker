@@ -547,18 +547,24 @@ class NotificationTests(unittest.TestCase):
             from app import discord_bot
 
         tree = Mock()
-        tree.sync = AsyncMock(return_value=[Mock(), Mock()])
+        tree.sync = AsyncMock(side_effect=[[Mock(), Mock()], [Mock(), Mock()]])
         subject = Mock(tree=tree)
 
         with patch.object(discord_bot, '_config_value', return_value='123456789012345678'):
             commands, scope = asyncio.run(discord_bot.DiscordBot._sync_commands(subject))
 
-        guild = tree.sync.await_args.kwargs['guild']
+        guild = tree.sync.await_args_list[0].kwargs['guild']
         self.assertEqual(guild.id, 123456789012345678)
         tree.clear_commands.assert_called_once_with(guild=guild)
         tree.copy_global_to.assert_called_once_with(guild=guild)
+        self.assertEqual(tree.sync.await_count, 2)
+        self.assertEqual(tree.sync.await_args_list[0].kwargs, {'guild': guild})
+        self.assertEqual(tree.sync.await_args_list[1].kwargs, {})
         self.assertEqual(len(commands), 2)
-        self.assertEqual(scope, 'guild 123456789012345678')
+        self.assertEqual(
+            scope,
+            'guild 123456789012345678 and 2 global command(s)',
+        )
 
     def test_discord_global_sync_does_not_build_a_guild_tree(self):
         with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):

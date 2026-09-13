@@ -1737,3 +1737,23 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Three focused URL fallback, immediate acknowledgement, missing-link rendering, and failure recovery tests passed.
 - The complete notification suite passed 49 tests in 44.194 seconds.
 - `git diff --check` passed.
+
+## Discord Direct-Message Command Availability
+
+### Applied Changes
+
+- Kept configured-guild synchronization first for immediate server command availability.
+- Added global synchronization of the same command tree when a Guild ID is configured so `/start` and other authorized commands can appear in bot DMs.
+- Updated administrator documentation to distinguish immediate guild registration from potentially slower global propagation.
+
+### Security / Reliability / Performance Review
+
+- Command discovery scope changed, but account-link tokens, linked-user checks, command enablement, and destination allowlists remain the authorization boundaries.
+- Synchronization remains a pair of bulk Discord API operations only at worker startup or on a unique administrator request.
+- A failure in either synchronization operation is surfaced through existing worker logging and synchronization status.
+
+### Validation Results
+
+- Three focused guild/global and worker-request tests passed in 0.300 seconds.
+- The complete notification suite passed 49 tests in 44.302 seconds.
+- `git diff --check` passed.

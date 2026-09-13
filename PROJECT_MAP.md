@@ -85,7 +85,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Link Discord identities using single-use user tokens.
 - Run native Discord interactions with early deferral and worker-thread database access.
 - Support scoped Public Results browsing with acknowledged component callbacks, validated COA links, and safe file-only-result fallbacks, plus configured dynamic commands.
-- Copy global command definitions into configured guild trees and support durable administrator-requested command refreshes without a worker restart.
+- Publish commands globally for bot DMs, copy the same definitions into configured guild trees for immediate server availability, and support durable administrator-requested refreshes without a worker restart.
 - Deliver Discord and Root outbound webhook notifications.
 
 ### Administration
@@ -229,6 +229,22 @@ After each edit phase:
 
 ## Current Change Record
 
+### Discord Direct-Message Command Availability
+
+- **Date:** 2026-09-13
+- **Scope:** Make account-linking and other Discord application commands available in bot direct messages while retaining immediate guild-scoped registration.
+- **Target files/modules:** Discord synchronization in `app/discord_bot.py`, focused synchronization tests, project map, and operator history.
+- **Intended behavior:** When a Guild ID is configured, synchronize the complete command tree both to that guild and globally; guild commands remain immediately available in the configured server, while global commands can appear in DMs for users sharing that server with the bot.
+- **Assumptions:** Discord may take longer to propagate global commands than guild commands, and existing command handlers remain the authorization boundary regardless of where a command is visible.
+- **Security risks/checks:** Global command visibility must not grant data access; `/start` still requires a valid single-use link token, linked-user commands still require the stable Discord account binding, and server/destination restrictions remain enforced.
+- **Reliability risks/checks:** Preserve guild-first synchronization for fast deployment feedback, fail startup/request status clearly if either Discord API sync fails, and avoid creating a second command implementation.
+- **Optimization checks:** Add one global bulk synchronization request only during startup or an administrator-requested refresh; do not add polling or per-command API calls.
+- **Validation plan:** Update guild/global synchronization assertions, run focused worker-sync tests and the complete notification suite, and run `git diff --check`.
+- **Applied edits:** Configured-guild synchronization now performs the existing guild copy/sync first and then synchronizes the same global tree. A deployment or administrator-requested synchronization therefore keeps immediate guild commands while making `/start` and the other commands eligible to appear in the bot's DM command picker.
+- **Security/reliability/optimization review:** Command handlers and destination checks remain unchanged, so global discovery does not bypass linking or data authorization. Synchronization remains bulk, runs only at startup or on a unique admin request, and reports failure if either guild or global publication fails.
+- **Validation:** Three focused guild/global and worker-request tests passed in 0.300s. The full notification suite passed 49 tests in 44.302s. `git diff --check` passed.
+- **Remaining risks:** Discord controls global-command propagation time; a successful worker sync may not become visible in DMs immediately. Users must share a server with the bot, and the application still needs a real Discord deployment check.
+
 ### Discord Public Results Callback Reliability
 
 - **Date:** 2026-09-13
@@ -251,7 +267,7 @@ After each edit phase:
 - **Scope:** Correct guild-scoped Discord command registration and let administrators request command synchronization without restarting the worker.
 - **Target files/modules:** Discord command lifecycle in `app/discord_bot.py`, the administrator request endpoint in `app/routes.py`, the Discord card in `app/templates/admin/bot_integrations.html`, focused notification/security tests, and operator documentation.
 - **Intended behavior:** Guild-specific synchronization copies the current global command tree into the configured guild; an administrator-only, CSRF-protected button records a durable synchronization request; the separately deployed Discord worker polls for new requests, reloads active custom commands, synchronizes Discord, and records a bounded status message.
-- **Assumptions:** The web and Discord worker components share the same database, and one Discord worker is normally deployed. Global and guild commands remain mutually exclusive based on whether `discord_guild_id` is configured.
+- **Assumptions:** The web and Discord worker components share the same database, and one Discord worker is normally deployed. When `discord_guild_id` is configured, the command tree is intentionally published in both guild and global scopes so DMs remain usable.
 - **Security risks/checks:** Preserve admin-only POST and CSRF boundaries, never expose or log the bot token, and render synchronization status through Jinja auto-escaping.
 - **Reliability risks/checks:** Make request IDs idempotent, avoid continuous retries after a failed request, remove stale dynamic commands before rebuilding the tree, acknowledge requests only after an attempted sync, and keep worker polling resilient to database or Discord errors.
 - **Optimization checks:** Poll one indexed configuration key at a bounded interval and perform command reload/Discord API work only when the request ID changes.

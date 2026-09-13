@@ -170,7 +170,7 @@ Run the Discord gateway bot as a separate worker when Discord commands are enabl
 python -m app.discord_bot
 ```
 
-The web and Discord worker components must use the same `DATABASE_URL`. Discord commands synchronize when the worker starts. Administrators can also use **Admin Settings → Bot Integrations → Discord → Synchronize Commands**; the worker polls for that durable request every five seconds, reloads active custom commands, and reports the latest result on the Bot Integrations page. With a Discord Guild ID configured, commands are synchronized to that guild for immediate availability; without one, they are synchronized globally.
+The web and Discord worker components must use the same `DATABASE_URL`. Discord commands synchronize when the worker starts. Administrators can also use **Admin Settings → Bot Integrations → Discord → Synchronize Commands**; the worker polls for that durable request every five seconds, reloads active custom commands, and reports the latest result on the Bot Integrations page. With a Discord Guild ID configured, commands are synchronized both to that guild for immediate availability and globally for bot DMs; without one, they are synchronized globally only. Discord can take longer to propagate global commands.
 
 ### 6. Complete the Legal Deployment Fields
 

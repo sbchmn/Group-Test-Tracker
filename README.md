@@ -164,6 +164,14 @@ python -m flask --app app:create_app result-analysis-worker
 
 Use `python -m flask --app app:create_app result-analysis-worker --once` for a single-job operational check. The included `Procfile` defines `result-analysis-worker` as a separate process type. In DigitalOcean's Run Command field, enter only the command after the Procfile process label; do not include `result-analysis-worker:`.
 
+Run the Discord gateway bot as a separate worker when Discord commands are enabled:
+
+```bash
+python -m app.discord_bot
+```
+
+The web and Discord worker components must use the same `DATABASE_URL`. Discord commands synchronize when the worker starts. Administrators can also use **Admin Settings → Bot Integrations → Discord → Synchronize Commands**; the worker polls for that durable request every five seconds, reloads active custom commands, and reports the latest result on the Bot Integrations page. With a Discord Guild ID configured, commands are synchronized to that guild for immediate availability; without one, they are synchronized globally.
+
 ### 6. Complete the Legal Deployment Fields
 
 The public `/terms` and `/privacy` pages are linked from every page footer and from account registration. Before production launch:

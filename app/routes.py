@@ -18,7 +18,7 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
-from datetime import timedelta
+from datetime import timedelta, timezone
 from functools import wraps
 from itertools import zip_longest
 from sqlalchemy import and_, or_
@@ -4103,12 +4103,43 @@ def bot_integrations():
         'admin/bot_integrations.html',
         form=form,
         webhook_secret_mask=mask_secret(existing_webhook_secret),
+        discord_command_sync={
+            'pending': bool(configs.get('discord_command_sync_request_id')) and (
+                configs.get('discord_command_sync_request_id')
+                != configs.get('discord_command_sync_processed_id')
+            ),
+            'status': configs.get('discord_command_sync_status'),
+        },
         integration_status={
             'telegram': bool(configs.get('telegram_bot_token')),
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
             'root': bool(configs.get('root_webhook_url')),
         },
     )
+
+
+@main_bp.route('/admin/settings/bots/discord/sync-commands', methods=['POST'])
+@login_required
+@admin_required
+def synchronize_discord_commands():
+    bot_token = NotificationConfig.query.filter_by(key='discord_bot_token').first()
+    if not bot_token or not str(bot_token.value or '').strip():
+        flash('Configure and save a Discord bot token before synchronizing commands.', 'danger')
+        return redirect(url_for('main.bot_integrations'))
+
+    requested_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    request_id = f'{requested_at}-{secrets.token_hex(4)}'
+    _save_notification_config_values({
+        'discord_command_sync_request_id': request_id,
+        'discord_command_sync_status': (
+            f'Command synchronization requested at {requested_at}. '
+            'Waiting for the Discord worker.'
+        ),
+    })
+    db.session.commit()
+    append_notification_log('discord: administrator requested command synchronization')
+    flash('Discord command synchronization queued. The worker normally processes it within 5 seconds.', 'success')
+    return redirect(url_for('main.bot_integrations'))
 
 
 @main_bp.route('/admin/settings/commands')

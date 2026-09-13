@@ -107,6 +107,25 @@
                     {{ form.discord_webhook_username.label(class="form-label") }}
                     {{ form.discord_webhook_username(class="form-control", placeholder="Group Test Manager") }}
                 </div>
+                <div class="border-top pt-3 mt-3">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        <button
+                            type="submit"
+                            class="btn btn-outline-primary"
+                            formaction="{{ url_for('main.synchronize_discord_commands') }}"
+                            formmethod="post"
+                        >Synchronize Commands</button>
+                        {% if discord_command_sync.pending %}
+                            <span class="badge text-bg-warning">Waiting for worker</span>
+                        {% endif %}
+                    </div>
+                    <div class="form-text">
+                        Save configuration changes before synchronizing. The Discord worker checks for requests every 5 seconds.
+                    </div>
+                    {% if discord_command_sync.status %}
+                        <div class="small mt-2" role="status">{{ discord_command_sync.status }}</div>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>

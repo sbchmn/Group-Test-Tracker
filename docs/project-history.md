@@ -1692,3 +1692,26 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Three focused legal-route, footer, registration, disclosure, and escaping tests passed in the final run in 0.203 seconds.
 - The full security suite ran 70 tests in 75.967 seconds: 68 passed and two existing Telegram callback mock-signature assertions failed because the baseline implementation passes an explicit `None` notice argument.
 - Python compilation, ignore-rule inspection, and `git diff --check` passed.
+
+## Discord Guild and On-Demand Command Synchronization
+
+### Applied Changes
+
+- Corrected guild-scoped registration by clearing the local guild tree, copying the current global command definitions into it, and then synchronizing the configured guild.
+- Added an administrator-only Synchronize Commands action to Bot Integrations with queued/completed status stored in the shared configuration table.
+- Added a five-second Discord worker watcher that processes each unique request once, reloads active custom commands, removes stale dynamic commands, and records a sanitized success or failure result.
+- Documented the Discord worker command, shared-database requirement, guild/global behavior, and administrator refresh workflow.
+
+### Security / Reliability / Performance Review
+
+- The request route is authenticated, administrator-only, POST-only, and protected by the application's CSRF middleware.
+- Status and logs omit bot credentials and raw exception details; database values and rendered status are bounded.
+- Failed requests do not retry indefinitely, worker shutdown cancels the watcher, and repeated or already processed request IDs are ignored.
+- Idle polling performs one indexed configuration lookup every five seconds; command reload and Discord API synchronization happen only at startup or for a new request.
+
+### Validation Results
+
+- Focused guild/global synchronization, worker request, dynamic refresh, route authorization, persistence, and UI tests passed.
+- The full notification suite passed 46 tests in 44.701 seconds.
+- The full security suite ran 70 tests in 76.061 seconds: 68 passed, including the changed administrator workflow, and the same two pre-existing Telegram callback mock-signature assertions failed.
+- Python compilation and `git diff --check` passed.

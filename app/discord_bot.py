@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -27,6 +27,11 @@ from .public_results_bot import public_result_tag_page, public_results_for_tag_p
 
 APP = create_app()
 
+COMMAND_SYNC_REQUEST_KEY = 'discord_command_sync_request_id'
+COMMAND_SYNC_PROCESSED_KEY = 'discord_command_sync_processed_id'
+COMMAND_SYNC_STATUS_KEY = 'discord_command_sync_status'
+COMMAND_SYNC_POLL_SECONDS = 5
+
 
 def _append_bot_log(message, debug=False):
     """Write through Flask-backed notification logging from bot lifecycle hooks."""
@@ -46,6 +51,20 @@ def _config_value(key, default=None):
         if item is None:
             return default
         return item.value
+
+
+def _record_command_sync_result(request_id, status):
+    """Persist the latest processed request so web and worker processes can coordinate."""
+    with APP.app_context():
+        values = {
+            COMMAND_SYNC_PROCESSED_KEY: request_id,
+            COMMAND_SYNC_STATUS_KEY: str(status or '')[:500],
+        }
+        for key, value in values.items():
+            item = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+            item.value = value
+            db.session.add(item)
+        db.session.commit()
 
 
 def _builtin_enabled(command_name):
@@ -534,9 +553,25 @@ class DiscordBot(commands.Bot):
             await interaction.response.send_message(message, ephemeral=True)
 
     async def setup_hook(self):
+        self._dynamic_command_names = set()
         self._register_static_commands()
         self._register_dynamic_commands()
-        await self._sync_commands()
+        synced_commands, sync_scope = await self._sync_commands()
+        _append_bot_log(
+            f"discord: synchronized {len(synced_commands)} command(s) to {sync_scope}"
+        )
+
+        request_id = str(_config_value(COMMAND_SYNC_REQUEST_KEY) or '').strip()
+        self._last_command_sync_request_id = request_id
+        if request_id:
+            _record_command_sync_result(
+                request_id,
+                self._command_sync_status(len(synced_commands), sync_scope),
+            )
+        self._command_sync_watcher_task = asyncio.create_task(
+            self._watch_command_sync_requests(),
+            name='discord-command-sync-watcher',
+        )
 
     def _register_static_commands(self):
         @self.tree.command(name="help", description="Show available commands")
@@ -634,6 +669,10 @@ class DiscordBot(commands.Bot):
             await interaction.edit_original_response(content=text, view=view)
 
     def _register_dynamic_commands(self):
+        for command_name in getattr(self, '_dynamic_command_names', set()):
+            self.tree.remove_command(command_name)
+        self._dynamic_command_names = set()
+
         with APP.app_context():
             templates = TelegramCommandTemplate.query.filter_by(is_active=True).order_by(TelegramCommandTemplate.command.asc()).all()
 
@@ -641,7 +680,7 @@ class DiscordBot(commands.Bot):
 
         for template in templates:
             command_name = _normalize_command_name(template.command)
-            if not command_name or command_name in reserved_names:
+            if not command_name or command_name in reserved_names or command_name in self._dynamic_command_names:
                 _append_bot_log(f"discord: skipped dynamic command collision or invalid name: {template.command}", debug=True)
                 continue
 
@@ -669,14 +708,70 @@ class DiscordBot(commands.Bot):
                     callback=_make_dynamic_command(template),
                 )
             )
+            self._dynamic_command_names.add(command_name)
 
     async def _sync_commands(self):
         guild_id = str(_config_value('discord_guild_id') or '').strip()
         if guild_id:
             guild = discord.Object(id=int(guild_id))
-            await self.tree.sync(guild=guild)
-            return
-        await self.tree.sync()
+            self.tree.clear_commands(guild=guild)
+            self.tree.copy_global_to(guild=guild)
+            return await self.tree.sync(guild=guild), f'guild {guild_id}'
+        return await self.tree.sync(), 'global scope'
+
+    @staticmethod
+    def _command_sync_status(command_count, sync_scope):
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        return f'Synchronized {command_count} command(s) to {sync_scope} at {timestamp}.'
+
+    async def _watch_command_sync_requests(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                await self._process_pending_command_sync()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _append_bot_log(
+                    f'discord: command synchronization watcher error: {type(exc).__name__}'
+                )
+            await asyncio.sleep(COMMAND_SYNC_POLL_SECONDS)
+
+    async def _process_pending_command_sync(self):
+        request_id = str(
+            await _run_db(_config_value, COMMAND_SYNC_REQUEST_KEY, '') or ''
+        ).strip()
+        if not request_id or request_id == self._last_command_sync_request_id:
+            return False
+
+        # Mark first so a failed request does not create an unbounded retry loop.
+        self._last_command_sync_request_id = request_id
+        try:
+            self._register_dynamic_commands()
+            synced_commands, sync_scope = await self._sync_commands()
+            status = self._command_sync_status(len(synced_commands), sync_scope)
+            _append_bot_log(f'discord: {status.lower()}')
+        except Exception as exc:
+            status = (
+                'Command synchronization failed at '
+                f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')} "
+                f'({type(exc).__name__}). Check the Discord worker log.'
+            )
+            _append_bot_log(
+                f'discord: requested command synchronization failed: {type(exc).__name__}'
+            )
+        await _run_db(_record_command_sync_result, request_id, status)
+        return True
+
+    async def close(self):
+        watcher = getattr(self, '_command_sync_watcher_task', None)
+        if watcher is not None:
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
+        await super().close()
 
 
 async def _run_bot():

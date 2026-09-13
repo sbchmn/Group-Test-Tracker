@@ -115,6 +115,12 @@ class SecurityTests(unittest.TestCase):
         member_response = self.client.get("/admin/settings", follow_redirects=False)
         self.assertEqual(member_response.status_code, 302)
         self.assertIn("/dashboard", member_response.headers.get("Location", ""))
+        member_sync_response = self.client.post(
+            "/admin/settings/bots/discord/sync-commands",
+            follow_redirects=False,
+        )
+        self.assertEqual(member_sync_response.status_code, 302)
+        self.assertIn("/dashboard", member_sync_response.headers.get("Location", ""))
 
         self.client.get("/logout", follow_redirects=True)
         self.client.post("/login", data={"username": "settings-admin", "password": "secret"}, follow_redirects=True)
@@ -134,6 +140,8 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Bot Integrations", bot_page)
         self.assertIn("/admin/telegram-config", bot_page)
         self.assertIn("Discord Bot Token", bot_page)
+        self.assertIn("Synchronize Commands", bot_page)
+        self.assertIn("/admin/settings/bots/discord/sync-commands", bot_page)
         self.assertIn("Root Webhook URL", bot_page)
 
         save_response = self.client.post(
@@ -157,6 +165,23 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(values["discord_bot_token"], "discord-token")
         self.assertEqual(values["discord_status_channel_id"], "channel-123")
         self.assertEqual(values["root_webhook_url"], "https://root.example/webhook")
+
+        sync_response = self.client.post(
+            "/admin/settings/bots/discord/sync-commands",
+            follow_redirects=False,
+        )
+        self.assertEqual(sync_response.status_code, 302)
+        self.assertIn("/admin/settings/bots", sync_response.headers.get("Location", ""))
+        with self.app.app_context():
+            request_id = NotificationConfig.query.filter_by(
+                key="discord_command_sync_request_id"
+            ).first()
+            sync_status = NotificationConfig.query.filter_by(
+                key="discord_command_sync_status"
+            ).first()
+        self.assertIsNotNone(request_id)
+        self.assertTrue(request_id.value)
+        self.assertIn("Waiting for the Discord worker", sync_status.value)
 
         telegram_save = self.client.post(
             "/admin/settings/bots",

@@ -1,16 +1,18 @@
+import asyncio
 import json
+import os
 import tempfile
 import unittest
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from urllib.error import HTTPError
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
+from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
 from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message
 
 
@@ -539,6 +541,93 @@ class NotificationTests(unittest.TestCase):
              patch.object(discord_bot, "send_discord_status_channel_message", side_effect=assert_context):
             self.assertEqual(discord_bot._append_bot_log("ready"), "ready")
             self.assertEqual(discord_bot._send_bot_status_message("connected"), "connected")
+
+    def test_discord_guild_sync_copies_global_commands_before_syncing(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        tree = Mock()
+        tree.sync = AsyncMock(return_value=[Mock(), Mock()])
+        subject = Mock(tree=tree)
+
+        with patch.object(discord_bot, '_config_value', return_value='123456789012345678'):
+            commands, scope = asyncio.run(discord_bot.DiscordBot._sync_commands(subject))
+
+        guild = tree.sync.await_args.kwargs['guild']
+        self.assertEqual(guild.id, 123456789012345678)
+        tree.clear_commands.assert_called_once_with(guild=guild)
+        tree.copy_global_to.assert_called_once_with(guild=guild)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(scope, 'guild 123456789012345678')
+
+    def test_discord_global_sync_does_not_build_a_guild_tree(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        tree = Mock()
+        tree.sync = AsyncMock(return_value=[Mock()])
+        subject = Mock(tree=tree)
+
+        with patch.object(discord_bot, '_config_value', return_value=''):
+            commands, scope = asyncio.run(discord_bot.DiscordBot._sync_commands(subject))
+
+        tree.sync.assert_awaited_once_with()
+        tree.clear_commands.assert_not_called()
+        tree.copy_global_to.assert_not_called()
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(scope, 'global scope')
+
+    def test_discord_worker_processes_a_new_command_sync_request_once(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        subject = Mock()
+        subject._last_command_sync_request_id = 'old-request'
+        subject._sync_commands = AsyncMock(return_value=([Mock(), Mock(), Mock()], 'guild 123'))
+        subject._command_sync_status = discord_bot.DiscordBot._command_sync_status
+
+        with patch.object(
+            discord_bot,
+            '_run_db',
+            new=AsyncMock(side_effect=['new-request', None]),
+        ) as mock_run_db, patch.object(discord_bot, '_append_bot_log'):
+            processed = asyncio.run(
+                discord_bot.DiscordBot._process_pending_command_sync(subject)
+            )
+
+        self.assertTrue(processed)
+        self.assertEqual(subject._last_command_sync_request_id, 'new-request')
+        subject._register_dynamic_commands.assert_called_once_with()
+        subject._sync_commands.assert_awaited_once_with()
+        self.assertEqual(mock_run_db.await_count, 2)
+        self.assertIs(mock_run_db.await_args_list[1].args[0], discord_bot._record_command_sync_result)
+        self.assertEqual(mock_run_db.await_args_list[1].args[1], 'new-request')
+        self.assertIn('Synchronized 3 command(s) to guild 123', mock_run_db.await_args_list[1].args[2])
+
+    def test_discord_dynamic_command_refresh_removes_stale_commands(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(TelegramCommandTemplate(
+                command='/fresh',
+                description='Fresh command',
+                reply_text='Fresh response',
+                is_active=True,
+            ))
+            db.session.commit()
+
+        tree = Mock()
+        subject = Mock(tree=tree)
+        subject._dynamic_command_names = {'stale'}
+        with patch.object(discord_bot, 'APP', self.app):
+            discord_bot.DiscordBot._register_dynamic_commands(subject)
+
+        tree.remove_command.assert_called_once_with('stale')
+        tree.add_command.assert_called_once()
+        self.assertEqual(tree.add_command.call_args.args[0].name, 'fresh')
+        self.assertEqual(subject._dynamic_command_names, {'fresh'})
 
     def test_send_discord_status_channel_message_disables_mentions_in_payload(self):
         with self.app.app_context():

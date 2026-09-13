@@ -128,6 +128,13 @@ DigitalOcean/Procfile process type:
 - Procfile entry: `result-analysis-worker: python -m flask --app app:create_app result-analysis-worker --poll-seconds 5`
 - DigitalOcean Run Command: `python -m flask --app app:create_app result-analysis-worker --poll-seconds 5` (omit the `result-analysis-worker:` Procfile label)
 
+Discord bot worker:
+
+- DigitalOcean Run Command: `python -m app.discord_bot`
+- Give the web and Discord worker components the same `DATABASE_URL` and bot configuration environment.
+- After saving a new or changed command, open Admin Settings -> Bot Integrations and click **Synchronize Commands** in the Discord card. The running worker normally processes the request within five seconds and writes its status back to that page.
+- A configured Discord Guild ID produces fast guild-scoped registration. Leaving it blank registers commands globally.
+
 Daily review behavior:
 
 - New eligible uploads queue after the Group Test or Public Result record commits.

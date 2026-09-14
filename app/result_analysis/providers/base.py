@@ -28,7 +28,14 @@ Map each source test label to exactly one canonical type:
 Examples: "FTIR Identification and Composition Analysis" is Identity; "HPLC Purity of Peptide
 Assay" is Purity; "HPLC Potency Assay" is Net Content; "Bacterial Endotoxins Test (USP <85>)" is
 Endotoxin. Extract unsupported tests too, but classify them as Unknown. One Unknown row must not
-prevent extraction of other rows."""
+prevent extraction of other rows.
+
+If you have multiple of the same test type shown, like an endtoxins "Specification" line with a 
+"Pass" result showing that the test met the specification, and then later have the specific endotoxin 
+test result showing a value like "2.2EU/vial" then combine those into the same result category like
+"Pass - 2.2EU/vial".
+
+"""
 
 
 class ProviderError(RuntimeError):

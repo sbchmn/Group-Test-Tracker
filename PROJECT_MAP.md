@@ -175,16 +175,16 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - `suspended` and post-term `canceled`: block ordinary users. Tenant administrators enter a server-side allowlisted recovery shell: they may view existing group-test lists/details/results without mutation, download a new sanitized test/results export, open Support/billing, manage their own session, and log out. They cannot create, edit, delete, transition, approve, pay, or otherwise mutate tests/participants/results; export the user directory or participant identity/payment/notes data; send email, Telegram, Discord, Root, digest, webhook, or bot notifications; run bot commands/synchronization; or start provider/analysis work.
 - Implement suspension as an allowlist, not a denylist, so future routes default blocked. GET routes admitted to recovery must be side-effect free, and every notification/provider service must independently enforce suspension as a final backstop.
 - The existing `generate_test_export` workbook includes participant names, Telegram usernames, verification/payment state, and notes and therefore must not be exposed in recovery. Add a distinct bounded recovery export containing test metadata, test configuration/costs, result rows, source references, and relevant test audit timestamps, but no user directory, participant rows, contact identifiers, bot identifiers, credentials, or account exports.
-- Downgrades preserve Discord/AI settings, analysis history, findings, and tenant data. They block new execution before DigitalOcean removes the worker. Upgrades become usable only after the new entitlement revision is loaded; stale workers refuse work.
+- Environment state remains authoritative. Every entitlement revision causes a full App Platform restart, and all processes must report the same loaded revision. Downgrades preserve settings/history but use a first deployment that removes the entitlement while retaining the restarted, now-idle worker; only after readiness confirms the revision does a second deployment remove the worker. Upgrades add entitlement and worker in one App spec and become operational only after readiness.
 - `discord_bot` gates the entire Discord surface: gateway worker startup/handlers, linking tokens and claims, command registration/synchronization/execution, Discord settings/test actions, outbound Discord webhooks/notifications, and Discord as a selectable user notification channel. Without entitlement, saved configuration remains but cannot be edited or used; existing Discord channel preferences remain stored but delivery is suppressed and is never silently rerouted.
-- Without `result_analysis`, no `ResultAnalysisRun` may be inserted by upload hooks, manual Analyze, Retry, provider tests, public-result paths, or Telegram `/submitcoa`. On entitlement removal, an idempotent pre-deploy reconciliation marks queued/retry-scheduled work terminal as `canceled_entitlement`, clears leases, records the entitlement revision/reason, and then permits worker removal. In-flight/stale workers recheck entitlement immediately before provider I/O and before persistence.
+- Without `result_analysis`, no `ResultAnalysisRun` may be inserted by upload hooks, manual Analyze, Retry, provider tests, public-result paths, or Telegram `/submitcoa`. During downgrade deployment 1, an idempotent pre-deploy reconciliation marks queued/retry-scheduled work terminal as `canceled_entitlement`, clears leases, and records revision/reason. The retained worker restarts without entitlement and remains idle; deployment 2 removes it. Already in-flight work has a bounded DigitalOcean drain-window race, so persistence rechecks the process entitlement and normal downgrades occur at billing boundaries.
 - Re-upgrade never resumes `canceled_entitlement` runs. After entitlement returns, an administrator must explicitly create a new analysis; historical runs/findings remain readable.
 
 ### GTM implementation work packages
 
 | Work package | Primary files/modules | Required change |
 | --- | --- | --- |
-| Entitlement kernel | new `app/entitlements.py`, `app/__init__.py`, `app/routes.py` | Typed contract parsing, deployment mode, feature/status checks, decorators/service guards, Jinja context, upgrade URLs, and safe diagnostics |
+| Entitlement kernel | new `app/entitlements.py`, `app/__init__.py`, `app/routes.py` | Typed environment contract parsing, deployment mode, immutable loaded revision, component readiness/status, feature/status checks, decorators/service guards, Jinja context, upgrade URLs, and safe diagnostics |
 | Subscription UX | `app/templates/base.html`, new subscription/recovery templates, admin Settings templates, `app/export.py` or a focused recovery-export module | Plan/status banner, locked cards with upgrade actions, grace messaging, server-side suspended-admin route allowlist, and a sanitized test/results-only recovery export |
 | Discord enforcement | `app/discord_bot.py`, `app/routes.py`, `app/notifications.py`, `app/templates/profile.html`, `app/templates/admin/bot_integrations.html` | Guard startup, synchronization, handlers, linking, saves/tests, and any in-scope outbound delivery while preserving stored configuration |
 | Analysis enforcement | `app/result_analysis/jobs.py`, `app/result_analysis/service.py`, analysis routes, `_result_analysis_card.html`, `result_analysis_config.html` | Prevent automatic/manual queueing, claims, retries, provider tests, and paid mutations while retaining readable history and data |
@@ -193,7 +193,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 | Control-plane API | new isolated internal blueprint/service | Signed versioned commands, bootstrap, support lifecycle, status, replay defense, idempotency, bounded audit, and JSON-only error contracts |
 | Provisioning readiness | `app/__init__.py`, `app/version.py`, new health/status service | Public minimal liveness/readiness plus signed detailed status reporting application, schema, contract, tenant, entitlement, and support revisions |
 | Schema | `app/models.py`, new additive Alembic revisions | System-account/auth fields and durable command receipts/audit records, compatible with shared DigitalOcean MySQL and SQLite tests |
-| Deployment contract | `Procfile`, `.env.example`, `README.md`, `ADMIN_QUICK_START.md` | Managed variables, pre-deploy `flask --app app db upgrade head`, conditional worker expectations, bootstrap flow, recovery behavior, and troubleshooting |
+| Deployment contract | `app/__init__.py`, `Procfile`, `.env.example`, `README.md`, `ADMIN_QUICK_START.md` | Managed variables, component identity and bounded SQLAlchemy pool settings, pre-deploy migration/entitlement reconciliation, conditional workers, bootstrap, recovery, and troubleshooting |
 | Validation | new focused test modules plus existing security/result-analysis/notification/schema suites | Cross-product state matrix, tamper/replay tests, stale-worker tests, migration tests, UI locks, standalone compatibility, and control-plane contract tests |
 
 ### Internal control-plane interface
@@ -232,7 +232,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - The migration adds schema only. The signed managed-provisioning operation creates the reserved support account, avoiding an unowned credential in standalone databases.
 - Keep the existing manual `create-admin` command for standalone use, but route it through the same system-account protections. Managed bootstrap uses the signed internal operation.
 - DigitalOcean performs `flask --app app db upgrade head` as a pre-deploy job before web/worker activation. GTM readiness must report the expected schema before the control plane marks a deployment healthy.
-- Web, Discord, and analysis processes all load the same immutable entitlement revision at startup. Runtime changes arrive through App Platform configuration/deployment; no process should invent or persist a different entitlement set.
+- Web, Discord, and analysis processes all load the same immutable entitlement revision at startup. Runtime changes arrive only through a full App Platform configuration deployment/restart; readiness reports each component's revision and blocks lifecycle progression on mismatch. No process persists a competing entitlement set.
 - Source repository is settled as `sbchmn/Group-Test-Tracker`. Existing manually managed customers remain on `main`, and SaaS-only code/migrations must never be merged there merely to deploy the SaaS product.
 - When implementation is authorized, create case-sensitive branches `SaaS-Test` and `SaaS-Main` from the same re-read, recorded `main` commit and tag that commit with a dated SaaS baseline. This planning change does not create either branch.
 - All SaaS development lands in `SaaS-Test` and deploys to the existing development test application. Promotion is a reviewed, tested PR from `SaaS-Test` to protected `SaaS-Main`; customer DigitalOcean applications track `SaaS-Main` only.
@@ -242,15 +242,16 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ### Security, reliability, and optimization review
 
 - **Security:** Preserve existing admin/participant authorization beneath feature gates; pin Ed25519/`EdDSA`, validate canonical claims/audience/version/key lifecycle, retain bounded replay records, isolate private keys per tenant/direction, enforce the suspended recovery allowlist and sanitized export, preserve immutable system identity/session epochs/canonical URLs, and redact bounded logging.
-- **Reliability:** Make bootstrap and support commands idempotent, distinguish desired from actual revisions, fail paid features closed without breaking Core diagnostics, commit state before acknowledging commands, and surface drift/failures to the control plane Admin Action Queue.
-- **Optimization:** Parse immutable environment state once per process, use constant-time set membership for feature checks, index operation IDs/system keys/revisions, avoid per-request control-plane calls, render public documentation links locally, and perform network synchronization only for explicit support-account actions.
+- **Reliability:** Make bootstrap/support commands and pre-deploy cancellation idempotent, distinguish desired from component-reported revisions, require full restarts, keep the unentitled worker idle before removal, fail closed without breaking Core diagnostics, commit before acknowledging, and surface drift/failures to the Admin Action Queue.
+- **Optimization:** Parse immutable environment state once per process, use constant-time feature sets, bound SQLAlchemy pools by component role, index operation IDs/system keys/revisions, avoid per-request control-plane calls, render public documentation links locally, and synchronize only explicit support-account actions.
 
 ### Validation plan
 
 - Add `tests/test_entitlements.py` for standalone compatibility and the full status × feature matrix, including recovery-route allowlisting and default denial of newly added routes.
 - Add `tests/test_control_plane_api.py` with shared deterministic Ed25519 fixtures for algorithm substitution, `kid` rotation overlap/retirement, 60-second skew, 120-second lifetime, replay, payload mismatch, idempotency, bootstrap collisions, stale revisions, safe errors, and status output.
 - Add `tests/test_support_access.py` for every admin/self-service/reset/link/CLI/delete mutation path, role immutability, support toggles, credential rotation, session invalidation, public guide visibility by GTM role, safe unavailable states, and URL allowlisting.
-- Extend `tests/test_result_analysis.py`, `tests/test_notifications.py`, `tests/test_security.py`, `tests/test_export.py`, and `tests/test_schema_migration.py` for zero queue inserts without entitlement, terminal downgrade cancellation/no re-upgrade resume, Discord-wide notification gates, suspended mutation denial, sanitized recovery exports, worker races, MySQL-safe migrations, and unchanged standalone behavior.
+- Extend `tests/test_result_analysis.py`, `tests/test_notifications.py`, `tests/test_security.py`, `tests/test_export.py`, and `tests/test_schema_migration.py` for zero queue inserts without entitlement, deployment-1 cancellation/idle behavior, deployment-2 removal contract, revision mismatch, bounded in-flight drain races, no re-upgrade resume, Discord gates, suspended denial, sanitized exports, MySQL 8.4-safe migrations, and standalone behavior.
+- Add component-aware database tests and a load budget for the two-process Gunicorn web service plus Discord/analysis workers. Explicitly set pool size/overflow/recycle/pre-ping from validated environment rather than relying on SQLAlchemy defaults.
 - Add cross-repository contract fixtures so the control plane and GTM test the same environment schema, signature canonicalization, command/status JSON, entitlement identifiers, and supported contract versions.
 - Before production, test Core, Discord, AI, Complete, trial, grace, upgrade, downgrade, suspension, recovery/export, stale worker, failed bootstrap, and support rotation in a real DigitalOcean test application.
 
@@ -262,13 +263,13 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 4. Add signed internal status/bootstrap operations and DigitalOcean readiness checks.
 5. Add immutable support identity, session epochs, Support page, and locally role-filtered public documentation/helpdesk links.
 6. Gate all Discord and result-analysis queue/provider/notification surfaces and add downgrade reconciliation.
-7. Validate migrations and the full lifecycle in the real `SaaS-Test` deployment, then promote by PR to protected `SaaS-Main`.
+7. Validate MySQL 8.4 migrations, component connection budgets, full-restart revisions, two-deployment downgrades, and the lifecycle in the real `SaaS-Test` app, then promote by PR to protected `SaaS-Main`.
 
 ### Settled SaaS implementation decisions
 
 1. DigitalOcean deploys `sbchmn/Group-Test-Tracker`: customer SaaS apps track `SaaS-Main`, development testing uses `SaaS-Test`, and current non-SaaS clients remain on `main`.
 2. `discord_bot` covers the gateway worker, commands/linking/settings, Discord webhooks/notifications, and the Discord user notification channel.
-3. Analysis is never queued without `result_analysis`; pending work is terminally canceled on downgrade and never automatically resumes after re-upgrade.
+3. Analysis is never queued without `result_analysis`; environment changes restart the entire app, downgrade deployment 1 cancels pending work and idles the retained worker, deployment 2 removes it, and re-upgrade never automatically resumes canceled work.
 4. Suspended tenant administrators have only the explicit read-only test/results, sanitized test export, billing/support, session, and logout surface described above; user/participant exports, mutations, delivery, bot, and provider operations are blocked.
 5. Cross-repository authentication uses per-tenant, per-direction Ed25519 keys and pinned `EdDSA` JWS with a 60-second clock-skew allowance, 120-second maximum request lifetime, one-time `jti`, and staged key rotation.
 6. The immutable support identity is `gtmsupport` / `support@grouptest.online`, authorized only by `system_account_key=control_plane_support`.
@@ -350,6 +351,8 @@ Record future results with the exact command, pass/fail count, date, environment
 - The current per-test export contains participant identity/payment data and cannot serve suspended recovery unchanged; the dedicated sanitized export is a security requirement.
 
 - The current branch has no automated GitHub verification signal.
+- Current SQLAlchemy configuration sets pre-ping/recycle but leaves default pool size/overflow in place; with two Gunicorn processes plus Discord/analysis processes, a Complete tenant can theoretically consume most connections on a small shared MySQL node. SaaS deployment requires explicit component pool budgets and a control-plane capacity gate.
+- Environment-only entitlement enforcement intentionally accepts a bounded deployment drain-window race for work already in flight; the two-deployment downgrade sequence cannot provide instantaneous revocation.
 - Real provider accuracy, latency, cost, and retention behavior still require fixture evaluation with production-like credentials before automatic analysis is enabled.
 - Runtime databases, notification logs, Python bytecode, and a debug script are tracked in the repository.
 - Telegram animation validation recognizes GIF signatures and MP4 `ftyp` markers but does not fully parse or transcode media containers.
@@ -378,6 +381,19 @@ After each edit phase:
 4. Record exact results and remaining risks.
 
 ## Current Change Record
+
+### Environment-Authoritative Lifecycle and Database Capacity
+
+- **Date:** 2026-09-13
+- **Project map before changes:** The map required stale workers to stop but did not define how environment-only entitlements restart all processes, and it did not account for SQLAlchemy default pools across the two-process web service plus paid workers.
+- **Planned edits:** Mirror the approved control-plane lifecycle without introducing a GTM database entitlement authority, and make shared-MySQL capacity a first-class SaaS requirement.
+- **Applied edits:** Defined full-restart entitlement revisions, atomic upgrade deployment, two-deployment downgrade/cancellation/idle/removal behavior, component revision readiness, bounded drain-window semantics, component-aware pool configuration, connection/load tests, and MySQL 8.4 validation.
+- **Security review:** Paid work remains guarded at queue, provider, and persistence boundaries; no process or database row can grant an entitlement absent from the deployed environment.
+- **Reliability review:** All retained components must restart/report the target revision before worker removal; analysis cancellation is idempotent; revision mismatch blocks progression; already in-flight work is an explicit bounded risk.
+- **Optimization review:** Explicit pool/overflow budgets replace unsafe defaults and let the control plane cap tenants using real cluster connection headroom.
+- **Validation:** Reviewed current GTM engine options and Procfile through the connector: only pre-ping/recycle are configured and Gunicorn runs two worker processes. Planning-only update; no code, branch, migration, or deployment changed.
+- **Remaining action:** Implement and benchmark the pool/revision contract on `SaaS-Test` after branch creation is authorized.
+
 
 ### Public Documentation and Control-Plane Boundary Alignment
 

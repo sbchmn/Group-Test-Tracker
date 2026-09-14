@@ -30,10 +30,9 @@ Assay" is Purity; "HPLC Potency Assay" is Net Content; "Bacterial Endotoxins Tes
 Endotoxin. Extract unsupported tests too, but classify them as Unknown. One Unknown row must not
 prevent extraction of other rows.
 
-If you have multiple of the same test type shown, like an endtoxins "Specification" line with a 
-"Pass" result showing that the test met the specification, and then later have the specific endotoxin 
-test result showing a value like "2.2EU/vial" then combine those into the same result category like
-"Pass - 2.2EU/vial".
+Instead of returning two rows of any cannonical test type, combine the data for both entries into
+one line of that canonical type. For example, separate endotoxin entries of "Pass" and "2.2EU/vial" 
+should be combined into one Endotoxin Cannonical Type with the value "Pass - 2.2EU/vial".
 
 """
 

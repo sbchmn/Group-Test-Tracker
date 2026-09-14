@@ -132,7 +132,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
    - Remove one-off debug artifacts after confirming they are not operational dependencies.
 
 7. **SaaS control-plane compatibility — mapped; implementation not started**
-   - Implement the managed/standalone boundary, subscription/entitlement enforcement, signed control-plane API, provisioning bootstrap, support account, documentation launch, health contract, and lifecycle tests described below.
+   - Implement the managed/standalone boundary, subscription/entitlement enforcement, signed control-plane API, provisioning bootstrap, support account, role-filtered public documentation links, health contract, and lifecycle tests described below.
    - Freeze cross-repository contracts before writing either side so provisioning, retries, revisions, and failure behavior remain compatible.
 
 ## Planned SaaS Control-Plane Compatibility
@@ -142,7 +142,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 ### Compatibility and ownership rules
 
 - Add an explicit `GTT_DEPLOYMENT_MODE=standalone|managed` boundary. Default to `standalone` so existing self-hosted and manually managed deployments keep their current behavior.
-- In `managed` mode, the control plane owns subscription state, canonical tenant identity, entitlement revisions, support-account lifecycle, documentation launch authorization, and initial administrator bootstrap. GTM continues to own users, group tests, results, participant payments, tenant configuration, and customer-supplied bot/AI/email/storage credentials.
+- In `managed` mode, the control plane owns subscription state, canonical tenant identity, entitlement revisions, support-account lifecycle, canonical public documentation destinations, and initial administrator bootstrap. GTM continues to own users, group tests, results, participant payments, tenant configuration, and customer-supplied bot/AI/email/storage credentials.
 - Never scatter environment reads or plan-name comparisons through routes and templates. One typed entitlement service must parse, validate, expose, and test the complete contract.
 - Client-side hiding is informative only. Route, service, CLI, bot-command, notification, and worker checks are authoritative.
 
@@ -157,12 +157,12 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 | `GTT_SUBSCRIPTION_STATUS` | `active`, `trialing`, `grace`, `suspended`, or `canceled` | Invalid state fails closed and remains diagnosable |
 | `GTT_CONTROL_PLANE_URL` | Canonical billing/upgrade/tenant-console origin | No generated upgrade redirect; show configuration error |
 | `GTT_SUPPORT_URL` | External support destination | Support page remains available with a safe unavailable state |
-| `GTT_USER_DOCUMENTATION_URL` | User-documentation launch destination | Do not emit a broken or unsigned link |
-| `GTT_ADMIN_DOCUMENTATION_URL` | Administrator-documentation launch destination | Administrators retain user docs only |
+| `GTT_USER_DOCUMENTATION_URL` | Canonical public user-guide URL on `grouptest.online` | Validate HTTPS/approved origin; hide an invalid link |
+| `GTT_ADMIN_DOCUMENTATION_URL` | Canonical public administrator-guide URL on `grouptest.online` | Validate HTTPS/approved origin; ordinary users never see this link |
 | `GTT_PUBLIC_URL` | Canonical tenant origin for generated links | Readiness warning; never trust an arbitrary Host header |
 
 - Use per-tenant, per-direction Ed25519 key pairs and compact JWS with the algorithm pinned to `EdDSA`. The control plane keeps the CP-to-GTM private key and provisions its public verification set to GTM; GTM keeps its GTM-to-control-plane private key in a DigitalOcean encrypted secret and registers only its public key with the control plane. Never share one HMAC/bearer secret across directions.
-- Every signed request includes `kid`, `iss`, `aud`, `iat`, `nbf`, `exp`, `jti`, tenant ID, contract version, HTTP method, canonical path, SHA-256 body digest, operation ID, and requested revision. Maximum request/assertion lifetime is 120 seconds, accepted clock skew is 60 seconds, and used `jti` values are retained for at least 10 minutes. Documentation launch assertions expire within 60 seconds and are one-time use.
+- Every signed request includes `kid`, `iss`, `aud`, `iat`, `nbf`, `exp`, `jti`, tenant ID, contract version, HTTP method, canonical path, SHA-256 body digest, operation ID, and requested revision. Maximum request/assertion lifetime is 120 seconds, accepted clock skew is 60 seconds, and used `jti` values are retained for at least 10 minutes. Public documentation links do not carry assertions, identity, tenant data, or signed query parameters.
 - Publish public keys as a versioned JWKS-style `OKP`/`Ed25519` set with `staged`, `active`, and `retired` lifecycle metadata. Install the next public key before sender cutover, switch by `kid`, retain the old public key as verify-only for 48 hours or until all in-flight work and deployment verification complete (whichever is later), then remove it. Private keys never appear in databases shared with tenants, logs, responses, or URLs.
 - Add a contract-version setting and publish the accepted versions in the status endpoint so incompatible control-plane/GTM deployments fail before mutation.
 - Keep every secret out of templates, diagnostics, health responses, audit payloads, URLs, and process command arguments.
@@ -188,7 +188,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 | Subscription UX | `app/templates/base.html`, new subscription/recovery templates, admin Settings templates, `app/export.py` or a focused recovery-export module | Plan/status banner, locked cards with upgrade actions, grace messaging, server-side suspended-admin route allowlist, and a sanitized test/results-only recovery export |
 | Discord enforcement | `app/discord_bot.py`, `app/routes.py`, `app/notifications.py`, `app/templates/profile.html`, `app/templates/admin/bot_integrations.html` | Guard startup, synchronization, handlers, linking, saves/tests, and any in-scope outbound delivery while preserving stored configuration |
 | Analysis enforcement | `app/result_analysis/jobs.py`, `app/result_analysis/service.py`, analysis routes, `_result_analysis_card.html`, `result_analysis_config.html` | Prevent automatic/manual queueing, claims, retries, provider tests, and paid mutations while retaining readable history and data |
-| Support and documentation | new focused support blueprint/service/templates plus `base.html` | Logged-in Support tab, user/admin documentation authorization, external helpdesk link, support-access request/status, and no public documentation URLs |
+| Support and documentation | new focused support blueprint/service/templates plus `base.html` | Logged-in Support tab, role-filtered links to public user/admin guides, owner-configured external helpdesk link, and support-access request/status |
 | Managed system account | `app/models.py`, a focused user-management service, auth/user routes, CLI commands, user/profile templates | Immutable reserved support identity, enable/disable/rotation only through the control plane, and immediate session invalidation |
 | Control-plane API | new isolated internal blueprint/service | Signed versioned commands, bootstrap, support lifecycle, status, replay defense, idempotency, bounded audit, and JSON-only error contracts |
 | Provisioning readiness | `app/__init__.py`, `app/version.py`, new health/status service | Public minimal liveness/readiness plus signed detailed status reporting application, schema, contract, tenant, entitlement, and support revisions |
@@ -217,12 +217,14 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Prevent ORM/service deletion of the system account. Direct database-owner repair remains possible and must be audited operationally.
 - Bind authenticated sessions to `auth_epoch`; disabling or rotating the support account invalidates all of its existing sessions on the next request. Maintain backward compatibility for ordinary pre-migration sessions or deliberately invalidate them once during rollout.
 
-### Support and documentation launch flow
+### Support and public-documentation flow
 
-- Add a Support navigation item for every authenticated user. Tenant administrators additionally see administrator documentation and support-access enable/disable controls.
-- The GTM support toggle requests desired state from the control plane; it does not directly activate the local account. Show pending/actual state and a retry-safe error when the control plane is unavailable.
-- Launch documentation with a short-lived signed POST assertion containing issuer/tenant, opaque user subject, GTM role, audience, destination, expiry, and nonce. Never put the signed assertion or identity fields into analytics URLs.
-- Ordinary users receive user documentation only; administrators receive user and administrator documentation. The external helpdesk may keep separate portal accounts and receives no GTM password or support credential.
+- Add a Support navigation item for every authenticated GTM user. It is the only in-application place that presents documentation/helpdesk links.
+- Documentation pages are public on the control plane. Ordinary authenticated GTM users see only the public user-guide link; GTM administrators see both public user and administrator guide links.
+- Role-based link display is a local GTM navigation rule, not cross-system authorization. Do not create signed documentation assertions, transmit GTM identities/roles to the control plane, or append tenant/user data to guide URLs.
+- Validate documentation and helpdesk destinations against HTTPS and configured/approved origins. Before configuration, show a safe unavailable state; never redirect to an arbitrary database/user-supplied URL.
+- The external hosted helpdesk maintains separate portal accounts and receives no GTM password, support credential, signed token, or automatic user/test data.
+- The GTM support toggle still requests desired support-account state through the signed control-plane operation; it does not activate the local account directly. Show pending/actual state and retry-safe errors.
 
 ### Migration, deployment, and release behavior
 
@@ -241,13 +243,13 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 - **Security:** Preserve existing admin/participant authorization beneath feature gates; pin Ed25519/`EdDSA`, validate canonical claims/audience/version/key lifecycle, retain bounded replay records, isolate private keys per tenant/direction, enforce the suspended recovery allowlist and sanitized export, preserve immutable system identity/session epochs/canonical URLs, and redact bounded logging.
 - **Reliability:** Make bootstrap and support commands idempotent, distinguish desired from actual revisions, fail paid features closed without breaking Core diagnostics, commit state before acknowledging commands, and surface drift/failures to the control plane Admin Action Queue.
-- **Optimization:** Parse immutable environment state once per process, use constant-time set membership for feature checks, index operation IDs/system keys/revisions, avoid per-request control-plane calls, and perform network synchronization only for explicit support/documentation actions.
+- **Optimization:** Parse immutable environment state once per process, use constant-time set membership for feature checks, index operation IDs/system keys/revisions, avoid per-request control-plane calls, render public documentation links locally, and perform network synchronization only for explicit support-account actions.
 
 ### Validation plan
 
 - Add `tests/test_entitlements.py` for standalone compatibility and the full status × feature matrix, including recovery-route allowlisting and default denial of newly added routes.
 - Add `tests/test_control_plane_api.py` with shared deterministic Ed25519 fixtures for algorithm substitution, `kid` rotation overlap/retirement, 60-second skew, 120-second lifetime, replay, payload mismatch, idempotency, bootstrap collisions, stale revisions, safe errors, and status output.
-- Add `tests/test_support_access.py` for every admin/self-service/reset/link/CLI/delete mutation path, role immutability, support toggles, credential rotation, and session invalidation.
+- Add `tests/test_support_access.py` for every admin/self-service/reset/link/CLI/delete mutation path, role immutability, support toggles, credential rotation, session invalidation, public guide visibility by GTM role, safe unavailable states, and URL allowlisting.
 - Extend `tests/test_result_analysis.py`, `tests/test_notifications.py`, `tests/test_security.py`, `tests/test_export.py`, and `tests/test_schema_migration.py` for zero queue inserts without entitlement, terminal downgrade cancellation/no re-upgrade resume, Discord-wide notification gates, suspended mutation denial, sanitized recovery exports, worker races, MySQL-safe migrations, and unchanged standalone behavior.
 - Add cross-repository contract fixtures so the control plane and GTM test the same environment schema, signature canonicalization, command/status JSON, entitlement identifiers, and supported contract versions.
 - Before production, test Core, Discord, AI, Complete, trial, grace, upgrade, downgrade, suspension, recovery/export, stale worker, failed bootstrap, and support rotation in a real DigitalOcean test application.
@@ -258,7 +260,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 2. Freeze the shared Ed25519/JWS, environment, bootstrap-hash, status, recovery-export, and operation fixtures in both repositories.
 3. Add additive schema, the entitlement kernel, recovery allowlist, and standalone-compatibility tests on `SaaS-Test`.
 4. Add signed internal status/bootstrap operations and DigitalOcean readiness checks.
-5. Add immutable support identity, session epochs, support page, and documentation assertions.
+5. Add immutable support identity, session epochs, Support page, and locally role-filtered public documentation/helpdesk links.
 6. Gate all Discord and result-analysis queue/provider/notification surfaces and add downgrade reconciliation.
 7. Validate migrations and the full lifecycle in the real `SaaS-Test` deployment, then promote by PR to protected `SaaS-Main`.
 
@@ -376,6 +378,19 @@ After each edit phase:
 4. Record exact results and remaining risks.
 
 ## Current Change Record
+
+### Public Documentation and Control-Plane Boundary Alignment
+
+- **Date:** 2026-09-13
+- **Project map before changes:** GTM planned signed, access-controlled documentation assertions even though the revised control-plane product makes both guide sets public.
+- **Planned edits:** Remove unnecessary cross-system documentation authentication while preserving role-appropriate discovery inside GTM and the signed support-account control contract.
+- **Applied edits:** Made user/admin guides public control-plane destinations; limited their in-GTM presentation to the authenticated Support page; ordinary users see only the user guide and GTM administrators see both; removed documentation assertions and identity transfer; retained HTTPS/origin validation and safe unavailable states.
+- **Security review:** GTM sends no identity, role, tenant ID, signed token, or query data to public documentation. Role filtering is presentation, not authorization; arbitrary redirect destinations remain blocked.
+- **Reliability review:** Links require no live control-plane call and fail safely when unconfigured. Support-account enable/disable remains a separate signed, revisioned operation.
+- **Optimization review:** Public guide navigation is local and stateless, eliminating assertion issuance, replay storage, and documentation-session coupling.
+- **Validation:** Read the current connector-visible GTM map and checked all documentation/assertion references before publishing this planning-only update. No application code, branch, migration, or deployment changed.
+- **Remaining action:** Implement the Support-page link rules on `SaaS-Test` after branch creation is authorized.
+
 
 ### SaaS Branches and Settled Entitlement Contract
 

@@ -6,7 +6,7 @@ All extensions initialized here without circular imports.
 """
 
 import os
-from flask import Flask
+from flask import Flask, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
@@ -61,6 +61,10 @@ def create_app(config_overrides=None):
             'managed_admin_docs_url': managed_admin_docs_url(),
             'subscription_status': subscription_status(),
         }
+
+    @app.get('/health/ready')
+    def readiness_probe():
+        return jsonify({'status': 'ready'}), 200
     
     # === Configuration ===
     # SECRET_KEY required for sessions, CSRF, Flask-Login

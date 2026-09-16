@@ -56,6 +56,14 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Version 4.0", body)
         self.assertIn("href=\"/version\"", body)
 
+    def test_readiness_probes_are_public_and_side_effect_free(self):
+        response = self.client.get("/health/ready")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "ready"})
+        self.assertEqual(self.client.get("/heath/ready").status_code, 404)
+
+        self.assertEqual(self.client.post("/health/ready").status_code, 405)
+
     def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):
         terms_response = self.client.get("/terms")
         privacy_response = self.client.get("/privacy")

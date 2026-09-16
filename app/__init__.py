@@ -19,6 +19,7 @@ from .saas import (
     managed_mode_enabled,
     managed_public_url,
     managed_user_docs_url,
+    instance_status_payload,
     report_instance_event,
     subscription_status,
 )
@@ -154,6 +155,8 @@ def create_app(config_overrides=None):
             return None
         if raw_epoch and str(user.session_epoch) != raw_epoch:
             return None
+        if user.is_reserved_support_account and not user.support_access_active:
+            return None
         return user
     
     # === Register Blueprints ===
@@ -256,8 +259,7 @@ def create_app(config_overrides=None):
 
         with app.app_context():
             report_instance_event('status', {
-                'component': 'result-analysis-worker',
-                'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+                **instance_status_payload(component='result-analysis-worker', ready=True),
             })
             click.echo(f'Result analysis worker started; polling every {poll_seconds} seconds.')
             while True:
@@ -282,8 +284,7 @@ def create_app(config_overrides=None):
         """Report the current managed tenant status to the control plane."""
         from .version import APP_VERSION
         result = report_instance_event('status', {
-            'app_version': APP_VERSION,
-            'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+            **instance_status_payload(component='control-plane-status', ready=True),
         })
         click.echo('Control-plane status reported.' if result is not False else 'Control-plane status report failed.')
 
@@ -293,8 +294,7 @@ def create_app(config_overrides=None):
         from . import discord_bot
 
         report_instance_event('status', {
-            'component': 'discord-bot-worker',
-            'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+            **instance_status_payload(component='discord-bot-worker', ready=True),
         })
         discord_bot.main()
 

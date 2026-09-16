@@ -64,6 +64,10 @@ class User(UserMixin, db.Model):
     system_account_key = db.Column(db.String(64), unique=True, nullable=True, index=True)
     # Incremented to force-invalidate every existing session (e.g. support disable/rotate).
     session_epoch = db.Column(db.Integer, default=0, nullable=False)
+    # Reserved support-account state is controlled only by the managed control plane.
+    support_state = db.Column(db.String(20), default='disabled', nullable=False)
+    support_credential_version = db.Column(db.Integer, nullable=True)
+    support_expires_at = db.Column(db.DateTime, nullable=True)
     
     # Relationships
     participations = db.relationship(
@@ -114,6 +118,16 @@ class User(UserMixin, db.Model):
     @property
     def is_reserved_support_account(self):
         return self.system_account_key == RESERVED_SUPPORT_SYSTEM_KEY
+
+    @property
+    def support_access_active(self):
+        return bool(
+            self.is_reserved_support_account
+            and self.is_active
+            and self.support_state == 'enabled'
+            and self.support_expires_at is not None
+            and self.support_expires_at > datetime.utcnow()
+        )
 
     def __repr__(self):
         return f'<User {self.username}>'

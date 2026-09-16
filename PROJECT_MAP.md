@@ -12,6 +12,16 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Deployment entry points:** `run.py` and `Procfile`, including a dedicated result-analysis worker process.
 - **Completed readiness probe:** Added an unauthenticated GET-only readiness probe at `/health/ready`, returning static JSON and covered by `tests.test_security`.
 - **Completed plan-aware administration UI:** Core managed plans hide the Result Analysis settings action and reject direct access, keep the Discord card visible but read-only with an explicit plan notice, reject Discord command synchronization, show provisioned plan status and entitlements on Version, and place user/admin documentation links only in the footer.
+- **Current managed-contract update:** Instance-to-Control-Plane events now use the top-level `type` contract. Reserved support state persists credential version and expiry, expires fail closed in login/session loading, and support requests require a bounded reason plus a generated consent reference. Status events include application, schema, contract, entitlement, component, readiness, and bounded resource fields.
+
+## Current Implementation Map — Managed Contract Completion
+
+- **Project map before changes:** GTM emitted a nested instance event envelope that the private Control Plane rejected, and support state lacked local credential version/expiry enforcement.
+- **Planned edits:** Correct event bodies; add additive support state migration; harden support transitions; enforce expiry at authentication boundaries; repair support request UI; centralize readiness payloads; validate both repositories.
+- **Applied edits:** `app/saas.py` emits top-level event bodies and shared status payloads; `app/models.py` and `migrations/versions/b3c4d5e6f7a8_add_support_account_state.py` persist support state; `app/control_plane_routes.py` validates identity, versions, and future UTC expiry; `app/__init__.py` and `app/routes.py` fail closed on expired support and report corrected status; the admin template collects a reason and displays non-secret state.
+- **Security/reliability/optimization review:** Reserved authorization remains keyed by immutable `system_account_key`; stale versions and malformed/far-past expiries are rejected; disable/rotate increments session epochs and rotates disabled hashes; external event delivery remains asynchronous with a ten-second timeout; status metrics are bounded and no new ordinary-request provider dependency was introduced.
+- **Validation plan/results:** Migration, managed contract, security, and diagnostics checks were run locally. Final full-suite validation remains required; warnings are existing SQLAlchemy/UTC deprecations and the environment intermittently loses Python launchers from PATH.
+- **Remaining risks:** Actual Control Plane delivery, support queue convergence, worker startup readiness, and provider/network behavior still require deployment validation with live tenant credentials. The schema revision default must be updated when a later migration becomes the deployed head.
 
 ## Architecture and Ownership
 

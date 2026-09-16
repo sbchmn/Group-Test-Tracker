@@ -1305,7 +1305,9 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
-        if user and user.check_password(form.password.data):
+        if user and user.check_password(form.password.data) and user.is_active and (
+            not user.is_reserved_support_account or user.support_access_active
+        ):
             login_user(user, remember=form.remember.data)
             flash(f'Welcome back, {user.username}!', 'success')
             next_page = request.args.get('next')
@@ -4921,7 +4923,16 @@ def storage_config():
 def manage_users():
     """Admin page to view all users."""
     users = User.query.order_by(User.created_at.desc()).all()
-    return render_template('admin/manage_users.html', users=users)
+    support_user = User.query.filter_by(system_account_key='control_plane_support').first()
+    support_status = None
+    if support_user is not None:
+        if support_user.support_access_active:
+            support_status = 'enabled'
+        elif support_user.support_state == 'enabled' and support_user.support_expires_at is not None:
+            support_status = 'expired'
+        else:
+            support_status = 'disabled'
+    return render_template('admin/manage_users.html', users=users, support_user=support_user, support_status=support_status)
 
 
 @main_bp.route('/admin/managed-support/request', methods=['POST'])
@@ -4929,9 +4940,14 @@ def manage_users():
 @admin_required
 def request_managed_support():
     """Ask the private control plane to make temporary support access available."""
+    reason = str(request.form.get('reason') or '').strip()
+    if len(reason) < 8 or len(reason) > 500:
+        flash('Support access requires a reason between 8 and 500 characters.', 'danger')
+        return redirect(url_for('main.manage_users'))
+    consent_reference = f'support-request:{current_user.id}:{secrets.token_urlsafe(16)}'
     result = report_instance_event('support_access_requested', {
-        'requested_by_user_id': current_user.id,
-        'requested_by_username': current_user.username,
+        'reason': reason,
+        'consent_reference': consent_reference,
     })
     if result is False:
         flash('Support access request could not be delivered. Contact the service operator.', 'danger')
@@ -4948,6 +4964,8 @@ def emergency_disable_managed_support():
     support_user = User.query.filter_by(system_account_key='control_plane_support').first()
     if support_user is not None:
         support_user.is_active = False
+        support_user.support_state = 'disabled'
+        support_user.support_expires_at = None
         support_user.session_epoch += 1
         db.session.commit()
     result = report_instance_event('support_emergency_disabled', {

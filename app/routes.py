@@ -2413,7 +2413,10 @@ def telegram_webhook():
                 'Telegram callback processing failed chat=%s message=%s data=%s',
                 callback_chat_id, callback_message_id, callback_data[:120],
             )
-        answer_telegram_callback_query(callback_query.get('id'), callback_notice)
+        if callback_notice:
+            answer_telegram_callback_query(callback_query.get('id'), callback_notice)
+        else:
+            answer_telegram_callback_query(callback_query.get('id'))
         if handled:
             db.session.commit()
         else:

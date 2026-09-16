@@ -131,6 +131,8 @@ def create_app(config_overrides=None):
     # === Register Blueprints ===
     from .routes import main_bp
     app.register_blueprint(main_bp)
+    from .control_plane_routes import control_plane_bp
+    app.register_blueprint(control_plane_bp)
 
     # === Notification defaults ===
     with app.app_context():

@@ -388,6 +388,28 @@ class TelegramWebhookUpdate(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class ControlPlaneNonce(db.Model):
+    """Replay defense for signed SaaS control-plane requests (cp_to_instance)."""
+    __tablename__ = 'control_plane_nonces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nonce_digest = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ControlPlaneOperationReceipt(db.Model):
+    """Idempotency record so a retried control-plane operation is not reapplied."""
+    __tablename__ = 'control_plane_operation_receipts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    operation_id = db.Column(db.String(160), nullable=False, unique=True, index=True)
+    payload_digest = db.Column(db.String(64), nullable=False)
+    response_code = db.Column(db.Integer, nullable=False)
+    response_body = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TelegramStatusDigestEvent(db.Model):
     __tablename__ = 'telegram_status_digest_events'
 

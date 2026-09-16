@@ -8,12 +8,19 @@ must remain independently auditable.
 
 import hashlib
 import secrets
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 from werkzeug.security import generate_password_hash
 
 from . import control_plane, csrf, db
-from .models import RESERVED_SUPPORT_SYSTEM_KEY, ControlPlaneOperationReceipt, User
+from .models import (
+    RESERVED_SUPPORT_EMAIL,
+    RESERVED_SUPPORT_SYSTEM_KEY,
+    RESERVED_SUPPORT_USERNAME,
+    ControlPlaneOperationReceipt,
+    User,
+)
 
 control_plane_bp = Blueprint('control_plane', __name__)
 
@@ -136,10 +143,36 @@ def control_plane_support():
     username = str(payload.get('username') or '').strip()
     email = str(payload.get('email') or '').strip()
     password_hash = payload.get('password_hash')
+    credential_version = payload.get('credential_version')
+    expires_at_value = payload.get('expires_at')
     if action not in {'rotate', 'enable', 'disable'} or not username or not email:
         db.session.rollback()
         return jsonify({'error': 'invalid payload'}), 400
-    if action in {'rotate', 'enable'} and not password_hash:
+    if username.casefold() != RESERVED_SUPPORT_USERNAME.casefold() or email.casefold() != RESERVED_SUPPORT_EMAIL.casefold():
+        db.session.rollback()
+        return jsonify({'error': 'invalid reserved identity'}), 400
+    try:
+        credential_version = int(credential_version)
+    except (TypeError, ValueError):
+        db.session.rollback()
+        return jsonify({'error': 'invalid credential version'}), 400
+    if credential_version <= 0:
+        db.session.rollback()
+        return jsonify({'error': 'invalid credential version'}), 400
+    expires_at = None
+    if expires_at_value is not None:
+        try:
+            expires_at = datetime.fromisoformat(str(expires_at_value).replace('Z', '+00:00'))
+            if expires_at.tzinfo is not None:
+                expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            db.session.rollback()
+            return jsonify({'error': 'invalid expiry'}), 400
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if action == 'enable' and (not password_hash or expires_at is None or expires_at <= now_utc):
+        db.session.rollback()
+        return jsonify({'error': 'invalid enable payload'}), 400
+    if action == 'rotate' and not password_hash:
         db.session.rollback()
         return jsonify({'error': 'missing password hash'}), 400
 
@@ -162,6 +195,15 @@ def control_plane_support():
         )
         db.session.add(user)
         db.session.flush()
+    elif user.username.casefold() != username.casefold() or user.email.casefold() != email.casefold():
+        db.session.rollback()
+        return jsonify({'error': 'reserved identity conflict'}), 409
+
+    current_version = user.support_credential_version
+    if current_version is not None:
+        if credential_version < current_version or (action == 'rotate' and credential_version == current_version):
+            db.session.rollback()
+            return jsonify({'error': 'stale credential version'}), 409
 
     if action in {'rotate', 'enable'}:
         user.password_hash = str(password_hash)
@@ -170,13 +212,29 @@ def control_plane_support():
         user.session_epoch += 1
     if action == 'enable':
         user.is_active = True
+        user.support_state = 'enabled'
+        user.support_credential_version = credential_version
+        user.support_expires_at = expires_at
+    elif action == 'rotate':
+        user.is_active = False
+        user.support_state = 'disabled'
+        user.support_credential_version = credential_version
+        user.support_expires_at = None
     elif action == 'disable':
         user.is_active = False
+        user.support_state = 'disabled'
+        user.support_credential_version = credential_version
+        user.support_expires_at = None
         user.session_epoch += 1
         # Rotate the hash on disable so a leaked prior credential cannot be replayed.
         user.password_hash = generate_password_hash(secrets.token_urlsafe(32), method='scrypt')
 
-    response_body = {'state': 'enabled' if user.is_active else 'disabled'}
+    response_body = {
+        'accepted': True,
+        'state': user.support_state,
+        'credential_version': user.support_credential_version,
+        'expires_at': user.support_expires_at.isoformat() if user.support_expires_at else None,
+    }
     _record_control_plane_receipt(verified['operation_id'], payload_digest, 200, response_body)
     db.session.commit()
     return jsonify(response_body), 200

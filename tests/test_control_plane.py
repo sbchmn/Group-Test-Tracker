@@ -14,6 +14,7 @@ import secrets
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -180,7 +181,7 @@ class ControlPlaneTests(unittest.TestCase):
         enable = self._post('/internal/control-plane/v1/support', {
             'action': 'enable', 'username': 'gtmsupport', 'email': 'support@grouptest.online',
             'password_hash': 'scrypt:32768:8:1$salt$hash2', 'credential_version': 1,
-            'expires_at': '2026-01-01T00:00:00',
+            'expires_at': (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
         }, operation_id='support:owner4:1:enable')
         self.assertEqual(enable.status_code, 200)
         self.assertEqual(enable.get_json()['state'], 'enabled')

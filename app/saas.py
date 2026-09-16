@@ -101,6 +101,29 @@ def subscription_access_allowed(feature: str | None = None) -> bool:
     return True
 
 
+def instance_status_payload(*, component: str, ready: bool, schema_bytes: int = 0, pool_checked_out: int = 0, pool_capacity: int = 0) -> dict:
+    """Build the stable status body consumed by the private control plane."""
+    from .version import APP_VERSION
+
+    def bounded_metric(value):
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    return {
+        'component': str(component or 'web')[:64],
+        'application_version': APP_VERSION[:64],
+        'schema_revision': os.environ.get('GTT_SCHEMA_REVISION', 'b3c4d5e6f7a8')[:128],
+        'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+        'entitlement_revision': entitlement_revision(),
+        'schema_bytes': bounded_metric(schema_bytes),
+        'pool_checked_out': bounded_metric(pool_checked_out),
+        'pool_capacity': bounded_metric(pool_capacity),
+        'ready': bool(ready),
+    }
+
+
 def _instance_to_cp_url():
     base_url = os.environ.get('GTT_CONTROL_PLANE_URL', '').strip().rstrip('/')
     if not base_url:
@@ -157,14 +180,9 @@ def report_instance_event(event_name: str, payload: dict | None = None):
     if not url or not key_id or not secret:
         return False
 
-    envelope = {
-        'event': event_name,
-        'tenant_id': tenant_id(),
-        'timestamp': int(time.time()),
-        'payload': payload or {},
-    }
+    event_body = {'type': event_name, **(payload or {})}
     operation_id = f'instance:{event_name}:{int(time.time())}:{secrets.token_urlsafe(12)}'
-    headers, body = _instance_event_signature(secret, key_id=key_id, tenant=tenant_id(), operation_id=operation_id, payload=envelope)
+    headers, body = _instance_event_signature(secret, key_id=key_id, tenant=tenant_id(), operation_id=operation_id, payload=event_body)
     req = urllib_request.Request(url, data=body, headers=headers, method='POST')
     try:
         with urllib_request.urlopen(req, timeout=10) as response:

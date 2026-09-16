@@ -10,6 +10,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
 - **Deployment entry points:** `run.py` and `Procfile`, including a dedicated result-analysis worker process.
+- **Completed readiness probe:** Added an unauthenticated GET-only readiness probe at `/health/ready`, returning static JSON and covered by `tests.test_security`.
 
 ## Architecture and Ownership
 
@@ -173,6 +174,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Secrets remain masked in admin interfaces and must not appear in logs or rendered messages.
 - Result-analysis diagnostics retain only bounded status/code/request-ID context, redact credential patterns, exclude report content and raw responses, and rely on template auto-escaping.
 - User-controlled Telegram/Discord text must not create markup, commands, callbacks, or broad mentions.
+- The readiness probe exposes only static process health and does not query tenant data, credentials, or external services.
 
 ## Reliability Invariants
 

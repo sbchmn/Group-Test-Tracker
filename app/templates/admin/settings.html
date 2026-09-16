@@ -97,7 +97,11 @@
                     </div>
                     <span class="badge text-bg-{{ 'success' if settings_status.result_analysis else 'secondary' }}">{{ 'Enabled' if settings_status.result_analysis else 'Disabled' }}</span>
                 </div>
+                {% if settings_status.result_analysis_in_plan %}
                 <a class="btn btn-outline-primary" href="{{ url_for('main.result_analysis_config') }}">Open Result Analysis</a>
+                {% else %}
+                <p class="mb-0 text-muted">Result analysis isn't included in the current plan.</p>
+                {% endif %}
             </div>
         </div>
     </div>

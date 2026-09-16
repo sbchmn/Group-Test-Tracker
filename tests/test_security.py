@@ -240,6 +240,49 @@ class SecurityTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(NotificationConfig.query.filter_by(key="builtin_publicresults_enabled").first().value, "false")
 
+    def test_core_plan_gates_paid_settings_and_keeps_discord_card_visible(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="core-plan-admin", email="core-plan-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        os.environ.update({
+            "GTT_DEPLOYMENT_MODE": "managed",
+            "GTT_ENTITLEMENTS": "",
+            "GTT_ENTITLEMENT_REVISION": "9",
+            "GTT_SUBSCRIPTION_STATUS": "active",
+            "GTT_USER_DOCUMENTATION_URL": "https://docs.example/user",
+            "GTT_ADMIN_DOCUMENTATION_URL": "https://docs.example/admin",
+        })
+        self.client.post("/login", data={"username": "core-plan-admin", "password": "secret"}, follow_redirects=True)
+
+        settings_page = self.client.get("/admin/settings").get_data(as_text=True)
+        self.assertIn("Result analysis isn't included in the current plan.", settings_page)
+        self.assertNotIn("Open Result Analysis", settings_page)
+
+        bot_page_response = self.client.get("/admin/settings/bots")
+        self.assertEqual(bot_page_response.status_code, 200)
+        bot_page = bot_page_response.get_data(as_text=True)
+        self.assertIn("> Discord</h5>", bot_page)
+        self.assertIn("Discord isn't included in the current plan.", bot_page)
+        self.assertNotIn("Synchronize Commands", bot_page)
+        self.assertIn('name="discord_bot_token"', bot_page)
+        self.assertIn('disabled', bot_page)
+
+        self.assertEqual(self.client.get("/admin/settings/result-analysis").status_code, 404)
+        self.assertEqual(self.client.post("/admin/settings/bots/discord/sync-commands").status_code, 404)
+
+        version_page = self.client.get("/version").get_data(as_text=True)
+        self.assertIn("Managed", version_page)
+        self.assertIn("Subscription", version_page)
+        self.assertIn("Entitlement revision", version_page)
+        self.assertIn("Core features only", version_page)
+        self.assertIn("User Docs", version_page)
+        self.assertIn("Admin Docs", version_page)
+        self.assertNotIn('class="nav-link" href="https://docs.example/user"', version_page)
+
     def test_create_user_does_not_flash_generated_password(self):
         with self.app.app_context():
             db.create_all()

@@ -55,13 +55,17 @@ from .models import (
 )
 from .system_accounts import is_reserved_identity
 from .saas import (
+    entitlement_revision,
     entitlement_enabled,
+    entitlements,
     managed_admin_docs_url,
+    managed_mode_enabled,
     managed_user_docs_url,
     managed_public_url,
     report_instance_event,
     subscription_access_allowed,
     subscription_is_readonly,
+    subscription_status,
 )
 from .export import generate_sanitized_test_export, generate_test_export
 from .notifications import (
@@ -134,6 +138,12 @@ def version_info():
         app_name=APP_NAME,
         app_version=APP_VERSION,
         app_release=APP_RELEASE,
+        plan_details={
+            'managed': managed_mode_enabled(),
+            'subscription_status': subscription_status(),
+            'entitlement_revision': entitlement_revision(),
+            'entitlements': sorted(entitlements()),
+        },
     )
 
 
@@ -3936,7 +3946,9 @@ def admin_settings():
             'telegram': bool(configs.get('telegram_bot_token')),
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
             'storage': bool(str(configs.get('storage_enabled') or '').lower() == 'true'),
-            'result_analysis': analysis_settings['enabled'],
+            'result_analysis': analysis_settings['enabled'] and entitlement_enabled('result_analysis'),
+            'result_analysis_in_plan': entitlement_enabled('result_analysis'),
+            'discord_in_plan': entitlement_enabled('discord_bot'),
         },
     )
 
@@ -3955,6 +3967,8 @@ _ANALYSIS_SECRET_PLACEHOLDER = '••••••••••••'
 @login_required
 @admin_required
 def result_analysis_config():
+    if not entitlement_enabled('result_analysis'):
+        abort(404)
     form = ResultAnalysisSettingsForm()
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     effective = get_analysis_settings()
@@ -4031,6 +4045,8 @@ def result_analysis_config():
 @login_required
 @admin_required
 def test_result_analysis_provider(provider):
+    if not entitlement_enabled('result_analysis'):
+        abort(404)
     if provider not in PROVIDERS:
         abort(404)
     config = None
@@ -4096,6 +4112,7 @@ def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None)
 @admin_required
 def bot_integrations():
     form = BotIntegrationsForm()
+    discord_in_plan = entitlement_enabled('discord_bot')
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     existing_discord_bot_token = str(configs.get('discord_bot_token') or '').strip()
     existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
@@ -4119,12 +4136,12 @@ def bot_integrations():
             'telegram_digest_enabled': 'true' if form.telegram_digest_enabled.data else 'false',
             'telegram_digest_window_minutes': str(int(form.telegram_digest_window_minutes.data or 10)),
             'service_base_url': form.service_base_url.data,
-            'discord_bot_token': submitted_discord_bot_token,
-            'discord_application_id': form.discord_application_id.data,
-            'discord_guild_id': form.discord_guild_id.data,
-            'discord_status_channel_id': form.discord_status_channel_id.data,
-            'discord_webhook_url': form.discord_webhook_url.data,
-            'discord_webhook_username': form.discord_webhook_username.data,
+            'discord_bot_token': submitted_discord_bot_token if discord_in_plan else existing_discord_bot_token,
+            'discord_application_id': form.discord_application_id.data if discord_in_plan else configs.get('discord_application_id'),
+            'discord_guild_id': form.discord_guild_id.data if discord_in_plan else configs.get('discord_guild_id'),
+            'discord_status_channel_id': form.discord_status_channel_id.data if discord_in_plan else configs.get('discord_status_channel_id'),
+            'discord_webhook_url': form.discord_webhook_url.data if discord_in_plan else configs.get('discord_webhook_url'),
+            'discord_webhook_username': form.discord_webhook_username.data if discord_in_plan else configs.get('discord_webhook_username'),
             'root_webhook_url': form.root_webhook_url.data,
             'root_webhook_name': form.root_webhook_name.data,
         })
@@ -4175,6 +4192,7 @@ def bot_integrations():
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
             'root': bool(configs.get('root_webhook_url')),
         },
+        discord_in_plan=discord_in_plan,
     )
 
 
@@ -4182,6 +4200,8 @@ def bot_integrations():
 @login_required
 @admin_required
 def synchronize_discord_commands():
+    if not entitlement_enabled('discord_bot'):
+        abort(404)
     bot_token = NotificationConfig.query.filter_by(key='discord_bot_token').first()
     if not bot_token or not str(bot_token.value or '').strip():
         flash('Configure and save a Discord bot token before synchronizing commands.', 'danger')

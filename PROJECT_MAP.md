@@ -11,6 +11,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
 - **Deployment entry points:** `run.py` and `Procfile`, including a dedicated result-analysis worker process.
 - **Completed readiness probe:** Added an unauthenticated GET-only readiness probe at `/health/ready`, returning static JSON and covered by `tests.test_security`.
+- **Completed plan-aware administration UI:** Core managed plans hide the Result Analysis settings action and reject direct access, keep the Discord card visible but read-only with an explicit plan notice, reject Discord command synchronization, show provisioned plan status and entitlements on Version, and place user/admin documentation links only in the footer.
 
 ## Architecture and Ownership
 
@@ -175,6 +176,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Result-analysis diagnostics retain only bounded status/code/request-ID context, redact credential patterns, exclude report content and raw responses, and rely on template auto-escaping.
 - User-controlled Telegram/Discord text must not create markup, commands, callbacks, or broad mentions.
 - The readiness probe exposes only static process health and does not query tenant data, credentials, or external services.
+- Paid feature settings are gated both in the rendered UI and at route boundaries; unavailable Discord form submissions preserve existing Discord values.
 
 ## Reliability Invariants
 

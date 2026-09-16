@@ -74,16 +74,6 @@
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('main.login') }}">Login</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('main.register') }}">Register</a></li>
                     {% endif %}
-                    {% if managed_user_docs_url and (current_user.is_authenticated or managed_mode) %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ managed_user_docs_url }}" target="_blank" rel="noopener">User Docs</a>
-                        </li>
-                    {% endif %}
-                    {% if managed_admin_docs_url and current_user.is_authenticated and current_user.is_admin %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ managed_admin_docs_url }}" target="_blank" rel="noopener">Admin Docs</a>
-                        </li>
-                    {% endif %}
                 </ul>
             </div>
         </div>
@@ -113,7 +103,11 @@
             <a class="text-muted" href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a>
             {% if managed_user_docs_url %}
             <span aria-hidden="true"> • </span>
-            <a class="text-muted" href="{{ managed_user_docs_url }}" target="_blank" rel="noopener">Docs</a>
+            <a class="text-muted" href="{{ managed_user_docs_url }}" target="_blank" rel="noopener">User Docs</a>
+            {% endif %}
+            {% if managed_admin_docs_url and current_user.is_authenticated and current_user.is_admin %}
+            <span aria-hidden="true"> • </span>
+            <a class="text-muted" href="{{ managed_admin_docs_url }}" target="_blank" rel="noopener">Admin Docs</a>
             {% endif %}
             <span aria-hidden="true"> • </span>
             <a class="text-muted" href="{{ url_for('main.version_info') }}">Version {{ app_version }}</a>

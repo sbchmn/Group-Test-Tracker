@@ -530,7 +530,8 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("https://discord.com/api/v10/channels/999888777/messages", request.full_url)
 
     def test_discord_bot_lifecycle_helpers_push_application_context(self):
-        from app import discord_bot
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
 
         def assert_context(value, **kwargs):
             self.assertIs(current_app._get_current_object(), self.app)

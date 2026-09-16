@@ -12,6 +12,12 @@ from . import db
 import json
 from urllib.parse import quote
 
+# Immutable system-account marker for the control plane's reserved support identity.
+# Authorization is tied only to this key, never to username/email text matching.
+RESERVED_SUPPORT_SYSTEM_KEY = 'control_plane_support'
+RESERVED_SUPPORT_USERNAME = 'gtmsupport'
+RESERVED_SUPPORT_EMAIL = 'support@grouptest.online'
+
 
 group_test_tags = db.Table(
     'group_test_tags',
@@ -54,6 +60,10 @@ class User(UserMixin, db.Model):
     digest_daily_hour_utc = db.Column(db.Integer, default=9, nullable=False)
     digest_last_sent_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Non-null only for the one reserved, system-managed control-plane support account.
+    system_account_key = db.Column(db.String(64), unique=True, nullable=True, index=True)
+    # Incremented to force-invalidate every existing session (e.g. support disable/rotate).
+    session_epoch = db.Column(db.Integer, default=0, nullable=False)
     
     # Relationships
     participations = db.relationship(
@@ -95,7 +105,16 @@ class User(UserMixin, db.Model):
     def check_password(self, password: str) -> bool:
         from werkzeug.security import check_password_hash
         return check_password_hash(self.password_hash, password)
-    
+
+    def get_id(self):
+        # Embed the session epoch so rotating it (e.g. support disable) instantly
+        # invalidates every existing Flask-Login session, not just the password hash.
+        return f'{self.id}:{self.session_epoch}'
+
+    @property
+    def is_reserved_support_account(self):
+        return self.system_account_key == RESERVED_SUPPORT_SYSTEM_KEY
+
     def __repr__(self):
         return f'<User {self.username}>'
 

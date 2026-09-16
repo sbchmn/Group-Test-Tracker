@@ -5,6 +5,7 @@ from datetime import datetime
 
 from . import db
 from .models import NotificationConfig, PublicResult, ResultAnalysisRun, Tag
+from .saas import managed_public_url
 from .notifications import (
     delete_telegram_message,
     download_telegram_photo,
@@ -28,15 +29,15 @@ def _config(key, default=''):
 
 
 def _base_url():
-    return str(_config('service_base_url')).strip().rstrip('/')
+    return managed_public_url() or str(_config('service_base_url')).strip().rstrip('/')
 
 
 def _state(result):
     value = deepcopy(result.review_state_json or {})
     value.setdefault('selected', {})
     value.setdefault('values', {})
-    value.setdefault('tag_ids', [tag.id for tag in result.tags])
-    value.setdefault('draft_tag_ids', list(value['tag_ids']))
+    saved_tag_ids = value.get('tag_ids', [tag.id for tag in result.tags])
+    value.setdefault('draft_tag_ids', list(saved_tag_ids))
     value.setdefault('draft_results_link', result.results_link)
     value.setdefault('draft_results_image_key', result.results_image_key)
     value.setdefault('messages', [])
@@ -62,7 +63,7 @@ def _result_url(result):
 def _keyboard(run, result):
     state = _state(result)
     selected = state['selected']
-    selected_tag_ids = {int(tag_id) for tag_id in state.get('tag_ids', []) if str(tag_id).isdigit()}
+    selected_tag_ids = {int(tag_id) for tag_id in state.get('tag_ids', [tag.id for tag in result.tags]) if str(tag_id).isdigit()}
     rows = []
     for finding in run.findings:
         actionable = finding.proposed_action in {'fill', 'create'}
@@ -134,7 +135,8 @@ def _body(run, result):
     if state.get('draft_results_link') or result.results_link:
         source_parts.append('submitted link')
     source = ' + '.join(source_parts) or 'unknown'
-    selected_tags = [tag.name for tag in Tag.query.filter(Tag.id.in_(state.get('tag_ids', []))).order_by(Tag.name).all()] if state.get('tag_ids') else []
+    saved_tag_ids = state.get('tag_ids', [tag.id for tag in result.tags])
+    selected_tags = [tag.name for tag in Tag.query.filter(Tag.id.in_(saved_tag_ids)).order_by(Tag.name).all()] if saved_tag_ids else []
     lines = [f'COA Review #{result.id}', '', f'Result name: {title}', f'Source: {source}', f'Tags: {", ".join(selected_tags) if selected_tags else "None"}', f'Analysis run: #{run.id}', '', 'Findings:']
     selected = state['selected']
     for finding in run.findings:

@@ -13,7 +13,7 @@ from flask import Blueprint, jsonify, request
 from werkzeug.security import generate_password_hash
 
 from . import control_plane, csrf, db
-from .models import ControlPlaneOperationReceipt, User
+from .models import RESERVED_SUPPORT_SYSTEM_KEY, ControlPlaneOperationReceipt, User
 
 control_plane_bp = Blueprint('control_plane', __name__)
 
@@ -99,14 +99,20 @@ def control_plane_bootstrap():
         admin_user.is_admin = True
         admin_user.is_active = True
 
-    support_user = User.query.filter_by(username=support_username).first()
+    support_user = User.query.filter_by(system_account_key=RESERVED_SUPPORT_SYSTEM_KEY).first()
     if support_user is None:
+        # Never adopt/overwrite a conflicting ordinary account with this normalized
+        # identity; only a record carrying the reserved system key is authoritative.
+        if User.query.filter_by(username=support_username).first() is not None:
+            db.session.rollback()
+            return jsonify({'error': 'reserved support identity conflict'}), 409
         created = True
         # Support access stays disabled until the /support endpoint enables it.
         db.session.add(User(
             username=support_username, email=support_email,
             password_hash=generate_password_hash(secrets.token_urlsafe(32), method='scrypt'),
             is_admin=True, is_active=False,
+            system_account_key=RESERVED_SUPPORT_SYSTEM_KEY,
         ))
 
     response_body = {'acknowledged': True}
@@ -143,22 +149,30 @@ def control_plane_support():
         db.session.commit()
         return cached
 
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(system_account_key=RESERVED_SUPPORT_SYSTEM_KEY).first()
     if user is None:
+        if User.query.filter_by(username=username).first() is not None:
+            db.session.rollback()
+            return jsonify({'error': 'reserved support identity conflict'}), 409
         user = User(
             username=username, email=email,
             password_hash=generate_password_hash(secrets.token_urlsafe(32), method='scrypt'),
             is_admin=True, is_active=False,
+            system_account_key=RESERVED_SUPPORT_SYSTEM_KEY,
         )
         db.session.add(user)
         db.session.flush()
 
     if action in {'rotate', 'enable'}:
         user.password_hash = str(password_hash)
+        # A credential change must invalidate any existing support session immediately;
+        # replacing the password hash alone is not sufficient session revocation.
+        user.session_epoch += 1
     if action == 'enable':
         user.is_active = True
     elif action == 'disable':
         user.is_active = False
+        user.session_epoch += 1
         # Rotate the hash on disable so a leaked prior credential cannot be replayed.
         user.password_hash = generate_password_hash(secrets.token_urlsafe(32), method='scrypt')
 

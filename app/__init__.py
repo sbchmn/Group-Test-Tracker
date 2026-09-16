@@ -14,6 +14,14 @@ from flask_wtf import CSRFProtect
 from flask_migrate import Migrate
 from dotenv import load_dotenv
 from .version import APP_NAME, APP_VERSION
+from .saas import (
+    managed_admin_docs_url,
+    managed_mode_enabled,
+    managed_public_url,
+    managed_user_docs_url,
+    report_instance_event,
+    subscription_status,
+)
 
 # Extensions (initialized in create_app to support factory)
 db = SQLAlchemy()
@@ -47,6 +55,11 @@ def create_app(config_overrides=None):
             'legal_mailing_address': app.config.get('LEGAL_MAILING_ADDRESS'),
             'legal_governing_law': app.config.get('LEGAL_GOVERNING_LAW'),
             'legal_effective_date': app.config.get('LEGAL_EFFECTIVE_DATE') or 'September 12, 2026',
+            'managed_mode': managed_mode_enabled(),
+            'managed_public_url': managed_public_url(),
+            'managed_user_docs_url': managed_user_docs_url(),
+            'managed_admin_docs_url': managed_admin_docs_url(),
+            'subscription_status': subscription_status(),
         }
     
     # === Configuration ===
@@ -126,7 +139,18 @@ def create_app(config_overrides=None):
     @login_manager.user_loader
     def load_user(user_id):
         from .models import User
-        return User.query.get(int(user_id))
+        # get_id() embeds the session epoch as "<id>:<epoch>"; a mismatch (e.g. after a
+        # support-account disable/rotate) must invalidate the session immediately.
+        try:
+            raw_id, _, raw_epoch = str(user_id).partition(':')
+            user = User.query.get(int(raw_id))
+        except (TypeError, ValueError):
+            return None
+        if user is None:
+            return None
+        if raw_epoch and str(user.session_epoch) != raw_epoch:
+            return None
+        return user
     
     # === Register Blueprints ===
     from .routes import main_bp
@@ -227,6 +251,10 @@ def create_app(config_overrides=None):
         from .result_analysis.jobs import process_next_run
 
         with app.app_context():
+            report_instance_event('status', {
+                'component': 'result-analysis-worker',
+                'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+            })
             click.echo(f'Result analysis worker started; polling every {poll_seconds} seconds.')
             while True:
                 run = None
@@ -241,7 +269,31 @@ def create_app(config_overrides=None):
                     return
                 if not run:
                     time.sleep(poll_seconds)
-    
+
+    # Alias matching the SaaS control plane's provisioned run_command exactly.
+    app.cli.add_command(result_analysis_worker, name='run-result-analysis-worker')
+
+    @app.cli.command('report-control-plane-status')
+    def report_control_plane_status():
+        """Report the current managed tenant status to the control plane."""
+        from .version import APP_VERSION
+        result = report_instance_event('status', {
+            'app_version': APP_VERSION,
+            'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+        })
+        click.echo('Control-plane status reported.' if result is not False else 'Control-plane status report failed.')
+
+    @app.cli.command('run-discord-bot')
+    def run_discord_bot():
+        """Start the Discord gateway worker (control-plane managed deployments)."""
+        from . import discord_bot
+
+        report_instance_event('status', {
+            'component': 'discord-bot-worker',
+            'contract_version': os.environ.get('GTT_CONTRACT_VERSION', '1').strip() or '1',
+        })
+        discord_bot.main()
+
     # === Shell context for easy debugging ===
     @app.shell_context_processor
     def make_shell_context():

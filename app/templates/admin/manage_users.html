@@ -9,6 +9,16 @@
     <a href="{{ url_for('main.create_user') }}" class="btn btn-success">
         <i class="bi bi-person-plus"></i> Add New User
     </a>
+    {% if managed_mode %}
+    <form method="POST" action="{{ url_for('main.request_managed_support') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-primary ms-2">Request Support Access</button>
+    </form>
+    <form method="POST" action="{{ url_for('main.emergency_disable_managed_support') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger ms-2">Emergency Disable Support</button>
+    </form>
+    {% endif %}
     <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary ms-2">Back to Dashboard</a>
 </div>
 
@@ -64,6 +74,9 @@
                     </td>
                     <td class="small text-muted">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>
                     <td class="text-end">
+                        {% if user.is_reserved_support_account %}
+                            <span class="badge bg-dark">Managed support account</span>
+                        {% else %}
                         <a href="{{ url_for('main.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
                         <form method="POST" action="{{ url_for('main.send_password_reset_admin', user_id=user.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -75,6 +88,7 @@
                                 {{ 'Deactivate' if user.is_active else 'Activate' }}
                             </button>
                         </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

@@ -15,6 +15,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import create_app, db
 from app.models import User
@@ -64,6 +65,11 @@ class ControlPlaneTests(unittest.TestCase):
         self._env_keys = [
             'GTT_DEPLOYMENT_MODE', 'GTT_TENANT_ID', 'GTT_CONTRACT_VERSION',
             'GTT_CP_TO_INSTANCE_KEY_ID', 'GTT_CP_TO_INSTANCE_SECRET',
+            'GTT_CP_TO_INSTANCE_KEY_ID_PREVIOUS', 'GTT_CP_TO_INSTANCE_SECRET_PREVIOUS',
+            'GTT_ENTITLEMENTS', 'GTT_ENTITLEMENT_REVISION', 'GTT_PUBLIC_URL',
+            'GTT_USER_DOCUMENTATION_URL', 'GTT_ADMIN_DOCUMENTATION_URL',
+            'GTT_SUBSCRIPTION_STATUS', 'GTT_CONTROL_PLANE_URL',
+            'GTT_INSTANCE_TO_CP_KEY_ID', 'GTT_INSTANCE_TO_CP_SECRET',
         ]
         self._env_backup = {key: os.environ.get(key) for key in self._env_keys}
         os.environ['GTT_DEPLOYMENT_MODE'] = 'managed'
@@ -191,6 +197,89 @@ class ControlPlaneTests(unittest.TestCase):
         db.session.refresh(support)
         self.assertFalse(support.is_active)
         self.assertNotEqual(support.password_hash, 'scrypt:32768:8:1$salt$hash2')
+
+    def test_managed_mode_parses_entitlements_and_documentation_urls(self):
+        from app.saas import (
+            entitlement_enabled,
+            entitlement_revision,
+            managed_admin_docs_url,
+            managed_mode_enabled,
+            managed_public_url,
+            managed_user_docs_url,
+            subscription_status,
+        )
+
+        os.environ['GTT_DEPLOYMENT_MODE'] = 'managed'
+        os.environ['GTT_ENTITLEMENTS'] = 'discord_bot,result_analysis'
+        os.environ['GTT_ENTITLEMENT_REVISION'] = '7'
+        os.environ['GTT_PUBLIC_URL'] = 'https://example.com'
+        os.environ['GTT_USER_DOCUMENTATION_URL'] = 'https://docs.example.com/user'
+        os.environ['GTT_ADMIN_DOCUMENTATION_URL'] = 'https://docs.example.com/admin'
+        os.environ['GTT_SUBSCRIPTION_STATUS'] = 'active'
+
+        self.assertTrue(managed_mode_enabled())
+        self.assertEqual(entitlement_revision(), 7)
+        self.assertTrue(entitlement_enabled('discord_bot'))
+        self.assertTrue(entitlement_enabled('result_analysis'))
+        self.assertEqual(managed_public_url(), 'https://example.com')
+        self.assertEqual(managed_user_docs_url(), 'https://docs.example.com/user')
+        self.assertEqual(managed_admin_docs_url(), 'https://docs.example.com/admin')
+        self.assertEqual(subscription_status(), 'active')
+
+    def test_suspended_subscription_sets_readonly_recovery_surface(self):
+        from app.saas import (
+            subscription_access_allowed,
+            subscription_is_readonly,
+        )
+
+        os.environ['GTT_DEPLOYMENT_MODE'] = 'managed'
+        os.environ['GTT_SUBSCRIPTION_STATUS'] = 'suspended'
+        os.environ['GTT_ENTITLEMENTS'] = 'discord_bot,result_analysis'
+
+        self.assertTrue(subscription_is_readonly())
+        self.assertTrue(subscription_access_allowed())
+        self.assertFalse(subscription_access_allowed(feature='discord_bot'))
+
+    def test_instance_event_uses_control_plane_canonical_signature(self):
+        from app.saas import _instance_event_signature
+
+        os.environ['GTT_ENTITLEMENT_REVISION'] = '12'
+        headers, body = _instance_event_signature(
+            'instance-secret',
+            key_id='instance-key-1',
+            tenant=self.tenant,
+            operation_id='instance:status:1',
+            payload={'event': 'status', 'payload': {'component': 'worker'}},
+        )
+
+        digest = hashlib.sha256(body).hexdigest()
+        self.assertEqual(headers['X-GTT-Tenant'], self.tenant)
+        self.assertEqual(headers['X-GTT-Revision'], '12')
+        self.assertEqual(headers['X-GTT-Body-SHA256'], digest)
+        canonical = '\n'.join([
+            'instance-key-1', self.tenant, '1', 'POST',
+            f'/internal/tenants/{self.tenant}/events',
+            headers['X-GTT-Timestamp'], headers['X-GTT-Nonce'],
+            'instance:status:1', '12', digest,
+        ]).encode('utf-8')
+        expected = hmac.new('instance-secret'.encode('utf-8'), canonical, hashlib.sha256).hexdigest()
+        self.assertTrue(hmac.compare_digest(headers['X-GTT-Signature'], expected))
+
+    def test_managed_urls_and_docs_are_ignored_outside_managed_mode(self):
+        from app.saas import managed_admin_docs_url, managed_public_url, managed_user_docs_url
+
+        os.environ['GTT_DEPLOYMENT_MODE'] = 'standalone'
+        os.environ['GTT_PUBLIC_URL'] = 'https://managed.example'
+        os.environ['GTT_USER_DOCUMENTATION_URL'] = 'https://docs.example/user'
+        os.environ['GTT_ADMIN_DOCUMENTATION_URL'] = 'https://docs.example/admin'
+
+        self.assertEqual(managed_public_url(), '')
+        self.assertEqual(managed_user_docs_url(), '')
+        self.assertEqual(managed_admin_docs_url(), '')
+
+
+if __name__ == '__main__':
+    unittest.main()
 
 
 if __name__ == '__main__':

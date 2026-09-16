@@ -2,6 +2,22 @@
 
 > Archived from the original `PROJECT_MAP.md` on 2026-09-10. This file preserves the chronological engineering record. For the maintained current-state map, see [`../PROJECT_MAP.md`](../PROJECT_MAP.md).
 
+## 2026-09-16 - Managed SaaS Control-Plane Parity
+
+Implemented the GTM side of the managed control-plane contract: signed bootstrap/support endpoints with replay and idempotency protection, reserved support-account immutability with session epochs, entitlement and subscription gating, managed documentation/public URL handling, signed instance-to-control-plane events, worker startup status reporting, support request/emergency-disable actions, and sanitized recovery export behavior.
+
+Added SaaS regression coverage for outbound canonical signing and managed URL isolation. Fixed Telegram review tag staging so unsaved selections remain draft state, and fixed the Discord lifecycle test to provide the application secret required by module-level bot initialization.
+
+Validation completed on 2026-09-16:
+
+```text
+tests.test_control_plane: 11 tests passed in 9.980s
+tests.test_security: 70 tests passed in 65.624s
+Full unittest suite: 188 tests passed in 175.470s
+```
+
+The suite emits existing deprecation warnings. Production migration execution, live control-plane event delivery, real bot deployment checks, and the broader GTM roadmap remain operational follow-up rather than test failures.
+
 ## 2026-09-11 - Telegram COA Review and Public Result Detail Improvements
 
 ### Scope

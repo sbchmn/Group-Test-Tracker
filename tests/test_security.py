@@ -53,7 +53,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Application Version", body)
-        self.assertIn("Version 3.2", body)
+        self.assertIn("Version 4.0", body)
         self.assertIn("href=\"/version\"", body)
 
     def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):

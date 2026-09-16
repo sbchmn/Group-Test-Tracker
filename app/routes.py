@@ -53,7 +53,17 @@ from .models import (
     PaymentOption,
     ResultAnalysisRun,
 )
-from .export import generate_test_export
+from .system_accounts import is_reserved_identity
+from .saas import (
+    entitlement_enabled,
+    managed_admin_docs_url,
+    managed_user_docs_url,
+    managed_public_url,
+    report_instance_event,
+    subscription_access_allowed,
+    subscription_is_readonly,
+)
+from .export import generate_sanitized_test_export, generate_test_export
 from .notifications import (
     append_notification_log,
     read_notification_log,
@@ -92,6 +102,29 @@ from .result_analysis.service import AnalysisConflict, apply_analysis_run, enque
 from .result_analysis.settings import ENV_KEYS, PROVIDERS, get_analysis_settings, provider_config
 
 main_bp = Blueprint('main', __name__)
+
+
+@main_bp.before_request
+def enforce_managed_tenant_contract():
+    if request.method in {'GET', 'HEAD', 'OPTIONS'}:
+        return None
+
+    recovery_actions = {
+        'main.logout',
+        'main.login',
+        'main.password_reset',
+        'main.request_managed_support',
+        'main.emergency_disable_managed_support',
+    }
+    if subscription_is_readonly() and request.endpoint not in recovery_actions:
+        flash('This tenant is in read-only recovery mode. Write actions are disabled until the subscription is restored.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    if not subscription_access_allowed() and request.endpoint not in recovery_actions:
+        flash('This tenant is not allowed to perform write actions right now.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    return None
 
 
 @main_bp.route('/version')
@@ -629,6 +662,9 @@ def _build_telegram_deep_link(token_value):
 
 
 def _resolve_telegram_webhook_url(config_map):
+    managed_url = managed_public_url()
+    if managed_url:
+        return f"{managed_url}{url_for('main.telegram_webhook')}"
     explicit_url = str(config_map.get('telegram_webhook_url') or '').strip()
     if explicit_url:
         if explicit_url.endswith('/telegram/webhook'):
@@ -642,6 +678,9 @@ def _resolve_telegram_webhook_url(config_map):
 
 
 def _resolve_service_base_url(config_map):
+    managed_url = managed_public_url()
+    if managed_url:
+        return managed_url
     service_base = str(config_map.get('service_base_url') or '').strip()
     if service_base:
         return service_base.rstrip('/')
@@ -1202,6 +1241,9 @@ def register():
         return redirect(url_for('main.dashboard'))
     form = RegisterForm()
     if form.validate_on_submit():
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'warning')
+            return render_template('register.html', form=form)
         if User.query.filter_by(username=form.username.data).first():
             flash('Username already taken.', 'warning')
             return render_template('register.html', form=form)
@@ -1277,6 +1319,9 @@ def password_reset():
     form = PasswordResetForm()
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
+        if user is not None and user.is_reserved_support_account:
+            flash('No account matched that username.', 'warning')
+            return redirect(url_for('main.login'))
         if user:
             selected_channel = form.notification_channel.data or user.notification_channel or 'email'
             if selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip():
@@ -1307,6 +1352,9 @@ def password_reset():
 @admin_required
 def send_password_reset_admin(user_id):
     user = User.query.get_or_404(user_id)
+    if user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.manage_users'))
     new_password = os.urandom(6).hex()
     user.set_password(new_password)
     sent = send_password_reset(user, new_password)
@@ -1324,6 +1372,9 @@ def send_password_reset_admin(user_id):
 def profile():
     """Allow users to update their own profile info and password."""
     form = ProfileForm(obj=current_user)
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
     if form.validate_on_submit():
         existing_username = User.query.filter(User.username == form.username.data, User.id != current_user.id).first()
         existing_email = User.query.filter(User.email == form.email.data, User.id != current_user.id).first()
@@ -1388,6 +1439,9 @@ def profile():
 @main_bp.route('/profile/telegram-link-token', methods=['POST'])
 @login_required
 def create_telegram_link_token():
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
     token = _issue_telegram_link_token(current_user)
     db.session.commit()
 
@@ -1403,6 +1457,9 @@ def create_telegram_link_token():
 @main_bp.route('/profile/discord-link-token', methods=['POST'])
 @login_required
 def create_discord_link_token():
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
     token = _issue_discord_link_token(current_user)
     db.session.commit()
 
@@ -4847,6 +4904,44 @@ def manage_users():
     return render_template('admin/manage_users.html', users=users)
 
 
+@main_bp.route('/admin/managed-support/request', methods=['POST'])
+@login_required
+@admin_required
+def request_managed_support():
+    """Ask the private control plane to make temporary support access available."""
+    result = report_instance_event('support_access_requested', {
+        'requested_by_user_id': current_user.id,
+        'requested_by_username': current_user.username,
+    })
+    if result is False:
+        flash('Support access request could not be delivered. Contact the service operator.', 'danger')
+    else:
+        flash('Support access request sent to the service operator.', 'success')
+    return redirect(url_for('main.manage_users'))
+
+
+@main_bp.route('/admin/managed-support/emergency-disable', methods=['POST'])
+@login_required
+@admin_required
+def emergency_disable_managed_support():
+    """Immediately disable the reserved support account and notify the control plane."""
+    support_user = User.query.filter_by(system_account_key='control_plane_support').first()
+    if support_user is not None:
+        support_user.is_active = False
+        support_user.session_epoch += 1
+        db.session.commit()
+    result = report_instance_event('support_emergency_disabled', {
+        'requested_by_user_id': current_user.id,
+        'requested_by_username': current_user.username,
+        'support_account_disabled': support_user is not None,
+    })
+    if result is False:
+        flash('Support access was disabled locally, but the control plane notification failed.', 'warning')
+    else:
+        flash('Support access was disabled and the control plane was notified.', 'success')
+    return redirect(url_for('main.manage_users'))
+
+
 @main_bp.route('/admin/users/new', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -4854,6 +4949,9 @@ def create_user():
     """Admin creates a new user."""
     form = UserForm()
     if form.validate_on_submit():
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'danger')
+            return render_template('admin/create_user.html', form=form)
         if User.query.filter_by(username=form.username.data).first():
             flash('Username already exists.', 'danger')
             return render_template('admin/create_user.html', form=form)
@@ -4896,6 +4994,9 @@ def create_user():
 def edit_user(user_id):
     """Admin edits an existing user."""
     user = User.query.get_or_404(user_id)
+    if user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.manage_users'))
     form = UserForm(obj=user)
     form.password.validators = [Optional(), Length(min=6)]
 
@@ -4939,6 +5040,9 @@ def edit_user(user_id):
 def toggle_user_active(user_id):
     """Quick toggle active/inactive."""
     user = User.query.get_or_404(user_id)
+    if user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.manage_users'))
     user.is_active = not user.is_active
     db.session.commit()
     status = "activated" if user.is_active else "deactivated"
@@ -5159,4 +5263,21 @@ def export_test(test_id):
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
         download_name=filename
+    )
+
+
+@main_bp.route('/test/<int:test_id>/recovery-export')
+@login_required
+def recovery_export_test(test_id):
+    """Export only non-personal group-test data for suspended managed tenants."""
+    if not subscription_is_readonly() or not current_user.is_admin:
+        abort(403)
+    test = GroupTest.query.get_or_404(test_id)
+    output = generate_sanitized_test_export(test)
+    filename = f"group_test_{test.id}_recovery_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename,
     )

@@ -5,6 +5,7 @@ from flask import current_app
 from sqlalchemy import or_
 
 from .. import db
+from ..saas import entitlement_enabled
 from ..models import ResultAnalysisRun
 from .providers import build_provider
 from .providers.base import ProviderError
@@ -16,6 +17,8 @@ from .types import AnalysisContext
 
 
 def claim_next_run():
+    if not entitlement_enabled('result_analysis'):
+        return None
     now = datetime.utcnow()
     candidate = ResultAnalysisRun.query.filter(
         or_(
@@ -77,6 +80,8 @@ def _fail_run(run, code, message, transient=False):
 
 
 def process_run(run):
+    if not entitlement_enabled('result_analysis'):
+        return None
     try:
         config = provider_config(run.provider)
         if config['model'] != run.provider_model:

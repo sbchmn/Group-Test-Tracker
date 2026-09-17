@@ -13,6 +13,16 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Completed readiness probe:** Added an unauthenticated GET-only readiness probe at `/health/ready`, returning static JSON and covered by `tests.test_security`.
 - **Completed plan-aware administration UI:** Core managed plans hide the Result Analysis settings action and reject direct access, keep the Discord card visible but read-only with an explicit plan notice, reject Discord command synchronization, show provisioned plan status and entitlements on Version, and place user/admin documentation links only in the footer.
 - **Current managed-contract update:** Instance-to-Control-Plane events now use the top-level `type` contract. Reserved support state persists credential version and expiry, expires fail closed in login/session loading, and support requests require a bounded reason plus a generated consent reference. Status events include application, schema, contract, entitlement, component, readiness, and bounded resource fields.
+- **Current edit-test fix:** Group-test editing no longer executes a copied Public Results validation branch that referenced undefined `result_link` and `result` variables. Open tests can be edited without a results link or file, covered by a focused security regression.
+
+## Current Implementation Map — Group-Test Edit Regression
+
+- **Project map before changes:** `POST /admin/edit-test/<id>` raised `NameError` before saving because the handler referenced Public Results locals that are not defined in the group-test route.
+- **Applied edit:** Removed the misplaced Public Results validation/render branch and normalized the group-test results link directly from `GroupTestForm`; existing group-test upload replacement, removal, and closed-status cleanup remain unchanged.
+- **Security/reliability/optimization review:** The route remains protected by login/admin authorization and CSRF; no new external I/O or unbounded query was introduced. Open tests retain optional results behavior consistent with creation.
+- **Validation:** The focused regression passed; the full `tests.test_security` suite completed without reported failures. Existing SQLAlchemy and UTC deprecation warnings remain.
+- **Remaining risk:** Closed-test result-link/file policy is unchanged and should be covered separately if product requirements later require at least one result source.
+- **Review hardening:** Unknown managed subscription statuses now fail closed, and outbound event payloads cannot override the authoritative `type`; both behaviors have focused regression coverage. Full GTM regression subsequently passed 193 tests in 182.746 seconds.
 
 ## Current Implementation Map — Managed Contract Completion
 

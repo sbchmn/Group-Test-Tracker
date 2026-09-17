@@ -14,6 +14,9 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Completed plan-aware administration UI:** Core managed plans hide the Result Analysis settings action and reject direct access, keep the Discord card visible but read-only with an explicit plan notice, reject Discord command synchronization, show provisioned plan status and entitlements on Version, and place user/admin documentation links only in the footer.
 - **Current managed-contract update:** Instance-to-Control-Plane events now use the top-level `type` contract. Reserved support state persists credential version and expiry, expires fail closed in login/session loading, and support requests require a bounded reason plus a generated consent reference. Status events include application, schema, contract, entitlement, component, readiness, and bounded resource fields.
 - **Current edit-test fix:** Group-test editing no longer executes a copied Public Results validation branch that referenced undefined `result_link` and `result` variables. Open tests can be edited without a results link or file, covered by a focused security regression.
+- **Migration execution check:** `flask --app run.py db upgrade` was verified against a fresh temporary SQLite database; all 22 revisions applied successfully through head `b3c4d5e6f7a8`.
+- **Web security hardening:** Added Flask-Limiter controls for login and password-reset POSTs, same-origin validation for the login `next` parameter, uniform password-reset responses, baseline security headers, and DOM-property assignment for dynamic admin form values. Production multi-worker deployments should set `RATELIMIT_STORAGE_URI` to a shared backend such as Redis.
+- **License and attribution status:** The repository now uses a proprietary commercial license naming Solomon N. Bachman as copyright holder. Deployment, operation, copying, modification, and redistribution require prior written commercial authorization, subject to Third-Party Component licenses. The Version page shows the license and direct dependency attribution inventory; no repositories are bundled. PyMuPDF requires an explicit AGPL-or-commercial licensing decision before redistribution.
 
 ## Current Implementation Map — Group-Test Edit Regression
 
@@ -140,7 +143,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
    - Implemented: `GTT_PUBLIC_URL` takes precedence over the legacy per-tenant `service_base_url` for managed Telegram, Discord, review, notification, webhook, and service-link generation; managed URLs/docs are ignored outside managed mode.
    - Implemented and tested: outbound canonical signing fields and standalone managed-URL isolation are covered in `tests/test_control_plane.py` (`11 tests passed on 2026-09-16`).
    - Validated: the full repository suite passed `188 tests in 175.470s` on 2026-09-16 after adding the required Discord import test setup; remaining output is limited to deprecation warnings.
-   - Remaining contract-adjacent work: production migration execution, real control-plane event delivery, real Discord/Telegram deployment checks, and the broader GTM roadmap items listed below.
+   - Remaining contract-adjacent work: production migration execution against the deployed database, real control-plane event delivery, real Discord/Telegram deployment checks, and the broader GTM roadmap items listed below.
 
 2. **Automated result analysis — implemented; deployment evaluation pending**
    - The durable worker, provider adapters, bounded source acquisition, administrator review/apply UI, automatic new-upload queueing, migration, tests, and operating documentation are implemented.
@@ -345,6 +348,9 @@ Remaining Phase 0 work is operational configuration (DigitalOcean IDs/scopes, DN
 - Result-analysis diagnostics retain only bounded status/code/request-ID context, redact credential patterns, exclude report content and raw responses, and rely on template auto-escaping.
 - User-controlled Telegram/Discord text must not create markup, commands, callbacks, or broad mentions.
 - The readiness probe exposes only static process health and does not query tenant data, credentials, or external services.
+- Web login and password-reset POSTs are throttled by Flask-Limiter; production deployments must use shared rate-limit storage when requests can reach multiple workers.
+- Login redirects accept only same-origin relative paths, and password-reset responses do not disclose whether an account exists.
+- User-controlled values in dynamic admin form rows are assigned through DOM properties rather than interpolated into HTML strings.
 - Paid feature settings are gated both in the rendered UI and at route boundaries; unavailable Discord form submissions preserve existing Discord values.
 
 ## Reliability Invariants

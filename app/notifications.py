@@ -14,6 +14,7 @@ from flask import current_app
 from . import db
 from .models import NotificationConfig, NotificationTemplate, User, UserDigestEvent
 from .bot_dispatch import post_json
+from .saas import managed_public_url
 
 
 def _get_config(key, default=None):
@@ -804,7 +805,7 @@ def send_password_reset(user, new_password):
 
 
 def send_group_test_notification(test, user, template, amount_owed=None):
-    base_url = str(_get_config("service_base_url") or "").strip()
+    base_url = managed_public_url() or str(_get_config("service_base_url") or "").strip()
     if not base_url:
         base_url = current_app.config.get("SERVER_NAME") or "http://localhost"
     if not base_url.startswith(("http://", "https://")):

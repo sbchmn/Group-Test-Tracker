@@ -12,6 +12,12 @@ from . import db
 import json
 from urllib.parse import quote
 
+# Immutable system-account marker for the control plane's reserved support identity.
+# Authorization is tied only to this key, never to username/email text matching.
+RESERVED_SUPPORT_SYSTEM_KEY = 'control_plane_support'
+RESERVED_SUPPORT_USERNAME = 'gtmsupport'
+RESERVED_SUPPORT_EMAIL = 'support@grouptest.online'
+
 
 group_test_tags = db.Table(
     'group_test_tags',
@@ -54,6 +60,14 @@ class User(UserMixin, db.Model):
     digest_daily_hour_utc = db.Column(db.Integer, default=9, nullable=False)
     digest_last_sent_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Non-null only for the one reserved, system-managed control-plane support account.
+    system_account_key = db.Column(db.String(64), unique=True, nullable=True, index=True)
+    # Incremented to force-invalidate every existing session (e.g. support disable/rotate).
+    session_epoch = db.Column(db.Integer, default=0, nullable=False)
+    # Reserved support-account state is controlled only by the managed control plane.
+    support_state = db.Column(db.String(20), default='disabled', nullable=False)
+    support_credential_version = db.Column(db.Integer, nullable=True)
+    support_expires_at = db.Column(db.DateTime, nullable=True)
     
     # Relationships
     participations = db.relationship(
@@ -95,7 +109,26 @@ class User(UserMixin, db.Model):
     def check_password(self, password: str) -> bool:
         from werkzeug.security import check_password_hash
         return check_password_hash(self.password_hash, password)
-    
+
+    def get_id(self):
+        # Embed the session epoch so rotating it (e.g. support disable) instantly
+        # invalidates every existing Flask-Login session, not just the password hash.
+        return f'{self.id}:{self.session_epoch}'
+
+    @property
+    def is_reserved_support_account(self):
+        return self.system_account_key == RESERVED_SUPPORT_SYSTEM_KEY
+
+    @property
+    def support_access_active(self):
+        return bool(
+            self.is_reserved_support_account
+            and self.is_active
+            and self.support_state == 'enabled'
+            and self.support_expires_at is not None
+            and self.support_expires_at > datetime.utcnow()
+        )
+
     def __repr__(self):
         return f'<User {self.username}>'
 
@@ -385,6 +418,28 @@ class TelegramWebhookUpdate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     update_id = db.Column(db.BigInteger, nullable=False, unique=True, index=True)
     source_ip = db.Column(db.String(45), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ControlPlaneNonce(db.Model):
+    """Replay defense for signed SaaS control-plane requests (cp_to_instance)."""
+    __tablename__ = 'control_plane_nonces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nonce_digest = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ControlPlaneOperationReceipt(db.Model):
+    """Idempotency record so a retried control-plane operation is not reapplied."""
+    __tablename__ = 'control_plane_operation_receipts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    operation_id = db.Column(db.String(160), nullable=False, unique=True, index=True)
+    payload_digest = db.Column(db.String(64), nullable=False)
+    response_code = db.Column(db.Integer, nullable=False)
+    response_body = db.Column(db.JSON, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 

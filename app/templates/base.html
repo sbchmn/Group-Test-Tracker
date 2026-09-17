@@ -101,6 +101,14 @@
             <a class="text-muted" href="{{ url_for('main.terms_of_service') }}">Terms of Service</a>
             <span aria-hidden="true"> • </span>
             <a class="text-muted" href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a>
+            {% if managed_user_docs_url %}
+            <span aria-hidden="true"> • </span>
+            <a class="text-muted" href="{{ managed_user_docs_url }}" target="_blank" rel="noopener">User Docs</a>
+            {% endif %}
+            {% if managed_admin_docs_url and current_user.is_authenticated and current_user.is_admin %}
+            <span aria-hidden="true"> • </span>
+            <a class="text-muted" href="{{ managed_admin_docs_url }}" target="_blank" rel="noopener">Admin Docs</a>
+            {% endif %}
             <span aria-hidden="true"> • </span>
             <a class="text-muted" href="{{ url_for('main.version_info') }}">Version {{ app_version }}</a>
         </p>

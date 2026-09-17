@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 
 from .. import db
+from ..saas import entitlement_enabled
 from ..models import GroupTest, PublicResult, ResultAnalysisFinding, ResultAnalysisRun
 from .settings import get_analysis_settings, provider_config
 from .taxonomy import CANONICAL_ORDER, canonical_types_for_row, canonicalize_label
@@ -28,6 +29,8 @@ def _target_filter(target):
 def enqueue_analysis(
         target, source_kind, requested_by_id=None, provider=None, automatic=False,
         bypass_duplicate_check=False):
+    if not entitlement_enabled('result_analysis'):
+        raise PermissionError('Result analysis is not enabled for this tenant.')
     settings = get_analysis_settings()
     if automatic and not settings['enabled']:
         return None

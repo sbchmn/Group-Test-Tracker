@@ -1,3 +1,7 @@
 instance/result_analysis_diagnostics.log
-*.pyc
+# Python bytecode and interpreter cache files
 __pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd

@@ -6,10 +6,22 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
 - **Current branch baseline:** `Test-Updates` including Discord custom-command media parity.
-- **Application version:** `3.2` from `app/version.py`.
+- **Application version:** `4.0` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and Root webhook delivery.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
 - **Deployment entry points:** `run.py` and `Procfile`, including a dedicated result-analysis worker process.
+- **Completed readiness probe:** Added an unauthenticated GET-only readiness probe at `/health/ready`, returning static JSON and covered by `tests.test_security`.
+- **Completed plan-aware administration UI:** Core managed plans hide the Result Analysis settings action and reject direct access, keep the Discord card visible but read-only with an explicit plan notice, reject Discord command synchronization, show provisioned plan status and entitlements on Version, and place user/admin documentation links only in the footer.
+- **Current managed-contract update:** Instance-to-Control-Plane events now use the top-level `type` contract. Reserved support state persists credential version and expiry, expires fail closed in login/session loading, and support requests require a bounded reason plus a generated consent reference. Status events include application, schema, contract, entitlement, component, readiness, and bounded resource fields.
+
+## Current Implementation Map — Managed Contract Completion
+
+- **Project map before changes:** GTM emitted a nested instance event envelope that the private Control Plane rejected, and support state lacked local credential version/expiry enforcement.
+- **Planned edits:** Correct event bodies; add additive support state migration; harden support transitions; enforce expiry at authentication boundaries; repair support request UI; centralize readiness payloads; validate both repositories.
+- **Applied edits:** `app/saas.py` emits top-level event bodies and shared status payloads; `app/models.py` and `migrations/versions/b3c4d5e6f7a8_add_support_account_state.py` persist support state; `app/control_plane_routes.py` validates identity, versions, and future UTC expiry; `app/__init__.py` and `app/routes.py` fail closed on expired support and report corrected status; the admin template collects a reason and displays non-secret state.
+- **Security/reliability/optimization review:** Reserved authorization remains keyed by immutable `system_account_key`; stale versions and malformed/far-past expiries are rejected; disable/rotate increments session epochs and rotates disabled hashes; external event delivery remains asynchronous with a ten-second timeout; status metrics are bounded and no new ordinary-request provider dependency was introduced.
+- **Validation plan/results:** Migration, managed contract, security, and diagnostics checks were run locally. Final full-suite validation remains required; warnings are existing SQLAlchemy/UTC deprecations and the environment intermittently loses Python launchers from PATH.
+- **Remaining risks:** Actual Control Plane delivery, support queue convergence, worker startup readiness, and provider/network behavior still require deployment validation with live tenant credentials. The schema revision default must be updated when a later migration becomes the deployed head.
 
 ## Architecture and Ownership
 
@@ -96,37 +108,59 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Keep provider identity linking user-owned; administrator edits do not silently reassign Telegram or Discord identities.
 - Display sanitized, bounded provider diagnostics only on the administrator-only Result Analysis Settings page.
 
+### SaaS control plane integration (managed deployments)
+
+- Verify signed `cp_to_instance` requests from the private `Group-Test-Tracker-Control-Plane` service using the documented HMAC contract (`app/control_plane.py`): header set, canonical message, 120s max age/60s clock skew, constant-time comparison, and current/previous key rotation via `GTT_CP_TO_INSTANCE_KEY_ID[_PREVIOUS]`/`GTT_CP_TO_INSTANCE_SECRET[_PREVIOUS]`.
+- Reject replayed nonces (`ControlPlaneNonce`) and make repeated operations idempotent by operation ID (`ControlPlaneOperationReceipt`), returning the original response and rejecting conflicting payloads for the same operation ID.
+- Implement `POST /internal/control-plane/v1/bootstrap` and `POST /internal/control-plane/v1/support` in a dedicated blueprint (`app/control_plane_routes.py`), isolated from Telegram/Discord bot wiring in `app/routes.py`.
+- Fail closed to 404 outside `GTT_DEPLOYMENT_MODE=managed` and to 503 when managed but not yet configured.
+- Bootstrap creates the tenant administrator (using the control plane's pre-hashed werkzeug scrypt password, compatible with `User.password_hash`) and an inert `gtmsupport` account (`is_active=False`) until support access is explicitly enabled.
+- Support rotate/enable/disable manage that account's password hash and active state, and always rotate the hash on disable so a leaked prior credential cannot be replayed.
+- Provide the exact Flask CLI entry points the control plane's DigitalOcean provider invokes verbatim: `run-discord-bot` and `run-result-analysis-worker` (aliased to the existing `result-analysis-worker` command), registered in `app/__init__.py`. The control plane's provisioner builds explicit `run_command` strings and does not read `Procfile`.
+
 ## Active Priorities
 
-1. **Automated result analysis — implemented; deployment evaluation pending**
+1. **SaaS control-plane parity — implemented for the current managed-contract surface**
+   - Implemented: the `cp_to_instance` bootstrap/support endpoints above, plus the `run-discord-bot`/`run-result-analysis-worker` CLI entry points the control plane's provisioner requires to start the Discord and result-analysis worker components at all.
+   - Implemented: a central managed-mode SaaS contract helper in `app/saas.py` parsing `GTT_ENTITLEMENTS`, `GTT_ENTITLEMENT_REVISION`, `GTT_PUBLIC_URL`, `GTT_USER_DOCUMENTATION_URL`, `GTT_ADMIN_DOCUMENTATION_URL`, and `GTT_SUBSCRIPTION_STATUS` and exposing entitlement and read-only subscription checks.
+   - Implemented: `result_analysis` and `discord_bot` entitlement gates at runtime so the managed tenant cannot use disabled paid features once the control plane removes them; the result-analysis worker also refuses queued work after entitlement removal.
+   - Implemented: read-only subscription gating in `app/routes.py` for write actions while preserving recovery navigation and logout.
+   - Implemented: managed documentation links injected into the app shell via `app/__init__.py` and `app/templates/base.html` for user/admin role-appropriate docs.
+   - Implemented: a signed `instance_to_cp` helper interface in `app/saas.py`, status events at the Discord/result-analysis worker startup boundaries, and administrator actions for `support_access_requested` and `support_emergency_disabled`.
+   - Implemented: `GTT_PUBLIC_URL` takes precedence over the legacy per-tenant `service_base_url` for managed Telegram, Discord, review, notification, webhook, and service-link generation; managed URLs/docs are ignored outside managed mode.
+   - Implemented and tested: outbound canonical signing fields and standalone managed-URL isolation are covered in `tests/test_control_plane.py` (`11 tests passed on 2026-09-16`).
+   - Validated: the full repository suite passed `188 tests in 175.470s` on 2026-09-16 after adding the required Discord import test setup; remaining output is limited to deprecation warnings.
+   - Remaining contract-adjacent work: production migration execution, real control-plane event delivery, real Discord/Telegram deployment checks, and the broader GTM roadmap items listed below.
+
+2. **Automated result analysis — implemented; deployment evaluation pending**
    - The durable worker, provider adapters, bounded source acquisition, administrator review/apply UI, automatic new-upload queueing, migration, tests, and operating documentation are implemented.
    - Before production enablement, migrate the database, configure one provider, run the shared real-report fixture evaluation, and operate the dedicated worker.
    - Follow [`docs/plans/2026-09-10-automated-result-analysis.md`](docs/plans/2026-09-10-automated-result-analysis.md) for acceptance criteria and staged rollout.
 
-2. **Public Results notifications and enrichment**
+3. **Public Results notifications and enrichment**
    - Normalize and bound itemized result data.
    - Escape provider markup and disable Discord mentions.
    - Validate external COA URLs.
    - Dispatch notifications only after commit and make delivery idempotent.
    - Add Telegram, Discord, route, malformed-input, and truncation tests.
 
-3. **Discord command parity and hardening**
+4. **Discord command parity and hardening**
    - Replace Telegram-named command fields and models with provider-neutral or Discord-native ownership.
    - Expand dedicated tests beyond guild/global synchronization and media delivery into link conflicts, interaction deferral, rate limiting, and administrator reply updates.
    - Validate configured guild/channel IDs and document invite/permission setup.
 
-4. **Provider destination management**
+5. **Provider destination management**
    - Present friendly provider-qualified destination names while retaining raw IDs internally.
    - Add explicit refresh, validation, permission status, and send-test actions.
    - Preserve manual ID entry as a fallback, especially for Telegram.
 
-5. **Delivery durability and service boundaries**
+6. **Delivery durability and service boundaries**
    - Extract provider-neutral bot operations from route and adapter code.
    - Introduce authenticated, versioned internal APIs only when independently deployed bot processes require them.
    - Add idempotency, timeouts, bounded retries, and contract tests before process separation.
    - Move outbound delivery to durable jobs when traffic or retry requirements justify the operational complexity.
 
-6. **Repository and verification hygiene**
+7. **Repository and verification hygiene**
    - Add automated CI for the full unittest suite.
    - Stop tracking runtime databases, logs, `__pycache__`, and `.pyc` files.
    - Remove one-off debug artifacts after confirming they are not operational dependencies.
@@ -137,6 +171,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Add Root connection testing beyond outbound webhook delivery.
 - Add administrator-triggered Public Results re-notification only after initial idempotent creation delivery is established.
 - Introduce a separate queue/worker platform only when in-process or synchronous delivery no longer meets reliability requirements.
+
 
 ## Security Invariants
 
@@ -150,6 +185,8 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - Secrets remain masked in admin interfaces and must not appear in logs or rendered messages.
 - Result-analysis diagnostics retain only bounded status/code/request-ID context, redact credential patterns, exclude report content and raw responses, and rely on template auto-escaping.
 - User-controlled Telegram/Discord text must not create markup, commands, callbacks, or broad mentions.
+- The readiness probe exposes only static process health and does not query tenant data, credentials, or external services.
+- Paid feature settings are gated both in the rendered UI and at route boundaries; unavailable Discord form submissions preserve existing Discord values.
 
 ## Reliability Invariants
 
@@ -175,14 +212,14 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 ## Validation Baseline
 
-Latest local validation on 2026-09-11, from baseline `cc700412f387e8680720584016dbd4f023ebf2a4` plus the unified Action Queue diff:
+Latest local validation on 2026-09-16, after the managed SaaS/control-plane integration changes:
 
 ```text
-PYTHONPATH=/tmp/group-test-tracker-test-deps-20260910 /home/sbachman/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -B -m unittest
-149 tests passed in 158.283s
+C:\Users\sbachman\AppData\Local\Programs\Python\Python312\python.exe -m unittest
+188 tests passed in 175.470s
 ```
 
-This local result is recorded in project history but is not backed by a GitHub Actions check. The provider/network paths use mocks; production credentials and the real-report evaluation corpus were not exercised.
+This local result is not backed by a GitHub Actions check. The provider/network paths use mocks; production credentials, real control-plane event delivery, and the real-report evaluation corpus were not exercised. The run emitted existing `datetime.utcnow`, SQLAlchemy `Query.get`, Flask-SQLAlchemy, and Python `audioop` deprecation warnings.
 
 Required validation by change type:
 
@@ -229,6 +266,16 @@ After each edit phase:
 4. Record exact results and remaining risks.
 
 ## Current Change Record
+
+### Managed SaaS Control-Plane Parity
+
+- **Date:** 2026-09-16
+- **Scope:** Align GTM with the private control-plane contract and verify the managed deployment surface end to end.
+- **Target files/modules:** `app/control_plane.py`, `app/control_plane_routes.py`, `app/saas.py`, `app/models.py`, `app/routes.py`, `app/__init__.py`, `app/result_analysis/jobs.py`, `app/result_analysis/service.py`, `app/discord_bot.py`, `app/notifications.py`, `app/telegram_result_review.py`, `app/export.py`, migrations, templates, and SaaS regression tests.
+- **Intended behavior:** Authenticate inbound control-plane operations; protect the reserved support account; enforce entitlements and subscription recovery mode; report managed status/support events; honor managed public URLs/docs; and expose the exact worker commands expected by the provisioner.
+- **Security/reliability/optimization review:** HMAC requests use canonical body digests, replay protection, constant-time comparison, and idempotent receipts. Support sessions are epoch-invalidated. Paid-feature removal blocks both new and queued analysis work. Managed URLs fail closed outside managed mode. Recovery exports omit participant, identity, payment, and notes data. Outbound event delivery uses bounded HTTP timeouts and best-effort failure handling.
+- **Validation:** `tests.test_control_plane` passed 11 tests; `tests.test_security` passed 70 tests; the focused Telegram tag-staging test passed; the full suite passed 188 tests in 175.470s on 2026-09-16. Existing deprecation warnings remain.
+- **Remaining risks:** Production migration and real control-plane event delivery still require deployment validation. The broader GTM roadmap still includes CI, provider destination management, Discord naming cleanup, delivery durability, and real provider/report-fixture evaluation.
 
 ### Discord Custom Command Media Parity
 

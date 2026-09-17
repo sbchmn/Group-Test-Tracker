@@ -15,6 +15,7 @@ from discord.ext import commands
 from sqlalchemy.exc import IntegrityError
 
 from . import create_app, db
+from .saas import entitlement_enabled, managed_public_url
 from .models import (
     DiscordCommandInvocation,
     DiscordLinkToken,
@@ -29,6 +30,9 @@ from .public_results_bot import public_result_tag_page, public_results_for_tag_p
 from .storage import StorageConfigurationError, StorageReadError, read_result_file
 
 APP = create_app()
+
+if not entitlement_enabled('discord_bot'):
+    raise RuntimeError('Discord bot is not enabled for this managed tenant.')
 
 COMMAND_SYNC_REQUEST_KEY = 'discord_command_sync_request_id'
 COMMAND_SYNC_PROCESSED_KEY = 'discord_command_sync_processed_id'
@@ -234,7 +238,7 @@ def _discord_public_result_url(result, service_base_url=''):
     if direct_url:
         return direct_url
 
-    base_url = _valid_discord_button_url(service_base_url)
+    base_url = _valid_discord_button_url(managed_public_url() or service_base_url)
     if not base_url:
         return None
     return f"{base_url.rstrip('/')}/public-results/{result.id}"

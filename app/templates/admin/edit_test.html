@@ -20,24 +20,28 @@ function addLabTestRow(name = '', price = '', vials = '', result = '') {
     row.innerHTML = `
         <div class="col-md-4">
             <label class="form-label small">Item Name</label>
-            <input type="text" name="lab_item_name" class="form-control form-control-sm" value="${name}">
+            <input type="text" name="lab_item_name" class="form-control form-control-sm">
         </div>
         <div class="col-md-2">
             <label class="form-label small">Price</label>
-            <input type="number" step="0.01" name="lab_item_price" class="form-control form-control-sm lab-price" value="${price}" onchange="updateTotalLabCost()">
+            <input type="number" step="0.01" name="lab_item_price" class="form-control form-control-sm lab-price" onchange="updateTotalLabCost()">
         </div>
         <div class="col-md-2">
             <label class="form-label small">Vials</label>
-            <input type="number" name="lab_item_vials" class="form-control form-control-sm" value="${vials}">
+            <input type="number" name="lab_item_vials" class="form-control form-control-sm">
         </div>
         <div class="col-md-3">
             <label class="form-label small">Result</label>
-            <input type="text" name="lab_item_result" class="form-control form-control-sm" placeholder="Pass / 98.7% / ND" value="${result}">
+            <input type="text" name="lab_item_result" class="form-control form-control-sm" placeholder="Pass / 98.7% / ND">
         </div>
         <div class="col-md-1">
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.lab-test-row').remove(); updateTotalLabCost()">×</button>
         </div>
     `;
+    row.querySelector('[name="lab_item_name"]').value = name;
+    row.querySelector('[name="lab_item_price"]').value = price;
+    row.querySelector('[name="lab_item_vials"]').value = vials;
+    row.querySelector('[name="lab_item_result"]').value = result;
     container.appendChild(row);
     updateTotalLabCost();
 }

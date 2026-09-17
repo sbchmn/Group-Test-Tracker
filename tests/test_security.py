@@ -64,6 +64,75 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(self.client.post("/health/ready").status_code, 405)
 
+    def test_security_headers_are_present(self):
+        response = self.client.get("/version")
+        self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(response.headers.get("X-Frame-Options"), "SAMEORIGIN")
+        self.assertEqual(response.headers.get("Referrer-Policy"), "strict-origin-when-cross-origin")
+
+    def test_login_rate_limit_blocks_excessive_post_attempts(self):
+        limited_db_path = Path(self.temp_dir.name) / "limited-test.db"
+        limited_app = create_app({
+            "TESTING": True,
+            "RATELIMIT_ENABLED": True,
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{limited_db_path}",
+            "WTF_CSRF_ENABLED": False,
+        })
+        limited_client = limited_app.test_client()
+        try:
+            with limited_app.app_context():
+                db.create_all()
+            responses = [
+                limited_client.post(
+                    "/login",
+                    data={"username": "missing-login-user", "password": "wrong"},
+                )
+                for _ in range(11)
+            ]
+        finally:
+            with limited_app.app_context():
+                db.session.remove()
+                db.engine.dispose()
+        self.assertTrue(all(response.status_code == 200 for response in responses[:10]))
+        self.assertEqual(responses[-1].status_code, 429)
+
+    def test_login_rejects_external_next_redirect(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="redirect-user", email="redirect-user@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+
+        response = self.client.post(
+            "/login?next=https://attacker.example/",
+            data={"username": "redirect-user", "password": "secret"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/dashboard")
+
+    def test_password_reset_does_not_reveal_account_existence(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="reset-user", email="reset-user@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+
+        missing = self.client.post(
+            "/password-reset",
+            data={"username": "missing-reset-user", "notification_channel": "email"},
+            follow_redirects=True,
+        )
+        existing = self.client.post(
+            "/password-reset",
+            data={"username": "reset-user", "notification_channel": "email"},
+            follow_redirects=True,
+        )
+        self.assertIn("If an account matches, a password reset message has been sent.", missing.get_data(as_text=True))
+        self.assertIn("If an account matches, a password reset message has been sent.", existing.get_data(as_text=True))
+
     def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):
         terms_response = self.client.get("/terms")
         privacy_response = self.client.get("/privacy")

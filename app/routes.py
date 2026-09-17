@@ -29,7 +29,7 @@ import ipaddress
 import html
 import re
 
-from . import db, csrf
+from . import db, csrf, limiter
 import os
 import json
 
@@ -98,7 +98,14 @@ from .storage import (
     upload_result_image,
     upload_telegram_animation,
 )
-from .version import APP_NAME, APP_RELEASE, APP_VERSION
+from .version import (
+    APP_NAME,
+    APP_RELEASE,
+    APP_VERSION,
+    PROJECT_LICENSE,
+    PROJECT_LICENSE_NOTICE,
+    THIRD_PARTY_ATTRIBUTIONS,
+)
 from .result_analysis.providers import build_provider
 from .result_analysis.providers.base import ProviderError
 from .result_analysis.diagnostics import append_provider_diagnostic, read_provider_diagnostics
@@ -106,6 +113,12 @@ from .result_analysis.service import AnalysisConflict, apply_analysis_run, enque
 from .result_analysis.settings import ENV_KEYS, PROVIDERS, get_analysis_settings, provider_config
 
 main_bp = Blueprint('main', __name__)
+
+
+def _safe_next_url(value):
+    if not value or not value.startswith('/') or value.startswith('//'):
+        return None
+    return value
 
 
 @main_bp.before_request
@@ -144,6 +157,9 @@ def version_info():
             'entitlement_revision': entitlement_revision(),
             'entitlements': sorted(entitlements()),
         },
+        project_license=PROJECT_LICENSE,
+        project_license_notice=PROJECT_LICENSE_NOTICE,
+        third_party_attributions=THIRD_PARTY_ATTRIBUTIONS,
     )
 
 
@@ -1299,6 +1315,7 @@ def register():
 
 
 @main_bp.route('/login', methods=['GET', 'POST'])
+@limiter.limit('10 per minute', methods=['POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
@@ -1310,7 +1327,7 @@ def login():
         ):
             login_user(user, remember=form.remember.data)
             flash(f'Welcome back, {user.username}!', 'success')
-            next_page = request.args.get('next')
+            next_page = _safe_next_url(request.args.get('next'))
             return redirect(next_page or url_for('main.dashboard'))
         flash('Invalid username or password.', 'danger')
     return render_template('login.html', form=form)
@@ -1325,36 +1342,30 @@ def logout():
 
 
 @main_bp.route('/password-reset', methods=['GET', 'POST'])
+@limiter.limit('3 per hour', methods=['POST'])
 def password_reset():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     form = PasswordResetForm()
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
-        if user is not None and user.is_reserved_support_account:
-            flash('No account matched that username.', 'warning')
-            return redirect(url_for('main.login'))
-        if user:
+        reset_sent = False
+        if user and not user.is_reserved_support_account:
             selected_channel = form.notification_channel.data or user.notification_channel or 'email'
-            if selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip():
-                flash('To use Telegram reset, open the bot and press Start first, then try again.', 'warning')
-                return render_template('password_reset.html', form=form)
-            if selected_channel == 'discord' and not (user.discord_user_id or '').strip():
-                flash('To use Discord reset, add the bot and run /start first, then try again.', 'warning')
-                return render_template('password_reset.html', form=form)
-
-            new_password = os.urandom(6).hex()
-            user.set_password(new_password)
-            user.notification_channel = selected_channel
-            sent = send_password_reset(user, new_password)
-            if sent:
-                db.session.commit()
-                flash('A password reset message has been sent.', 'success')
-            else:
-                db.session.rollback()
-                flash('Reset message could not be delivered. Please try email or contact an admin.', 'danger')
-        else:
-            flash('No account matched that username.', 'warning')
+            channel_available = not (
+                selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip()
+                or selected_channel == 'discord' and not (user.discord_user_id or '').strip()
+            )
+            if channel_available:
+                new_password = os.urandom(6).hex()
+                user.set_password(new_password)
+                user.notification_channel = selected_channel
+                reset_sent = send_password_reset(user, new_password)
+                if reset_sent:
+                    db.session.commit()
+                else:
+                    db.session.rollback()
+        flash('If an account matches, a password reset message has been sent.', 'info')
         return redirect(url_for('main.login'))
     return render_template('password_reset.html', form=form)
 

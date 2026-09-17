@@ -22,6 +22,19 @@
                     <dt class="col-sm-5">Included features</dt>
                     <dd class="col-sm-7">{{ plan_details.entitlements|join(', ') if plan_details.entitlements else 'Core features only' }}</dd>
                 </dl>
+                <hr>
+                <h2 class="h5">License</h2>
+                <p>{{ project_license_notice }}</p>
+                <p class="mb-2"><strong>{{ project_license }}</strong></p>
+                <p class="small text-muted">No separate repositories are currently bundled or vendored with this application.</p>
+                <h2 class="h5">Third-Party Attributions</h2>
+                <p class="small text-muted">Direct dependency inventory. Exact versions and transitive notices must be reviewed before redistributing a build.</p>
+                <ul class="small">
+                    {% for dependency, license in third_party_attributions %}
+                    <li><strong>{{ dependency }}</strong>: {{ license }}</li>
+                    {% endfor %}
+                </ul>
+                <p class="small mb-0">The full inventory is included in the source distribution as <strong>THIRD_PARTY_NOTICES.md</strong>. PyMuPDF requires a deliberate AGPL or commercial licensing decision.</p>
             </div>
         </div>
     </div>

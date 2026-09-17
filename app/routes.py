@@ -3294,19 +3294,7 @@ def edit_test(test_id):
         clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
         upload_file = request.files.get('results_image')
         has_new_upload = bool(upload_file and upload_file.filename)
-        if not result_link and not has_new_upload and (clear_existing_image or not result.results_image_key):
-            flash('Provide a results link or upload an image/PDF.', 'danger')
-            public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
-            return render_template(
-                'admin/public_results.html',
-                form=form,
-                public_results=public_results,
-                editing_result=result,
-                tag_suggestions=get_all_tag_names(),
-                storage_settings=get_storage_settings(),
-                editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
-                **_analysis_template_context(result),
-            )
+        test.results_link = (form.results_link.data or '').strip() or None
         if has_new_upload:
             try:
                 new_key = upload_result_image(upload_file, 'group-tests')

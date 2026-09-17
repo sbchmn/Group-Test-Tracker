@@ -1110,6 +1110,33 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Provide a results link or upload an image/PDF.", response.get_data(as_text=True))
 
+    def test_edit_open_group_test_without_result_file_succeeds(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="edit-test-admin", email="edit-test-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Original title", status="recruiting", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "edit-test-admin", "password": "secret"})
+        response = self.client.post(
+            f"/admin/edit-test/{test_id}",
+            data={"title": "Updated title", "status": "recruiting"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"/test/{test_id}", response.headers["Location"])
+        with self.app.app_context():
+            updated = db.session.get(GroupTest, test_id)
+            self.assertEqual(updated.title, "Updated title")
+            self.assertIsNone(updated.results_link)
+            self.assertIsNone(updated.results_image_key)
+
     def test_telegram_public_results_tag_click_handles_image_only_certificate(self):
         with self.app.app_context():
             db.create_all()

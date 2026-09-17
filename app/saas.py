@@ -98,7 +98,9 @@ def subscription_access_allowed(feature: str | None = None) -> bool:
         if feature is None:
             return True
         return False
-    return True
+    # Managed deployments must fail closed when the control plane sends a
+    # status this version does not understand.
+    return False
 
 
 def instance_status_payload(*, component: str, ready: bool, schema_bytes: int = 0, pool_checked_out: int = 0, pool_capacity: int = 0) -> dict:
@@ -180,7 +182,7 @@ def report_instance_event(event_name: str, payload: dict | None = None):
     if not url or not key_id or not secret:
         return False
 
-    event_body = {'type': event_name, **(payload or {})}
+    event_body = {**(payload or {}), 'type': event_name}
     operation_id = f'instance:{event_name}:{int(time.time())}:{secrets.token_urlsafe(12)}'
     headers, body = _instance_event_signature(secret, key_id=key_id, tenant=tenant_id(), operation_id=operation_id, payload=event_body)
     req = urllib_request.Request(url, data=body, headers=headers, method='POST')

@@ -241,6 +241,32 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertTrue(subscription_access_allowed())
         self.assertFalse(subscription_access_allowed(feature='discord_bot'))
 
+    def test_unknown_managed_subscription_status_fails_closed(self):
+        from app.saas import subscription_access_allowed
+
+        os.environ['GTT_DEPLOYMENT_MODE'] = 'managed'
+        os.environ['GTT_SUBSCRIPTION_STATUS'] = 'future_status'
+
+        self.assertFalse(subscription_access_allowed())
+        self.assertFalse(subscription_access_allowed(feature='discord_bot'))
+
+    @patch('app.saas.urllib_request.urlopen')
+    def test_report_instance_event_keeps_authoritative_type(self, urlopen):
+        from app.saas import report_instance_event
+
+        os.environ.update({
+            'GTT_CONTROL_PLANE_URL': 'https://control.example',
+            'GTT_INSTANCE_TO_CP_KEY_ID': 'instance-key',
+            'GTT_INSTANCE_TO_CP_SECRET': 'instance-secret',
+        })
+        urlopen.return_value.__enter__.return_value.read.return_value = b'{"accepted":true}'
+
+        result = report_instance_event('status', {'type': 'support_emergency_disabled', 'ready': True})
+
+        self.assertEqual(result, {'accepted': True})
+        request = urlopen.call_args.args[0]
+        self.assertEqual(json.loads(request.data.decode('utf-8'))['type'], 'status')
+
     def test_instance_event_uses_control_plane_canonical_signature(self):
         from app.saas import _instance_event_signature
 

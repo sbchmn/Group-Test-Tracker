@@ -77,14 +77,16 @@ class NotificationTests(unittest.TestCase):
             db.session.add(user)
             db.session.commit()
 
-        response = self.client.post(
-            "/password-reset",
-            data={"username": "reset_tg", "notification_channel": "telegram"},
-            follow_redirects=True,
-        )
+        with patch("app.routes.send_password_reset") as mock_reset:
+            response = self.client.post(
+                "/password-reset",
+                data={"username": "reset_tg", "notification_channel": "telegram"},
+                follow_redirects=True,
+            )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("open the bot and press Start", response.get_data(as_text=True))
+        self.assertIn("If an account matches, a password reset message has been sent.", response.get_data(as_text=True))
+        mock_reset.assert_not_called()
 
     def test_register_route_sends_welcome_email_with_login_link(self):
         with self.app.app_context():

@@ -6,11 +6,13 @@ All extensions initialized here without circular imports.
 """
 
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from dotenv import load_dotenv
 from .version import APP_NAME, APP_VERSION
@@ -28,6 +30,7 @@ from .saas import (
 db = SQLAlchemy()
 login_manager = LoginManager()
 csrf = CSRFProtect()
+limiter = Limiter(key_func=get_remote_address)
 migrate = Migrate()
 
 # Load .env early for config
@@ -117,6 +120,9 @@ def create_app(config_overrides=None):
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour forms
     app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH_MB', '12')) * 1024 * 1024
+    app.config['RATELIMIT_ENABLED'] = not testing_mode
+    app.config['RATELIMIT_STORAGE_URI'] = os.environ.get('RATELIMIT_STORAGE_URI', 'memory://')
+    app.config['RATELIMIT_HEADERS_ENABLED'] = True
 
     # Ensure csrf_token() is always available in Jinja2 templates
     @app.context_processor
@@ -134,7 +140,17 @@ def create_app(config_overrides=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
     migrate.init_app(app, db)
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        if request.is_secure:
+            response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000')
+        return response
     
     # Flask-Login config
     login_manager.login_view = 'main.login'

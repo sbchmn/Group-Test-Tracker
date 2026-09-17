@@ -175,6 +175,155 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
    - Stop tracking runtime databases, logs, `__pycache__`, and `.pyc` files.
    - Remove one-off debug artifacts after confirming they are not operational dependencies.
 
+7. **SaaS control-plane compatibility — mapped; implementation not started**
+   - Implement the managed/standalone boundary, subscription/entitlement enforcement, signed control-plane API, provisioning bootstrap, support account, role-filtered public documentation links, health contract, and lifecycle tests described below.
+   - Freeze cross-repository contracts before writing either side so provisioning, retries, revisions, and failure behavior remain compatible.
+
+## Planned SaaS Control-Plane Compatibility
+
+**Status:** Planning complete enough to estimate and sequence; no SaaS integration code or migration has been implemented.
+
+### Compatibility and ownership rules
+
+- Add an explicit `GTT_DEPLOYMENT_MODE=standalone|managed` boundary. Default to `standalone` so existing self-hosted and manually managed deployments keep their current behavior.
+- In `managed` mode, the control plane owns subscription state, canonical tenant identity, entitlement revisions, infrastructure lifecycle, support-account coordination, canonical public documentation destinations, and one-time initial administrator bootstrap. After bootstrap, GTM exclusively owns all of its users, group tests, results, participant payments, tenant configuration, and customer-supplied bot/AI/email/storage credentials; the control plane must not become an alternate GTM administration surface.
+- Never scatter environment reads or plan-name comparisons through routes and templates. One typed entitlement service must parse, validate, expose, and test the complete contract.
+- Client-side hiding is informative only. Route, service, CLI, bot-command, notification, and worker checks are authoritative.
+- Keep the two products' action queues separate: GTM's Admin Action Queue contains test/result/participant and other tenant-application work; the control plane's operator queue contains billing, provisioning, infrastructure, backup, domain, and support-access coordination only. Never copy routine GTM business records into the control plane.
+
+### Environment and trust contract
+
+| Setting | GTM responsibility | Failure behavior in managed mode |
+| --- | --- | --- |
+| `GTT_TENANT_ID` | Immutable tenant/audience identifier | Readiness fails; paid features fail closed |
+| `GTT_PLAN_CODE` | Display/diagnostic label only | Show unknown plan; never grant access from it |
+| `GTT_ENTITLEMENTS` | Versioned canonical feature set, initially `core`, `discord_bot`, `result_analysis` | Preserve Core diagnostics; deny paid features |
+| `GTT_ENTITLEMENT_REVISION` | Monotonic desired-state revision | Reject stale control-plane mutations and report drift |
+| `GTT_SUBSCRIPTION_STATUS` | `active`, `trialing`, `grace`, `suspended`, or `canceled` | Invalid state fails closed and remains diagnosable |
+| `GTT_CONTROL_PLANE_URL` | Canonical billing/upgrade/tenant-console origin | No generated upgrade redirect; show configuration error |
+| `GTT_SUPPORT_URL` | External support destination | Support page remains available with a safe unavailable state |
+| `GTT_USER_DOCUMENTATION_URL` | Canonical public user-guide URL on `grouptest.online` | Validate HTTPS/approved origin; hide an invalid link |
+| `GTT_ADMIN_DOCUMENTATION_URL` | Canonical public administrator-guide URL on `grouptest.online` | Validate HTTPS/approved origin; ordinary users never see this link |
+| `GTT_PUBLIC_URL` | Canonical tenant origin for generated links | Readiness warning; never trust an arbitrary Host header |
+| `GTT_CP_TO_INSTANCE_SECRET`, `GTT_CP_TO_INSTANCE_KEY_ID` | Verify control-plane commands | Readiness fails for managed mutation endpoints |
+| `GTT_INSTANCE_TO_CP_SECRET`, `GTT_INSTANCE_TO_CP_KEY_ID` | Sign the few GTM-originated callbacks/status acknowledgements | Outbound synchronization queues safely; ordinary GTM use remains local |
+
+- Provision two independent random 256-bit HMAC-SHA256 secrets per tenant, one for each direction. A compromised tenant secret therefore cannot authenticate another tenant or reverse the allowed direction. Store secrets only as DigitalOcean encrypted variables on GTM and encrypted values in the control plane.
+- Canonical signatures cover key ID, tenant ID, contract version, HTTP method, canonical path, timestamp, nonce, operation ID, requested revision, and SHA-256 body digest. Maximum request lifetime is 120 seconds, accepted clock skew is 60 seconds, used nonces are retained for at least 10 minutes, and comparisons are constant-time.
+- Rotation keeps only current and previous secrets. Deploy the receiver with both, switch the sender to the new key ID, verify traffic, and remove the previous secret within 24 hours. Reject unknown key IDs, wrong tenant/direction/version, stale timestamps, replay, body/path mismatch, and stale revisions.
+- Keep the communication surface deliberately small. Control plane to GTM is limited to initial administrator/support bootstrap, support enable/rotate/disable, and detailed status requests. GTM to control plane is limited to support-request/emergency-disable reconciliation and bounded status acknowledgements. Entitlements arrive through environment deployments; ordinary page requests, GTM user management, tests, results, settings, and notifications never call the control plane.
+- Add a contract-version setting and publish accepted versions in signed detailed status so incompatible control-plane/GTM deployments fail before mutation.
+- Keep every secret out of templates, diagnostics, health responses, audit payloads, URLs, and process command arguments.
+
+### Subscription and entitlement behavior
+
+- `standalone`: preserve all existing capabilities and configuration paths.
+- `active` and `trialing`: enable only the supplied entitlements. Trial add-ons work only when explicitly included.
+- `grace`: retain the current paid feature set, show a persistent billing warning to administrators, and link to the control-plane billing page.
+- `suspended` and post-term `canceled`: block ordinary users. Tenant administrators enter a server-side allowlisted recovery shell: they may view existing group-test lists/details/results without mutation, download a new sanitized test/results export, open Support/billing, manage their own session, and log out. They cannot create, edit, delete, transition, approve, pay, or otherwise mutate tests/participants/results; export the user directory or participant identity/payment/notes data; send email, Telegram, Discord, Root, digest, webhook, or bot notifications; run bot commands/synchronization; or start provider/analysis work.
+- Implement suspension as an allowlist, not a denylist, so future routes default blocked. GET routes admitted to recovery must be side-effect free, and every notification/provider service must independently enforce suspension as a final backstop.
+- The existing `generate_test_export` workbook includes participant names, Telegram usernames, verification/payment state, and notes and therefore must not be exposed in recovery. Add a distinct bounded recovery export containing test metadata, test configuration/costs, result rows, source references, and relevant test audit timestamps, but no user directory, participant rows, contact identifiers, bot identifiers, credentials, or account exports.
+- Environment state remains authoritative. Every entitlement revision causes a full App Platform restart, and all processes must report the same loaded revision. Downgrades preserve settings/history but use a first deployment that removes the entitlement while retaining the restarted, now-idle worker; only after readiness confirms the revision does a second deployment remove the worker. Upgrades add entitlement and worker in one App spec and become operational only after readiness.
+- `discord_bot` gates the entire Discord surface: gateway worker startup/handlers, linking tokens and claims, command registration/synchronization/execution, Discord settings/test actions, outbound Discord webhooks/notifications, and Discord as a selectable user notification channel. Without entitlement, saved configuration remains but cannot be edited or used; existing Discord channel preferences remain stored but delivery is suppressed and is never silently rerouted.
+- Without `result_analysis`, no `ResultAnalysisRun` may be inserted by upload hooks, manual Analyze, Retry, provider tests, public-result paths, or Telegram `/submitcoa`. During downgrade deployment 1, an idempotent pre-deploy reconciliation marks queued/retry-scheduled work terminal as `canceled_entitlement`, clears leases, and records revision/reason. The retained worker restarts without entitlement and remains idle; deployment 2 removes it. Already in-flight work has a bounded DigitalOcean drain-window race, so persistence rechecks the process entitlement and normal downgrades occur at billing boundaries.
+- Re-upgrade never resumes `canceled_entitlement` runs. After entitlement returns, an administrator must explicitly create a new analysis; historical runs/findings remain readable.
+
+### GTM implementation work packages
+
+| Work package | Primary files/modules | Required change |
+| --- | --- | --- |
+| Entitlement kernel | new `app/entitlements.py`, `app/__init__.py`, `app/routes.py` | Typed environment contract parsing, deployment mode, immutable loaded revision, component readiness/status, feature/status checks, decorators/service guards, Jinja context, upgrade URLs, and safe diagnostics |
+| Subscription UX | `app/templates/base.html`, new subscription/recovery templates, admin Settings templates, `app/export.py` or a focused recovery-export module | Plan/status banner, locked cards with upgrade actions, grace messaging, server-side suspended-admin route allowlist, and a sanitized test/results-only recovery export |
+| Discord enforcement | `app/discord_bot.py`, `app/routes.py`, `app/notifications.py`, `app/templates/profile.html`, `app/templates/admin/bot_integrations.html` | Guard startup, synchronization, handlers, linking, saves/tests, and any in-scope outbound delivery while preserving stored configuration |
+| Analysis enforcement | `app/result_analysis/jobs.py`, `app/result_analysis/service.py`, analysis routes, `_result_analysis_card.html`, `result_analysis_config.html` | Prevent automatic/manual queueing, claims, retries, provider tests, and paid mutations while retaining readable history and data |
+| Support and documentation | new focused support blueprint/service/templates plus `base.html` | Logged-in Support tab, role-filtered links to public user/admin guides, owner-configured external helpdesk link, and support-access request/status |
+| Managed system account | `app/models.py`, a focused user-management service, auth/user routes, CLI commands, user/profile templates | Immutable reserved support identity; tenant-consented control-plane enable/rotation; tenant-local emergency disable/expiry; and immediate session invalidation |
+| Control-plane API | new isolated internal blueprint/service | Signed versioned commands, bootstrap, support lifecycle, status, replay defense, idempotency, bounded audit, and JSON-only error contracts |
+| Provisioning readiness | `app/__init__.py`, `app/version.py`, new health/status service | Public minimal liveness/readiness plus signed detailed status reporting application, schema, contract, tenant, entitlement, and support revisions |
+| Schema | `app/models.py`, new additive Alembic revisions | System-account/auth fields and durable command receipts/audit records, compatible with shared DigitalOcean MySQL and SQLite tests |
+| Deployment contract | `app/__init__.py`, `Procfile`, `.env.example`, `README.md`, `ADMIN_QUICK_START.md` | Managed variables, component identity and bounded SQLAlchemy pool settings, pre-deploy migration/entitlement reconciliation, conditional workers, bootstrap, recovery, and troubleshooting |
+| Validation | new focused test modules plus existing security/result-analysis/notification/schema suites | Cross-product state matrix, tamper/replay tests, stale-worker tests, migration tests, UI locks, standalone compatibility, and control-plane contract tests |
+
+### Internal control-plane interface
+
+- Isolate endpoints under a versioned internal blueprint such as `/internal/control-plane/v1`; do not add these mutations to the already-large general route module.
+- Verify the directional HMAC-SHA256 contract above over the exact HTTP method, canonical path, timestamp, nonce, operation ID, tenant ID, revision, contract version, and SHA-256 body digest. Reject unknown/retired key IDs, more than 60 seconds of clock skew, requests older than 120 seconds, replay, wrong tenant/direction, browser session credentials, and non-JSON mutation bodies.
+- Exempt only this internal blueprint from CSRF because it does not use browser cookies; all ordinary GTM forms retain CSRF protection.
+- Persist a unique operation ID, payload hash, requested revision, outcome, and bounded response summary. Replaying the same operation and payload returns the prior result; reusing an ID with a different payload is rejected.
+- Initial-administrator bootstrap creates exactly the requested username and email once from the control-plane-produced, versioned Werkzeug scrypt hash. Validate the encoded scheme/length, reject username/email collisions, never pass the hash on a process command line, and never expose it in a response or log. Return an idempotent success receipt so the control plane can erase its staged encrypted hash; after bootstrap, all administrator management and password changes belong only to GTM.
+- Support lifecycle accepts only the reserved support identity and monotonically increasing revisions. It may create the account disabled, rotate its validated hash, enable it only after fresh tenant-admin consent, disable it, increment its authentication epoch, and report actual state; it cannot edit arbitrary users. Enablement expires automatically after 24 hours. A GTM administrator may emergency-disable it locally and revoke its sessions even if the control plane is unavailable, then queue reconciliation.
+- A signed status endpoint returns only bounded operational metadata: application version, Alembic revision, supported contract versions, tenant ID, loaded entitlement revision/status, component readiness, support-account actual revision/state/expiry, aggregate tenant schema bytes, and aggregate database-pool health. It never returns GTM users, tests, results, action items, settings, credentials, or row-level data.
+- Add minimal unauthenticated liveness/readiness endpoints suitable for DigitalOcean health checks without tenant data, exception text, configuration values, or secrets.
+
+### Immutable support-account design
+
+- Add nullable unique `system_account_key`, `auth_epoch`, and control-plane credential/state revision fields to `User`; reserve `control_plane_support` independently of username or email.
+- The managed account is displayed as username `gtmsupport` with internal email `support@grouptest.online`. Reserve both identities case-insensitively after the same normalization used by authentication, but authorize exclusively through `system_account_key`.
+- Managed provisioning creates the support identity disabled with administrator role and notifications/bot identities off. Standalone deployments do not create it automatically. If a pre-existing ordinary account conflicts with the reserved username or email, never adopt or overwrite it: leave managed support disabled, return a bounded conflict, and route an Admin Action for operator resolution.
+- Centralize user mutations so registration, ordinary admin creation/edit/toggle/reset, public reset, self-profile/password changes, bot-link creation/claim, imports, `create-admin`, `demote-admin`, and future deletion reject system-managed accounts.
+- Hide ordinary Edit, Reset, Activate/Deactivate, and future Delete controls, but treat server-side rejection as the security boundary.
+- Prevent ORM/service deletion of the system account. Direct database-owner repair remains possible and must be audited operationally.
+- Bind authenticated sessions to `auth_epoch`; disabling or rotating the support account invalidates all of its existing sessions on the next request. Maintain backward compatibility for ordinary pre-migration sessions or deliberately invalidate them once during rollout.
+
+### Support and public-documentation flow
+
+- Add a Support navigation item for every authenticated GTM user. It is the only in-application place that presents documentation/helpdesk links.
+- Documentation pages are public on the control plane. Ordinary authenticated GTM users see only the public user-guide link; GTM administrators see both public user and administrator guide links.
+- Role-based link display is a local GTM navigation rule, not cross-system authorization. Do not create signed documentation assertions, transmit GTM identities/roles to the control plane, or append tenant/user data to guide URLs.
+- Validate documentation and helpdesk destinations against HTTPS and configured/approved origins. Before configuration, show a safe unavailable state; never redirect to an arbitrary database/user-supplied URL.
+- The external hosted helpdesk maintains separate portal accounts and receives no GTM password, support credential, signed token, or automatic user/test data.
+- The GTM support control requests access from the control plane only after fresh administrator consent, shows the 24-hour expiry and pending/actual state, and uses retry-safe operations. Emergency disable acts locally first, revokes support sessions immediately, and queues a signed reconciliation callback; local enable remains prohibited.
+
+### Migration, deployment, and release behavior
+
+- Add forward-only Alembic revisions; never modify historical migrations. Test from both an empty database and the current production head on MySQL-compatible behavior.
+- The migration adds schema only. The signed managed-provisioning operation creates the reserved support account, avoiding an unowned credential in standalone databases.
+- Keep the existing manual `create-admin` command for standalone use, but route it through the same system-account protections. Managed bootstrap uses the signed internal operation.
+- DigitalOcean performs `flask --app app db upgrade head` as a pre-deploy job before web/worker activation. GTM readiness must report the expected schema before the control plane marks a deployment healthy.
+- Web, Discord, and analysis processes all load the same immutable entitlement revision at startup. Runtime changes arrive only through a full App Platform configuration deployment/restart; readiness reports each component's revision and blocks lifecycle progression on mismatch. No process persists a competing entitlement set.
+- Source repository is settled as `sbchmn/Group-Test-Tracker`. Existing manually managed customers remain on `main`, and SaaS-only code/migrations must never be merged there merely to deploy the SaaS product.
+- When implementation is authorized, create case-sensitive branches `SaaS-Test` and `SaaS-Main` from the same re-read, recorded `main` commit and tag that commit with a dated SaaS baseline. This planning change does not create either branch.
+- All SaaS development lands in `SaaS-Test` and deploys to the existing development test application. Promotion is a reviewed, tested PR from `SaaS-Test` to protected `SaaS-Main`; customer DigitalOcean applications track `SaaS-Main` only.
+- Apply future fixes from `main` one way into `SaaS-Test`, resolve Alembic revision collisions there, validate, then promote to `SaaS-Main`. Never back-merge SaaS-only commits or migrations into `main` accidentally.
+- Protect `SaaS-Main` from direct pushes and require the full suite, contract tests, migration checks, and a healthy real DigitalOcean `SaaS-Test` deployment before promotion. The control plane does not monitor the development test app in the MVP.
+
+### Security, reliability, and optimization review
+
+- **Security:** Preserve existing admin/participant authorization beneath feature gates; use independent per-tenant directional HMAC-SHA256 secrets, validate canonical request fields/version/key lifecycle, retain bounded replay records, compare signatures in constant time, enforce the suspended recovery allowlist and sanitized export, preserve immutable system identity/session epochs/canonical URLs, and redact bounded logging.
+- **Reliability:** Make bootstrap/support commands and pre-deploy cancellation idempotent, distinguish desired from component-reported revisions, require full restarts, keep the unentitled worker idle before removal, fail closed without breaking Core diagnostics, commit before acknowledging, expire support access locally, and surface tenant work only in GTM's queue while infrastructure/billing failures remain in the control-plane queue.
+- **Optimization:** Parse immutable environment state once per process, use constant-time feature sets, bound SQLAlchemy pools by component role, index operation IDs/system keys/revisions, avoid per-request control-plane calls, render public documentation links locally, and synchronize only bootstrap, support, revision/readiness, and bounded aggregate status events.
+
+### Validation plan
+
+- Add `tests/test_entitlements.py` for standalone compatibility and the full status × feature matrix, including recovery-route allowlisting and default denial of newly added routes.
+- Add `tests/test_control_plane_api.py` with shared deterministic HMAC fixtures for wrong direction/tenant/key ID, current/previous rotation overlap and retirement, 60-second skew, 120-second lifetime, replay, payload mismatch, idempotency, bootstrap collisions, stale revisions, safe errors, bounded aggregate status, and absence of GTM business data.
+- Add `tests/test_support_access.py` for every admin/self-service/reset/link/CLI/delete mutation path, role immutability, fresh-consent enablement, 24-hour automatic expiry, local emergency disable while the control plane is unavailable, reconciliation, credential rotation, session invalidation, public guide visibility by GTM role, safe unavailable states, and URL allowlisting.
+- Extend `tests/test_result_analysis.py`, `tests/test_notifications.py`, `tests/test_security.py`, `tests/test_export.py`, and `tests/test_schema_migration.py` for zero queue inserts without entitlement, deployment-1 cancellation/idle behavior, deployment-2 removal contract, revision mismatch, bounded in-flight drain races, no re-upgrade resume, Discord gates, suspended denial, sanitized exports, MySQL 8.4-safe migrations, and standalone behavior.
+- Add component-aware database tests and a load budget for the two-process Gunicorn web service plus Discord/analysis workers. Explicitly set pool size/overflow/recycle/pre-ping from validated environment rather than relying on SQLAlchemy defaults.
+- Add cross-repository contract fixtures so the control plane and GTM test the same environment schema, signature canonicalization, command/status JSON, entitlement identifiers, and supported contract versions.
+- Before production, test Core, Discord, AI, Complete, trial, grace, upgrade, downgrade, suspension, recovery/export, stale worker, failed bootstrap, and support rotation in a real DigitalOcean test application.
+
+### Recommended implementation sequence
+
+1. When implementation is authorized, re-read `main`, record/tag the exact baseline, create `SaaS-Test` and `SaaS-Main` from it, and configure protections/deployment targets without changing existing `main` clients.
+2. Freeze the shared directional HMAC, environment, bootstrap-hash/receipt, bounded status, recovery-export, and operation fixtures in both repositories.
+3. Add additive schema, the entitlement kernel, recovery allowlist, and standalone-compatibility tests on `SaaS-Test`.
+4. Add signed internal status/bootstrap operations and DigitalOcean readiness checks.
+5. Add immutable support identity, session epochs, Support page, and locally role-filtered public documentation/helpdesk links.
+6. Gate all Discord and result-analysis queue/provider/notification surfaces and add downgrade reconciliation.
+7. Validate MySQL 8.4 migrations, component connection budgets, full-restart revisions, two-deployment downgrades, and the lifecycle in the real `SaaS-Test` app, then promote by PR to protected `SaaS-Main`.
+
+### Settled SaaS implementation decisions
+
+1. DigitalOcean deploys `sbchmn/Group-Test-Tracker`: customer SaaS apps track `SaaS-Main`, development testing uses `SaaS-Test`, and current non-SaaS clients remain on `main`.
+2. `discord_bot` covers the gateway worker, commands/linking/settings, Discord webhooks/notifications, and the Discord user notification channel.
+3. Analysis is never queued without `result_analysis`; environment changes restart the entire app, downgrade deployment 1 cancels pending work and idles the retained worker, deployment 2 removes it, and re-upgrade never automatically resumes canceled work.
+4. Suspended tenant administrators have only the explicit read-only test/results, sanitized test export, billing/support, session, and logout surface described above; user/participant exports, mutations, delivery, bot, and provider operations are blocked.
+5. Cross-repository authentication uses two independent per-tenant directional HMAC-SHA256 secrets with key IDs, a 60-second clock-skew allowance, 120-second maximum request lifetime, one-time nonces retained for 10 minutes, and current/previous rotation with the prior secret removed within 24 hours.
+6. The immutable support identity is `gtmsupport` / `support@grouptest.online`, authorized only by `system_account_key=control_plane_support`; enablement requires fresh tenant-admin consent, expires after 24 hours, and can be emergency-disabled locally.
+
+Remaining Phase 0 work is operational configuration (DigitalOcean IDs/scopes, DNS, Mailjet, Stripe, chain providers, retention/support policy) and shared contract fixtures, not an unresolved GTM product choice.
+
 ## Deferred Work
 
 - Separately deploy Telegram and Discord processes only after the shared service/API contract is stable.
@@ -247,7 +396,14 @@ Record future results with the exact command, pass/fail count, date, environment
 
 ## Known Risks
 
+- GTM does not yet parse or enforce the control-plane entitlement/subscription contract; deploying paid plans before these guards exist would rely only on removable workers and UI state.
+- GTM has no signed control-plane command/status API, automated hash-based administrator bootstrap, immutable support identity, session epoch, or DigitalOcean-ready health endpoint.
+- Three long-lived branches create drift and Alembic collision risk. Keep `main` fixes flowing one-way through `SaaS-Test` to `SaaS-Main`, protect the production branch, and record the exact common baseline before branch creation.
+- The current per-test export contains participant identity/payment data and cannot serve suspended recovery unchanged; the dedicated sanitized export is a security requirement.
+
 - The current branch has no automated GitHub verification signal.
+- Current SQLAlchemy configuration sets pre-ping/recycle but leaves default pool size/overflow in place; with two Gunicorn processes plus Discord/analysis processes, a Complete tenant can theoretically consume most connections on a small shared MySQL node. SaaS deployment requires explicit component pool budgets and a control-plane capacity gate.
+- Environment-only entitlement enforcement intentionally accepts a bounded deployment drain-window race for work already in flight; the two-deployment downgrade sequence cannot provide instantaneous revocation.
 - Real provider accuracy, latency, cost, and retention behavior still require fixture evaluation with production-like credentials before automatic analysis is enabled.
 - Runtime databases, notification logs, Python bytecode, and a debug script are tracked in the repository.
 - Telegram animation validation recognizes GIF signatures and MP4 `ftyp` markers but does not fully parse or transcode media containers.

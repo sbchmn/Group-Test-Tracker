@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}Terms of Service - Group Test Manager{% endblock %}
+
+{% block content %}
+<article class="legal-document mx-auto bg-white rounded p-4 p-md-5 shadow-sm">
+    <h1>Terms of Service</h1>
+    <p class="text-muted"><strong>Effective date:</strong> {{ legal_effective_date }}</p>
+
+    <p>
+        These Terms of Service ("Terms") govern your access to and use of Group Test Manager, including its
+        website, accounts, group-test coordination tools, public-result features, notifications, automated
+        report analysis, and Telegram and Discord bots (collectively, the "Service"). "Operator," "we," "us,"
+        and "our" mean {{ legal_operator_name }}, the person or organization that deploys and administers this
+        instance of the Service.
+        By creating an account, using the Service, interacting with one of its bots, or submitting content, you
+        agree to these Terms and the <a href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a>.
+    </p>
+
+    <h2>1. Eligibility and authority</h2>
+    <p>
+        You must be at least 18 years old and legally able to enter into these Terms. If you use the Service for
+        an organization or testing group, you represent that you are authorized to bind it. You may not use the
+        Service where doing so would violate applicable law, regulation, sanctions, professional obligations, or
+        third-party rights.
+    </p>
+
+    <h2>2. What the Service does—and does not do</h2>
+    <p>
+        The Service helps users coordinate independent laboratory testing, manage participation and cost sharing,
+        receive notifications, and organize or publish laboratory reports. It is an administrative tool. The
+        Operator is not, merely by providing the Service, a laboratory, medical provider, pharmacy, manufacturer,
+        seller, escrow agent, money transmitter, insurer, or guarantor of any participant, organizer, vendor,
+        compound, sample, laboratory, report, or result.
+    </p>
+    <p>
+        Content and extracted values are provided for informational and coordination purposes only. They are not
+        medical advice, diagnosis, treatment guidance, a representation that any substance is safe or lawful, or
+        a substitute for a qualified professional or the original laboratory report. Never make health or safety
+        decisions from the Service alone.
+    </p>
+
+    <h2>3. Accounts and linked platforms</h2>
+    <ul>
+        <li>Provide accurate information and keep it current.</li>
+        <li>Protect your password and single-use Telegram or Discord linking tokens.</li>
+        <li>You are responsible for activity under your account and linked messaging identities.</li>
+        <li>Notify an administrator promptly if you suspect unauthorized access.</li>
+        <li>Do not share an account, impersonate another person, or link a platform identity you do not control.</li>
+    </ul>
+    <p>
+        The Operator may approve, deny, limit, suspend, unlink, or deactivate accounts when reasonably necessary
+        to protect the Service, users, testing groups, or legal compliance. Platform linking does not transfer
+        ownership of your Telegram or Discord account to the Operator.
+    </p>
+
+    <h2>4. Group tests, participation, costs, and payments</h2>
+    <p>
+        Group-test descriptions, participant approvals, vial-donor designations, cost allocations, payment status,
+        shipping status, and deadlines are maintained by administrators and group organizers. Displayed amounts
+        may be estimates and can change as costs or participation change. Unless the Operator expressly states
+        otherwise in writing, payments occur outside the Service through third-party methods selected by the group,
+        and the Service does not hold funds or guarantee refunds, shipments, sample custody, laboratory performance,
+        or completion of a test.
+    </p>
+    <p>
+        You are responsible for reviewing the details of a group test before participating and for complying with
+        all laws governing any sample, material, payment, or shipment. Disputes among participants, organizers,
+        vendors, laboratories, or payment providers should be addressed directly with the responsible party.
+    </p>
+
+    <h2>5. Laboratory reports and public results</h2>
+    <p>
+        You may be able to upload a report, submit a public report link, contribute test information, or ask an
+        administrator to publish a result. You represent that you have the right to provide that material and permit
+        the Operator to store, process, reproduce, format, analyze, and display it as needed to operate the Service.
+        Do not submit confidential information, personal information, protected health information, trade secrets,
+        unlawfully obtained material, or content that infringes another person's rights.
+    </p>
+    <p>
+        Public Results are intended to be shared with the Service's user community and through enabled bot browsing
+        features. Group-test reports may have narrower access rules. Access controls reduce exposure but cannot
+        guarantee that an authorized recipient will not copy or redistribute a report. The Operator may correct,
+        decline, unpublish, or remove content that is inaccurate, unsupported, unlawful, unsafe, or inconsistent
+        with these Terms.
+    </p>
+
+    <h2>6. Automated report analysis</h2>
+    <p>
+        When enabled, the Service can send a submitted laboratory report and limited test context to one configured
+        artificial-intelligence provider—OpenAI, xAI (Grok), or Anthropic (Claude)—to propose structured values such
+        as identity, mass, purity, net content, endotoxin, or sterility. Automated extraction can be incomplete,
+        incorrect, or misleading. It does not validate a report's authenticity, laboratory methods, chain of
+        custody, sample identity, or fitness for any purpose. Proposed values require administrator review before
+        application, and the original report controls if there is any discrepancy.
+    </p>
+
+    <h2>7. Telegram, Discord, and webhook integrations</h2>
+    <p>
+        The Service may provide Telegram and Discord bots for account linking, test listings, status and participation
+        actions, public-result browsing, password-reset delivery, administrator-configured commands, notifications,
+        and—in Telegram—laboratory-report submission and administrator review. Commands or buttons sent in a group,
+        channel, server, or thread may be visible to other members according to that platform's permissions.
+    </p>
+    <p>
+        The Service may also send administrator-configured outbound messages to Discord webhooks and a generic
+        "Root" webhook. Root is an outbound notification transport, not an account-login provider. Messaging
+        platforms and webhook recipients are independent services with their own terms and privacy practices. The
+        Operator is not responsible for their availability, security, moderation, or onward handling of messages.
+        You may stop bot interactions, unlink an identity through the Service where available, or ask an administrator
+        for help; platform-side copies may remain under the platform's rules.
+    </p>
+
+    <h2>8. Acceptable use</h2>
+    <p>You may not use the Service to:</p>
+    <ul>
+        <li>break the law or facilitate unlawful acquisition, sale, shipment, use, or concealment of regulated goods;</li>
+        <li>misrepresent a sample, report, laboratory, result, payment, identity, or authorization;</li>
+        <li>upload malware or attempt unauthorized access, scraping, probing, denial of service, or security bypass;</li>
+        <li>harass, threaten, defraud, dox, spam, or expose another person's private information;</li>
+        <li>circumvent participation, result-visibility, bot-scope, rate-limit, or administrator-review controls;</li>
+        <li>use automated results as a claim of medical safety, regulatory approval, or guaranteed authenticity; or</li>
+        <li>interfere with the Service or third-party providers used to operate it.</li>
+    </ul>
+
+    <h2>9. Ownership and content license</h2>
+    <p>
+        The Operator and applicable licensors retain rights in the Service's software, branding, and original content.
+        You retain whatever rights you hold in content you submit. You grant the Operator a non-exclusive, worldwide,
+        royalty-free license to host, copy, process, transmit, format, and display that content only as reasonably
+        needed to operate, secure, improve, and administer the Service and to meet legal obligations. For content you
+        intentionally publish as a Public Result, that license includes making it available to Service users and
+        enabled bot interfaces until it is removed from publication, subject to backup and legal retention needs.
+    </p>
+
+    <h2>10. Third-party services and links</h2>
+    <p>
+        The Service depends on third parties that may include hosting, databases, object storage, email delivery,
+        laboratories, payment methods, Telegram, Discord, webhook recipients, AI providers, and Google Analytics.
+        A link or integration does not mean the Operator endorses or controls that third party. Your use of a third
+        party is governed by its own terms, and you are responsible for reviewing them.
+    </p>
+
+    <h2>11. Availability, changes, and termination</h2>
+    <p>
+        The Service may change, experience delays, lose integrations, or be unavailable. The Operator may modify or
+        discontinue features and may suspend or terminate access for violations, security risk, nonpayment, legal
+        requirements, or operational necessity. You may stop using the Service at any time. Account termination does
+        not automatically erase records the Operator must retain for legitimate operational, dispute, security, or
+        legal purposes.
+    </p>
+
+    <h2>12. Disclaimers</h2>
+    <p class="text-uppercase">
+        To the maximum extent permitted by law, the Service is provided “as is” and “as available.” The Operator
+        disclaims warranties of accuracy, authenticity, merchantability, fitness for a particular purpose,
+        non-infringement, availability, and error-free operation. The Operator does not warrant laboratory reports,
+        automated extractions, user statements, links, samples, substances, payments, shipments, or third-party services.
+    </p>
+
+    <h2>13. Limitation of liability</h2>
+    <p>
+        To the maximum extent permitted by law, the Operator and its administrators, contributors, and service
+        providers will not be liable for indirect, incidental, special, consequential, exemplary, or punitive damages,
+        lost profits or data, personal injury arising from reliance on Service content, or losses involving samples,
+        substances, payments, shipments, reports, or third-party services. Where liability cannot be excluded, it is
+        limited to the greater of the amount you paid the Operator to use the Service during the preceding 12 months
+        or US $100. Some jurisdictions do not allow certain exclusions, so these limits may not fully apply to you.
+    </p>
+
+    <h2>14. Indemnification</h2>
+    <p>
+        To the extent permitted by law, you agree to defend, indemnify, and hold harmless the Operator and its
+        administrators and contributors from claims, damages, and reasonable costs arising from your submitted
+        content, your violation of these Terms or applicable law, or your misuse of the Service. This obligation does
+        not apply to the extent a claim was caused by the indemnified party's own unlawful conduct.
+    </p>
+
+    <h2>15. Governing terms</h2>
+    <p>
+        These Terms are governed by {% if legal_governing_law %}{{ legal_governing_law }}{% else %}the law applicable
+        at the Operator's principal place of business{% endif %}, without regard to conflict-of-law rules, unless
+        mandatory law requires otherwise. Before filing a claim, you and the Operator
+        should attempt in good faith to resolve it through the Service's established administrator contact channel.
+        Nothing here limits rights that cannot lawfully be waived.
+    </p>
+    <p>
+        If a provision is unenforceable, it will be limited to the minimum extent necessary and the remaining provisions
+        will continue. Failure to enforce a provision is not a waiver. These Terms and the Privacy Policy form the
+        agreement for use of the Service unless the Operator provides additional written terms for a particular group.
+    </p>
+
+    <h2>16. Changes and contact</h2>
+    <p>
+        The Operator may update these Terms. The effective date above will change when revisions are posted, and
+        material changes will be communicated when required by law. Continued use after revised Terms take effect
+        constitutes acceptance where permitted. Questions or legal notices should be sent
+        {% if legal_contact_email %}to <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}
+        to the site administrator through the contact channel supplied for this deployment{% endif %}.
+        {% if legal_mailing_address %}The Operator's mailing address is {{ legal_mailing_address }}.{% endif %}
+    </p>
+</article>
+{% endblock %}

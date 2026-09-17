@@ -1,16 +1,18 @@
+import asyncio
 import json
+import os
 import tempfile
 import unittest
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from urllib.error import HTTPError
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramStatusDigestEvent, User, UserDigestEvent
+from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
 from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message
 
 
@@ -528,7 +530,8 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("https://discord.com/api/v10/channels/999888777/messages", request.full_url)
 
     def test_discord_bot_lifecycle_helpers_push_application_context(self):
-        from app import discord_bot
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
 
         def assert_context(value, **kwargs):
             self.assertIs(current_app._get_current_object(), self.app)
@@ -539,6 +542,295 @@ class NotificationTests(unittest.TestCase):
              patch.object(discord_bot, "send_discord_status_channel_message", side_effect=assert_context):
             self.assertEqual(discord_bot._append_bot_log("ready"), "ready")
             self.assertEqual(discord_bot._send_bot_status_message("connected"), "connected")
+
+    def test_discord_guild_sync_copies_global_commands_before_syncing(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        tree = Mock()
+        tree.sync = AsyncMock(side_effect=[[Mock(), Mock()], [Mock(), Mock()]])
+        subject = Mock(tree=tree)
+
+        with patch.object(discord_bot, '_config_value', return_value='123456789012345678'):
+            commands, scope = asyncio.run(discord_bot.DiscordBot._sync_commands(subject))
+
+        guild = tree.sync.await_args_list[0].kwargs['guild']
+        self.assertEqual(guild.id, 123456789012345678)
+        tree.clear_commands.assert_called_once_with(guild=guild)
+        tree.copy_global_to.assert_called_once_with(guild=guild)
+        self.assertEqual(tree.sync.await_count, 2)
+        self.assertEqual(tree.sync.await_args_list[0].kwargs, {'guild': guild})
+        self.assertEqual(tree.sync.await_args_list[1].kwargs, {})
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(
+            scope,
+            'guild 123456789012345678 and 2 global command(s)',
+        )
+
+    def test_discord_global_sync_does_not_build_a_guild_tree(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        tree = Mock()
+        tree.sync = AsyncMock(return_value=[Mock()])
+        subject = Mock(tree=tree)
+
+        with patch.object(discord_bot, '_config_value', return_value=''):
+            commands, scope = asyncio.run(discord_bot.DiscordBot._sync_commands(subject))
+
+        tree.sync.assert_awaited_once_with()
+        tree.clear_commands.assert_not_called()
+        tree.copy_global_to.assert_not_called()
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(scope, 'global scope')
+
+    def test_discord_worker_processes_a_new_command_sync_request_once(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        subject = Mock()
+        subject._last_command_sync_request_id = 'old-request'
+        subject._sync_commands = AsyncMock(return_value=([Mock(), Mock(), Mock()], 'guild 123'))
+        subject._command_sync_status = discord_bot.DiscordBot._command_sync_status
+
+        with patch.object(
+            discord_bot,
+            '_run_db',
+            new=AsyncMock(side_effect=['new-request', None]),
+        ) as mock_run_db, patch.object(discord_bot, '_append_bot_log'):
+            processed = asyncio.run(
+                discord_bot.DiscordBot._process_pending_command_sync(subject)
+            )
+
+        self.assertTrue(processed)
+        self.assertEqual(subject._last_command_sync_request_id, 'new-request')
+        subject._register_dynamic_commands.assert_called_once_with()
+        subject._sync_commands.assert_awaited_once_with()
+        self.assertEqual(mock_run_db.await_count, 2)
+        self.assertIs(mock_run_db.await_args_list[1].args[0], discord_bot._record_command_sync_result)
+        self.assertEqual(mock_run_db.await_args_list[1].args[1], 'new-request')
+        self.assertIn('Synchronized 3 command(s) to guild 123', mock_run_db.await_args_list[1].args[2])
+
+    def test_discord_dynamic_command_refresh_removes_stale_commands(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(TelegramCommandTemplate(
+                command='/fresh',
+                description='Fresh command',
+                reply_text='Fresh response',
+                is_active=True,
+            ))
+            db.session.commit()
+
+        tree = Mock()
+        subject = Mock(tree=tree)
+        subject._dynamic_command_names = {'stale'}
+        with patch.object(discord_bot, 'APP', self.app):
+            discord_bot.DiscordBot._register_dynamic_commands(subject)
+
+        tree.remove_command.assert_called_once_with('stale')
+        tree.add_command.assert_called_once()
+        self.assertEqual(tree.add_command.call_args.args[0].name, 'fresh')
+        self.assertEqual(subject._dynamic_command_names, {'fresh'})
+
+    def test_discord_media_only_custom_command_reads_bounded_attachment(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(
+                username='discord-media',
+                email='discord-media@example.com',
+                discord_user_id='4455',
+            )
+            user.set_password('secret')
+            template = TelegramCommandTemplate(
+                command='/groupbuy',
+                reply_text='',
+                response_image_key='result-images/bot-commands/example.mp4',
+                is_active=True,
+            )
+            db.session.add_all([user, template])
+            db.session.commit()
+            template_id = template.id
+
+            with patch.object(
+                discord_bot,
+                'read_result_file',
+                return_value=(b'video-bytes', 'video/mp4'),
+            ) as mock_read:
+                response = discord_bot._run_dynamic_command(
+                    template_id,
+                    '4455',
+                    'Discord Media',
+                    '7788',
+                    None,
+                    '',
+                )
+
+        mock_read.assert_called_once_with(
+            'result-images/bot-commands/example.mp4',
+            discord_bot.DISCORD_COMMAND_MEDIA_MAX_BYTES,
+        )
+        self.assertEqual(response['media_bytes'], b'video-bytes')
+        self.assertEqual(response['content'], '')
+        self.assertEqual(response['media_filename'], 'command-media.mp4')
+
+    def test_discord_custom_command_media_failure_preserves_text_or_fallback(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(
+                username='discord-media-failure',
+                email='discord-media-failure@example.com',
+                discord_user_id='5566',
+            )
+            user.set_password('secret')
+            template = TelegramCommandTemplate(
+                command='/groupbuy',
+                reply_text='',
+                response_image_key='private/command.gif',
+                is_active=True,
+            )
+            text_template = TelegramCommandTemplate(
+                command='/groupbuytext',
+                reply_text='The group buy is open.',
+                response_image_key='private/command.gif',
+                is_active=True,
+            )
+            db.session.add_all([user, template, text_template])
+            db.session.commit()
+
+            with patch.object(
+                discord_bot,
+                'read_result_file',
+                side_effect=discord_bot.StorageReadError('unavailable'),
+            ), patch.object(discord_bot, 'append_notification_log') as mock_log:
+                response = discord_bot._run_dynamic_command(
+                    template.id,
+                    '5566',
+                    'Discord Media',
+                    '8899',
+                    None,
+                    '',
+                )
+                text_response = discord_bot._run_dynamic_command(
+                    text_template.id,
+                    '5566',
+                    'Discord Media',
+                    '8899',
+                    None,
+                    '',
+                )
+
+        self.assertEqual(response, 'The configured command media is temporarily unavailable.')
+        self.assertEqual(text_response, 'The group buy is open.')
+        self.assertEqual(mock_log.call_count, 2)
+        self.assertTrue(all(
+            'StorageReadError' in call.args[0]
+            for call in mock_log.call_args_list
+        ))
+
+    def test_discord_custom_command_response_attaches_media_and_disables_mentions(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        async def edit_response():
+            interaction = Mock()
+            interaction.edit_original_response = AsyncMock()
+            await discord_bot._edit_discord_command_response(
+                interaction,
+                {
+                    'content': '@everyone Group buy',
+                    'media_bytes': b'GIF89a-media',
+                    'media_filename': discord_bot._discord_command_media_filename('../../unsafe.GIF'),
+                },
+            )
+            return interaction
+
+        interaction = asyncio.run(edit_response())
+        kwargs = interaction.edit_original_response.await_args.kwargs
+        self.assertEqual(kwargs['content'], '@everyone Group buy')
+        self.assertEqual(len(kwargs['attachments']), 1)
+        self.assertEqual(kwargs['attachments'][0].filename, 'command-media.gif')
+        self.assertEqual(kwargs['attachments'][0].fp.read(), b'GIF89a-media')
+        self.assertFalse(kwargs['allowed_mentions'].everyone)
+        self.assertFalse(kwargs['allowed_mentions'].users)
+        self.assertFalse(kwargs['allowed_mentions'].roles)
+
+    def test_discord_public_results_uses_validated_app_url_fallback(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        result = Mock(id=42, results_link='#')
+        self.assertEqual(
+            discord_bot._discord_public_result_url(result, 'https://tracker.example'),
+            'https://tracker.example/public-results/42',
+        )
+        self.assertIsNone(discord_bot._discord_public_result_url(result, ''))
+        result.results_link = 'javascript:alert(1)'
+        self.assertIsNone(discord_bot._discord_public_result_url(result, 'not-a-url'))
+
+    def test_discord_public_results_tag_callback_defers_and_handles_missing_links(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        async def run_callback():
+            view = discord_bot.PublicResultsView(('tags', 1, 1, [(7, 'Purity')]))
+            interaction = Mock()
+            interaction.user.id = 11
+            interaction.channel_id = 22
+            interaction.guild_id = 33
+            interaction.response.defer = AsyncMock()
+            interaction.edit_original_response = AsyncMock()
+            with patch.object(
+                discord_bot,
+                '_run_db',
+                new=AsyncMock(side_effect=[
+                    (True, None),
+                    ('Public Results', ('results', 7, 1, 1), [('Uploaded COA', None)]),
+                ]),
+            ):
+                await view.children[0].callback(interaction)
+            return interaction
+
+        interaction = asyncio.run(run_callback())
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.edit_original_response.assert_awaited_once()
+        rendered_view = interaction.edit_original_response.await_args.kwargs['view']
+        self.assertTrue(rendered_view.children[0].disabled)
+        self.assertIn('COA unavailable', rendered_view.children[0].label)
+
+    def test_discord_public_results_callback_reports_failure_after_deferring(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        async def run_callback():
+            view = discord_bot.PublicResultsView(('tags', 1, 1, [(7, 'Purity')]))
+            interaction = Mock()
+            interaction.user.id = 11
+            interaction.channel_id = 22
+            interaction.guild_id = 33
+            interaction.response.defer = AsyncMock()
+            interaction.edit_original_response = AsyncMock()
+            with patch.object(discord_bot, '_run_db', new=AsyncMock(side_effect=RuntimeError)), \
+                 patch.object(discord_bot, '_append_bot_log') as mock_log:
+                await view.children[0].callback(interaction)
+            return interaction, mock_log
+
+        interaction, mock_log = asyncio.run(run_callback())
+        interaction.response.defer.assert_awaited_once_with()
+        self.assertIn(
+            'could not load',
+            interaction.edit_original_response.await_args.kwargs['content'].lower(),
+        )
+        self.assertIn('RuntimeError', mock_log.call_args.args[0])
 
     def test_send_discord_status_channel_message_disables_mentions_in_payload(self):
         with self.app.app_context():

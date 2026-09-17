@@ -10,6 +10,18 @@
                 <p class="text-uppercase text-muted small mb-2">Application Version</p>
                 <h1 class="h3 mb-3">{{ app_name }} <span class="text-muted">v{{ app_version }}</span></h1>
                 <p class="mb-0">{{ app_release }}</p>
+                <hr>
+                <h2 class="h5">Provisioned Plan</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-5">Deployment</dt>
+                    <dd class="col-sm-7">{{ 'Managed' if plan_details.managed else 'Standalone' }}</dd>
+                    <dt class="col-sm-5">Subscription</dt>
+                    <dd class="col-sm-7">{{ plan_details.subscription_status|title }}</dd>
+                    <dt class="col-sm-5">Entitlement revision</dt>
+                    <dd class="col-sm-7">{{ plan_details.entitlement_revision }}</dd>
+                    <dt class="col-sm-5">Included features</dt>
+                    <dd class="col-sm-7">{{ plan_details.entitlements|join(', ') if plan_details.entitlements else 'Core features only' }}</dd>
+                </dl>
             </div>
         </div>
     </div>

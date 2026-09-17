@@ -53,8 +53,57 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Application Version", body)
-        self.assertIn("Version 3.2", body)
+        self.assertIn("Version 4.0", body)
         self.assertIn("href=\"/version\"", body)
+
+    def test_readiness_probes_are_public_and_side_effect_free(self):
+        response = self.client.get("/health/ready")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "ready"})
+        self.assertEqual(self.client.get("/heath/ready").status_code, 404)
+
+        self.assertEqual(self.client.post("/health/ready").status_code, 405)
+
+    def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):
+        terms_response = self.client.get("/terms")
+        privacy_response = self.client.get("/privacy")
+        register_response = self.client.get("/register")
+
+        self.assertEqual(terms_response.status_code, 200)
+        self.assertEqual(privacy_response.status_code, 200)
+        self.assertEqual(register_response.status_code, 200)
+
+        terms = terms_response.get_data(as_text=True)
+        privacy = privacy_response.get_data(as_text=True)
+        register = register_response.get_data(as_text=True)
+        for body in (terms, privacy, register):
+            self.assertIn('href="/terms"', body)
+            self.assertIn('href="/privacy"', body)
+
+        self.assertIn("Telegram, Discord, and webhook integrations", terms)
+        self.assertIn("Automated report analysis", terms)
+        self.assertIn("Google Analytics and cookies", privacy)
+        self.assertIn("Telegram bot processing", privacy)
+        self.assertIn("Discord bot processing", privacy)
+        self.assertIn("Root and other webhook notifications", privacy)
+        self.assertIn("OpenAI", privacy)
+        self.assertIn("xAI (Grok)", privacy)
+        self.assertIn("Anthropic (Claude)", privacy)
+
+    def test_legal_operator_fields_are_escaped(self):
+        self.app.config.update({
+            "LEGAL_OPERATOR_NAME": '<script>alert("operator")</script>',
+            "LEGAL_CONTACT_EMAIL": 'privacy@example.com',
+            "LEGAL_GOVERNING_LAW": '<b>Example law</b>',
+        })
+        response = self.client.get("/terms")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('<script>alert("operator")</script>', body)
+        self.assertIn('&lt;script&gt;alert', body)
+        self.assertNotIn('<b>Example law</b>', body)
+        self.assertIn('privacy@example.com', body)
 
     def test_admin_settings_hub_requires_admin_and_groups_configuration_links(self):
         with self.app.app_context():
@@ -74,6 +123,12 @@ class SecurityTests(unittest.TestCase):
         member_response = self.client.get("/admin/settings", follow_redirects=False)
         self.assertEqual(member_response.status_code, 302)
         self.assertIn("/dashboard", member_response.headers.get("Location", ""))
+        member_sync_response = self.client.post(
+            "/admin/settings/bots/discord/sync-commands",
+            follow_redirects=False,
+        )
+        self.assertEqual(member_sync_response.status_code, 302)
+        self.assertIn("/dashboard", member_sync_response.headers.get("Location", ""))
 
         self.client.get("/logout", follow_redirects=True)
         self.client.post("/login", data={"username": "settings-admin", "password": "secret"}, follow_redirects=True)
@@ -93,6 +148,8 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Bot Integrations", bot_page)
         self.assertIn("/admin/telegram-config", bot_page)
         self.assertIn("Discord Bot Token", bot_page)
+        self.assertIn("Synchronize Commands", bot_page)
+        self.assertIn("/admin/settings/bots/discord/sync-commands", bot_page)
         self.assertIn("Root Webhook URL", bot_page)
 
         save_response = self.client.post(
@@ -116,6 +173,23 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(values["discord_bot_token"], "discord-token")
         self.assertEqual(values["discord_status_channel_id"], "channel-123")
         self.assertEqual(values["root_webhook_url"], "https://root.example/webhook")
+
+        sync_response = self.client.post(
+            "/admin/settings/bots/discord/sync-commands",
+            follow_redirects=False,
+        )
+        self.assertEqual(sync_response.status_code, 302)
+        self.assertIn("/admin/settings/bots", sync_response.headers.get("Location", ""))
+        with self.app.app_context():
+            request_id = NotificationConfig.query.filter_by(
+                key="discord_command_sync_request_id"
+            ).first()
+            sync_status = NotificationConfig.query.filter_by(
+                key="discord_command_sync_status"
+            ).first()
+        self.assertIsNotNone(request_id)
+        self.assertTrue(request_id.value)
+        self.assertIn("Waiting for the Discord worker", sync_status.value)
 
         telegram_save = self.client.post(
             "/admin/settings/bots",
@@ -165,6 +239,49 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(disabled_response.status_code, 302)
         with self.app.app_context():
             self.assertEqual(NotificationConfig.query.filter_by(key="builtin_publicresults_enabled").first().value, "false")
+
+    def test_core_plan_gates_paid_settings_and_keeps_discord_card_visible(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="core-plan-admin", email="core-plan-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        os.environ.update({
+            "GTT_DEPLOYMENT_MODE": "managed",
+            "GTT_ENTITLEMENTS": "",
+            "GTT_ENTITLEMENT_REVISION": "9",
+            "GTT_SUBSCRIPTION_STATUS": "active",
+            "GTT_USER_DOCUMENTATION_URL": "https://docs.example/user",
+            "GTT_ADMIN_DOCUMENTATION_URL": "https://docs.example/admin",
+        })
+        self.client.post("/login", data={"username": "core-plan-admin", "password": "secret"}, follow_redirects=True)
+
+        settings_page = self.client.get("/admin/settings").get_data(as_text=True)
+        self.assertIn("Result analysis isn't included in the current plan.", settings_page)
+        self.assertNotIn("Open Result Analysis", settings_page)
+
+        bot_page_response = self.client.get("/admin/settings/bots")
+        self.assertEqual(bot_page_response.status_code, 200)
+        bot_page = bot_page_response.get_data(as_text=True)
+        self.assertIn("> Discord</h5>", bot_page)
+        self.assertIn("Discord isn't included in the current plan.", bot_page)
+        self.assertNotIn("Synchronize Commands", bot_page)
+        self.assertIn('name="discord_bot_token"', bot_page)
+        self.assertIn('disabled', bot_page)
+
+        self.assertEqual(self.client.get("/admin/settings/result-analysis").status_code, 404)
+        self.assertEqual(self.client.post("/admin/settings/bots/discord/sync-commands").status_code, 404)
+
+        version_page = self.client.get("/version").get_data(as_text=True)
+        self.assertIn("Managed", version_page)
+        self.assertIn("Subscription", version_page)
+        self.assertIn("Entitlement revision", version_page)
+        self.assertIn("Core features only", version_page)
+        self.assertIn("User Docs", version_page)
+        self.assertIn("Admin Docs", version_page)
+        self.assertNotIn('class="nav-link" href="https://docs.example/user"', version_page)
 
     def test_create_user_does_not_flash_generated_password(self):
         with self.app.app_context():
@@ -992,6 +1109,33 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Provide a results link or upload an image/PDF.", response.get_data(as_text=True))
+
+    def test_edit_open_group_test_without_result_file_succeeds(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="edit-test-admin", email="edit-test-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Original title", status="recruiting", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "edit-test-admin", "password": "secret"})
+        response = self.client.post(
+            f"/admin/edit-test/{test_id}",
+            data={"title": "Updated title", "status": "recruiting"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"/test/{test_id}", response.headers["Location"])
+        with self.app.app_context():
+            updated = db.session.get(GroupTest, test_id)
+            self.assertEqual(updated.title, "Updated title")
+            self.assertIsNone(updated.results_link)
+            self.assertIsNone(updated.results_image_key)
 
     def test_telegram_public_results_tag_click_handles_image_only_certificate(self):
         with self.app.app_context():

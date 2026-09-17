@@ -6,14 +6,23 @@ All extensions initialized here without circular imports.
 """
 
 import os
-from flask import Flask
+from flask import Flask, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf import CSRFProtect
 from flask_migrate import Migrate
 from dotenv import load_dotenv
-from .version import APP_VERSION
+from .version import APP_NAME, APP_VERSION
+from .saas import (
+    managed_admin_docs_url,
+    managed_mode_enabled,
+    managed_public_url,
+    managed_user_docs_url,
+    instance_status_payload,
+    report_instance_event,
+    subscription_status,
+)
 
 # Extensions (initialized in create_app to support factory)
 db = SQLAlchemy()
@@ -32,10 +41,31 @@ def create_app(config_overrides=None):
     # DigitalOcean App Platform and similar proxies terminate TLS upstream.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config['APP_VERSION'] = APP_VERSION
+    app.config['LEGAL_OPERATOR_NAME'] = os.environ.get('LEGAL_OPERATOR_NAME', '').strip()
+    app.config['LEGAL_CONTACT_EMAIL'] = os.environ.get('LEGAL_CONTACT_EMAIL', '').strip()
+    app.config['LEGAL_MAILING_ADDRESS'] = os.environ.get('LEGAL_MAILING_ADDRESS', '').strip()
+    app.config['LEGAL_GOVERNING_LAW'] = os.environ.get('LEGAL_GOVERNING_LAW', '').strip()
+    app.config['LEGAL_EFFECTIVE_DATE'] = os.environ.get('LEGAL_EFFECTIVE_DATE', 'September 12, 2026').strip()
 
     @app.context_processor
     def inject_app_version():
-        return {'app_version': app.config['APP_VERSION']}
+        return {
+            'app_version': app.config['APP_VERSION'],
+            'legal_operator_name': app.config.get('LEGAL_OPERATOR_NAME') or f'{APP_NAME} operator',
+            'legal_contact_email': app.config.get('LEGAL_CONTACT_EMAIL'),
+            'legal_mailing_address': app.config.get('LEGAL_MAILING_ADDRESS'),
+            'legal_governing_law': app.config.get('LEGAL_GOVERNING_LAW'),
+            'legal_effective_date': app.config.get('LEGAL_EFFECTIVE_DATE') or 'September 12, 2026',
+            'managed_mode': managed_mode_enabled(),
+            'managed_public_url': managed_public_url(),
+            'managed_user_docs_url': managed_user_docs_url(),
+            'managed_admin_docs_url': managed_admin_docs_url(),
+            'subscription_status': subscription_status(),
+        }
+
+    @app.get('/health/ready')
+    def readiness_probe():
+        return jsonify({'status': 'ready'}), 200
     
     # === Configuration ===
     # SECRET_KEY required for sessions, CSRF, Flask-Login
@@ -114,11 +144,26 @@ def create_app(config_overrides=None):
     @login_manager.user_loader
     def load_user(user_id):
         from .models import User
-        return User.query.get(int(user_id))
+        # get_id() embeds the session epoch as "<id>:<epoch>"; a mismatch (e.g. after a
+        # support-account disable/rotate) must invalidate the session immediately.
+        try:
+            raw_id, _, raw_epoch = str(user_id).partition(':')
+            user = User.query.get(int(raw_id))
+        except (TypeError, ValueError):
+            return None
+        if user is None:
+            return None
+        if raw_epoch and str(user.session_epoch) != raw_epoch:
+            return None
+        if user.is_reserved_support_account and not user.support_access_active:
+            return None
+        return user
     
     # === Register Blueprints ===
     from .routes import main_bp
     app.register_blueprint(main_bp)
+    from .control_plane_routes import control_plane_bp
+    app.register_blueprint(control_plane_bp)
 
     # === Notification defaults ===
     with app.app_context():
@@ -213,6 +258,9 @@ def create_app(config_overrides=None):
         from .result_analysis.jobs import process_next_run
 
         with app.app_context():
+            report_instance_event('status', {
+                **instance_status_payload(component='result-analysis-worker', ready=True),
+            })
             click.echo(f'Result analysis worker started; polling every {poll_seconds} seconds.')
             while True:
                 run = None
@@ -227,7 +275,29 @@ def create_app(config_overrides=None):
                     return
                 if not run:
                     time.sleep(poll_seconds)
-    
+
+    # Alias matching the SaaS control plane's provisioned run_command exactly.
+    app.cli.add_command(result_analysis_worker, name='run-result-analysis-worker')
+
+    @app.cli.command('report-control-plane-status')
+    def report_control_plane_status():
+        """Report the current managed tenant status to the control plane."""
+        from .version import APP_VERSION
+        result = report_instance_event('status', {
+            **instance_status_payload(component='control-plane-status', ready=True),
+        })
+        click.echo('Control-plane status reported.' if result is not False else 'Control-plane status report failed.')
+
+    @app.cli.command('run-discord-bot')
+    def run_discord_bot():
+        """Start the Discord gateway worker (control-plane managed deployments)."""
+        from . import discord_bot
+
+        report_instance_event('status', {
+            **instance_status_payload(component='discord-bot-worker', ready=True),
+        })
+        discord_bot.main()
+
     # === Shell context for easy debugging ===
     @app.shell_context_processor
     def make_shell_context():

@@ -83,29 +83,53 @@
                     <span class="badge text-bg-{{ 'success' if integration_status.discord else 'secondary' }}">{{ 'Configured' if integration_status.discord else 'Needs setup' }}</span>
                 </div>
                 <p class="card-text text-muted">Bot token, application and guild identifiers, status channel, and optional webhook delivery.</p>
+                {% if not discord_in_plan %}
+                <p class="alert alert-secondary py-2">Discord isn't included in the current plan.</p>
+                {% endif %}
                 <div class="mb-3">
                     {{ form.discord_bot_token.label(class="form-label") }}
-                    {{ form.discord_bot_token(class="form-control") }}
+                    {{ form.discord_bot_token(class="form-control", disabled=not discord_in_plan) }}
                 </div>
                 <div class="mb-3">
                     {{ form.discord_application_id.label(class="form-label") }}
-                    {{ form.discord_application_id(class="form-control") }}
+                    {{ form.discord_application_id(class="form-control", disabled=not discord_in_plan) }}
                 </div>
                 <div class="mb-3">
                     {{ form.discord_guild_id.label(class="form-label") }}
-                    {{ form.discord_guild_id(class="form-control") }}
+                    {{ form.discord_guild_id(class="form-control", disabled=not discord_in_plan) }}
                 </div>
                 <div class="mb-3">
                     {{ form.discord_status_channel_id.label(class="form-label") }}
-                    {{ form.discord_status_channel_id(class="form-control", placeholder="123456789012345678") }}
+                    {{ form.discord_status_channel_id(class="form-control", placeholder="123456789012345678", disabled=not discord_in_plan) }}
                 </div>
                 <div class="mb-3">
                     {{ form.discord_webhook_url.label(class="form-label") }}
-                    {{ form.discord_webhook_url(class="form-control", placeholder="https://discord.com/api/webhooks/...") }}
+                    {{ form.discord_webhook_url(class="form-control", placeholder="https://discord.com/api/webhooks/...", disabled=not discord_in_plan) }}
                 </div>
                 <div class="mb-3">
                     {{ form.discord_webhook_username.label(class="form-label") }}
-                    {{ form.discord_webhook_username(class="form-control", placeholder="Group Test Manager") }}
+                    {{ form.discord_webhook_username(class="form-control", placeholder="Group Test Manager", disabled=not discord_in_plan) }}
+                </div>
+                <div class="border-top pt-3 mt-3">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        {% if discord_in_plan %}
+                        <button
+                            type="submit"
+                            class="btn btn-outline-primary"
+                            formaction="{{ url_for('main.synchronize_discord_commands') }}"
+                            formmethod="post"
+                        >Synchronize Commands</button>
+                        {% endif %}
+                        {% if discord_command_sync.pending %}
+                            <span class="badge text-bg-warning">Waiting for worker</span>
+                        {% endif %}
+                    </div>
+                    <div class="form-text">
+                        Save configuration changes before synchronizing. The Discord worker checks for requests every 5 seconds.
+                    </div>
+                    {% if discord_command_sync.status %}
+                        <div class="small mt-2" role="status">{{ discord_command_sync.status }}</div>
+                    {% endif %}
                 </div>
             </div>
         </div>

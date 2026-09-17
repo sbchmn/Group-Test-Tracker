@@ -200,3 +200,41 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     wb.save(output)
     output.seek(0)
     return output
+
+
+def generate_sanitized_test_export(test: GroupTest) -> BytesIO:
+    """Create a recovery export without identity, participant, payment, or notes data."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Group Test Recovery'
+    ws.append(['Field', 'Value'])
+    ws.append(['Title', test.title or ''])
+    ws.append(['Start Date', test.start_date])
+    ws.append(['Vendor', test.vendor or ''])
+    ws.append(['Batch Number', test.batch_number or ''])
+    ws.append(['Compound', test.compound or ''])
+    ws.append(['Size', test.size or ''])
+    ws.append(['Status', test.status or ''])
+    ws.append(['Lab Name', test.lab_name or ''])
+    ws.append(['Results Link', test.results_link or ''])
+    ws.append([])
+    ws.append(['Lab Test', 'Price', 'Vials Needed', 'Result'])
+    for item in test.lab_test_details or []:
+        ws.append([
+            item.get('name') or '',
+            item.get('price') or 0,
+            item.get('vials_needed') or 0,
+            item.get('result') or '',
+        ])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for cell in ws[14] if ws.max_row >= 14 else []:
+        cell.font = Font(bold=True)
+    ws.column_dimensions['A'].width = 24
+    ws.column_dimensions['B'].width = 28
+    ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['D'].width = 28
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output

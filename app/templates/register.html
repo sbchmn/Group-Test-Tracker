@@ -38,6 +38,12 @@
                             {% for e in form.confirm_password.errors %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
                         </div>
                     </div>
+                    <p class="small text-muted">
+                        By creating an account, you agree to the
+                        <a href="{{ url_for('main.terms_of_service') }}" target="_blank" rel="noopener">Terms of Service</a>
+                        and acknowledge the
+                        <a href="{{ url_for('main.privacy_policy') }}" target="_blank" rel="noopener">Privacy Policy</a>.
+                    </p>
                     <button type="submit" class="btn btn-success w-100">{{ form.submit.label.text }}</button>
                 </form>
             </div>

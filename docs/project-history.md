@@ -2,6 +2,22 @@
 
 > Archived from the original `PROJECT_MAP.md` on 2026-09-10. This file preserves the chronological engineering record. For the maintained current-state map, see [`../PROJECT_MAP.md`](../PROJECT_MAP.md).
 
+## 2026-09-16 - Managed SaaS Control-Plane Parity
+
+Implemented the GTM side of the managed control-plane contract: signed bootstrap/support endpoints with replay and idempotency protection, reserved support-account immutability with session epochs, entitlement and subscription gating, managed documentation/public URL handling, signed instance-to-control-plane events, worker startup status reporting, support request/emergency-disable actions, and sanitized recovery export behavior.
+
+Added SaaS regression coverage for outbound canonical signing and managed URL isolation. Fixed Telegram review tag staging so unsaved selections remain draft state, and fixed the Discord lifecycle test to provide the application secret required by module-level bot initialization.
+
+Validation completed on 2026-09-16:
+
+```text
+tests.test_control_plane: 11 tests passed in 9.980s
+tests.test_security: 70 tests passed in 65.624s
+Full unittest suite: 188 tests passed in 175.470s
+```
+
+The suite emits existing deprecation warnings. Production migration execution, live control-plane event delivery, real bot deployment checks, and the broader GTM roadmap remain operational follow-up rather than test failures.
+
 ## 2026-09-11 - Telegram COA Review and Public Result Detail Improvements
 
 ### Scope
@@ -1670,3 +1686,118 @@ Before adding or changing an internal bot API endpoint, answer these questions i
 - Coverage verifies needs-review and failed runs render, resolved runs do not render, participation filters do not hide analysis attention, and acknowledged failures leave the queue while retaining their record.
 - The final pagination-context adjustment passed its two targeted Action Queue tests.
 - `git diff --check` passed; existing Python, SQLAlchemy, and Flask-Migrate deprecation warnings remain.
+
+## Public Terms, Privacy, and Python Bytecode Ignore
+
+### Applied Changes
+
+- Added anonymous `/terms` and `/privacy` pages and linked them from the shared footer and registration form.
+- Documented group-test coordination, public/group reports, Telegram and Discord bots, Root and Discord webhooks, OpenAI/xAI/Anthropic extraction, external services, Google Analytics, retention, privacy rights, acceptable use, liability, and administrator review limitations.
+- Added environment-configurable operator name, privacy contact, mailing address, governing law, and policy effective date with setup guidance.
+- Added `*.pyc` and `__pycache__/` ignore patterns; already tracked bytecode remains tracked until explicitly removed from Git.
+
+### Security / Reliability / Performance Review
+
+- Public legal routes are read-only, perform no database or network work, and rely on Jinja auto-escaping for deployment-provided legal fields.
+- Policies expose no integration credentials or live user/bot identifiers and do not claim HIPAA coverage, AI accuracy, or an automatic retention schedule that the application does not implement.
+- Google Analytics is disclosed conditionally; the repository still contains no Google tag, advertising feature, consent banner, or Analytics runtime request.
+- Static templates and footer links add no material runtime cost.
+
+### Validation Results
+
+- Three focused legal-route, footer, registration, disclosure, and escaping tests passed in the final run in 0.203 seconds.
+- The full security suite ran 70 tests in 75.967 seconds: 68 passed and two existing Telegram callback mock-signature assertions failed because the baseline implementation passes an explicit `None` notice argument.
+- Python compilation, ignore-rule inspection, and `git diff --check` passed.
+
+## Discord Guild and On-Demand Command Synchronization
+
+### Applied Changes
+
+- Corrected guild-scoped registration by clearing the local guild tree, copying the current global command definitions into it, and then synchronizing the configured guild.
+- Added an administrator-only Synchronize Commands action to Bot Integrations with queued/completed status stored in the shared configuration table.
+- Added a five-second Discord worker watcher that processes each unique request once, reloads active custom commands, removes stale dynamic commands, and records a sanitized success or failure result.
+- Documented the Discord worker command, shared-database requirement, guild/global behavior, and administrator refresh workflow.
+
+### Security / Reliability / Performance Review
+
+- The request route is authenticated, administrator-only, POST-only, and protected by the application's CSRF middleware.
+- Status and logs omit bot credentials and raw exception details; database values and rendered status are bounded.
+- Failed requests do not retry indefinitely, worker shutdown cancels the watcher, and repeated or already processed request IDs are ignored.
+- Idle polling performs one indexed configuration lookup every five seconds; command reload and Discord API synchronization happen only at startup or for a new request.
+
+### Validation Results
+
+- Focused guild/global synchronization, worker request, dynamic refresh, route authorization, persistence, and UI tests passed.
+- The full notification suite passed 46 tests in 44.701 seconds.
+- The full security suite ran 70 tests in 76.061 seconds: 68 passed, including the changed administrator workflow, and the same two pre-existing Telegram callback mock-signature assertions failed.
+- Python compilation and `git diff --check` passed.
+
+## Discord Public Results Tag Callback Recovery
+
+### Applied Changes
+
+- Acknowledge Discord tag and pagination button interactions before database work so Discord does not expire the interaction while results load.
+- Validate direct COA links as absolute HTTP(S) URLs and replace blank, placeholder, or invalid values with the configured authenticated Public Result detail URL.
+- Render uploaded-file-only results as unavailable when no application base URL is configured instead of raising during button construction.
+- Preserve navigation for empty tag state and show a generic retry response while logging bounded failure context when callback rendering fails.
+
+### Security / Reliability / Performance Review
+
+- Existing Discord command and destination authorization remains unchanged and is rechecked for every button interaction.
+- Non-web URL schemes and hostless values cannot become Discord link buttons; generated application links retain the existing login requirement.
+- Error responses exclude exception details, and the worker log records only tag/page context and exception type.
+- The change adds no external requests or polling and performs one configuration lookup per rendered result page.
+
+### Validation Results
+
+- Three focused URL fallback, immediate acknowledgement, missing-link rendering, and failure recovery tests passed.
+- The complete notification suite passed 49 tests in 44.194 seconds.
+- `git diff --check` passed.
+
+## Discord Direct-Message Command Availability
+
+### Applied Changes
+
+- Kept configured-guild synchronization first for immediate server command availability.
+- Added global synchronization of the same command tree when a Guild ID is configured so `/start` and other authorized commands can appear in bot DMs.
+- Updated administrator documentation to distinguish immediate guild registration from potentially slower global propagation.
+
+### Security / Reliability / Performance Review
+
+- Command discovery scope changed, but account-link tokens, linked-user checks, command enablement, and destination allowlists remain the authorization boundaries.
+- Synchronization remains a pair of bulk Discord API operations only at worker startup or on a unique administrator request.
+- A failure in either synchronization operation is surfaced through existing worker logging and synchronization status.
+
+### Validation Results
+
+- Three focused guild/global and worker-request tests passed in 0.300 seconds.
+- The complete notification suite passed 49 tests in 44.302 seconds.
+- `git diff --check` passed.
+
+## Discord Custom Command Media Parity
+
+### Applied Changes
+
+- Extended shared custom-command execution so Discord sends the image, GIF, or Telegram-converted MP4 configured on the existing command template.
+- Preserved text-only commands and combined text-plus-media responses while making media-only commands valid Discord responses.
+- Read command media from private object storage only after existing identity, scope, argument, and rate-limit checks succeed.
+- Added a useful temporary-unavailable response for media-only storage failures and retained configured text as the fallback for combined responses.
+- Documented Discord custom-command media behavior and its 8 MiB application limit in the README and administrator quick start.
+
+### Security / Reliability / Performance Review
+
+- Private object keys and storage exception messages are not sent to Discord or written to diagnostics.
+- Storage reads are capped at 8 MiB, attachment filenames are generated from an allowlisted extension, reply text is bounded to Discord's content limit, and broad mentions are disabled.
+- Interaction acknowledgement still occurs before database or storage work, and blocking reads run in the existing worker thread rather than the Discord event loop.
+- Text-only commands avoid storage access and media allocation; media commands perform one bounded object read per successful invocation.
+
+### Validation Results
+
+- Three focused media-only, storage-failure, safe-filename, attachment, and mention-suppression tests passed in 2.601 seconds.
+- The complete notification suite passed 52 tests in 46.768 seconds.
+- `git diff --check` passed.
+
+### Remaining Risks
+
+- Discord client and codec support determines whether an MP4 is animated inline or offered as a downloadable attachment.
+- Media larger than 8 MiB intentionally falls back instead of uploading, and the private-storage path still needs deployment verification with the live Discord worker.

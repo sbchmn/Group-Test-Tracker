@@ -354,7 +354,7 @@ class ResultAnalysisTests(unittest.TestCase):
 
         ok, _ = handle_review_callback(self.user, '-10042', None, f'ra:tags:{run.id}:0')
         self.assertTrue(ok)
-        tag_page = edit_message.call_args.args[2]
+        tag_page = edit_message.call_args.args[3]
         tag_buttons = [button for row in tag_page['inline_keyboard'] for button in row if button['callback_data'].startswith(f'ra:tag:{run.id}:')]
         self.assertEqual(len(tag_buttons), 10)
 

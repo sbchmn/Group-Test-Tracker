@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import discord
 from discord import app_commands
@@ -13,6 +15,7 @@ from discord.ext import commands
 from sqlalchemy.exc import IntegrityError
 
 from . import create_app, db
+from .saas import entitlement_enabled, managed_public_url
 from .models import (
     DiscordCommandInvocation,
     DiscordLinkToken,
@@ -24,8 +27,18 @@ from .models import (
 )
 from .notifications import append_notification_log, render_notification_template, send_discord_status_channel_message
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
+from .storage import StorageConfigurationError, StorageReadError, read_result_file
 
 APP = create_app()
+
+if not entitlement_enabled('discord_bot'):
+    raise RuntimeError('Discord bot is not enabled for this managed tenant.')
+
+COMMAND_SYNC_REQUEST_KEY = 'discord_command_sync_request_id'
+COMMAND_SYNC_PROCESSED_KEY = 'discord_command_sync_processed_id'
+COMMAND_SYNC_STATUS_KEY = 'discord_command_sync_status'
+COMMAND_SYNC_POLL_SECONDS = 5
+DISCORD_COMMAND_MEDIA_MAX_BYTES = 8 * 1024 * 1024
 
 
 def _append_bot_log(message, debug=False):
@@ -46,6 +59,20 @@ def _config_value(key, default=None):
         if item is None:
             return default
         return item.value
+
+
+def _record_command_sync_result(request_id, status):
+    """Persist the latest processed request so web and worker processes can coordinate."""
+    with APP.app_context():
+        values = {
+            COMMAND_SYNC_PROCESSED_KEY: request_id,
+            COMMAND_SYNC_STATUS_KEY: str(status or '')[:500],
+        }
+        for key, value in values.items():
+            item = NotificationConfig.query.filter_by(key=key).first() or NotificationConfig(key=key)
+            item.value = value
+            db.session.add(item)
+        db.session.commit()
 
 
 def _builtin_enabled(command_name):
@@ -187,9 +214,34 @@ def _public_results_discord_page(tag_id=None, page=1):
     lines = [f'Public Results for {tag.name} (page {page}/{total_pages}):']
     for result in results:
         lines.append(f'- {result.title} ({result.created_at.strftime("%Y-%m-%d")})')
+    service_base_url = str(_config_value('service_base_url') or '').strip()
     return '\n'.join(lines), ('results', tag.id, page, total_pages), [
-        (result.title, result.results_link) for result in results
+        (result.title, _discord_public_result_url(result, service_base_url)) for result in results
     ]
+
+
+def _valid_discord_button_url(value):
+    candidate = str(value or '').strip()
+    if candidate.lower() in {'', '#', 'none', 'null', 'about:blank'}:
+        return None
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {'http', 'https'} or not parsed.hostname:
+        return None
+    return candidate
+
+
+def _discord_public_result_url(result, service_base_url=''):
+    direct_url = _valid_discord_button_url(result.results_link)
+    if direct_url:
+        return direct_url
+
+    base_url = _valid_discord_button_url(managed_public_url() or service_base_url)
+    if not base_url:
+        return None
+    return f"{base_url.rstrip('/')}/public-results/{result.id}"
 
 
 def _run_discord_public_results(user_id, channel_id, guild_id):
@@ -244,9 +296,30 @@ class PublicResultsView(discord.ui.View):
             self.add_item(close)
             return
 
+        if self.state[0] != 'results':
+            back = discord.ui.Button(label='Back to Tags', style=discord.ButtonStyle.secondary)
+            back.callback = self._tags_page_callback(1)
+            self.add_item(back)
+            close = discord.ui.Button(label='Close', style=discord.ButtonStyle.danger)
+            close.callback = self._close_callback()
+            self.add_item(close)
+            return
+
         _, tag_id, page, total_pages, items = self.state
         for title, result_link in items:
-            self.add_item(discord.ui.Button(label=f'COA: {title}'[:80], style=discord.ButtonStyle.link, url=result_link))
+            if result_link:
+                button = discord.ui.Button(
+                    label=f'COA: {title}'[:80],
+                    style=discord.ButtonStyle.link,
+                    url=result_link,
+                )
+            else:
+                button = discord.ui.Button(
+                    label=f'COA unavailable: {title}'[:80],
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+            self.add_item(button)
         back = discord.ui.Button(label='Back to Tags', style=discord.ButtonStyle.secondary)
         back.callback = self._tags_page_callback(1)
         self.add_item(back)
@@ -264,12 +337,34 @@ class PublicResultsView(discord.ui.View):
 
     def _render_callback(self, tag_id, page):
         async def callback(button_interaction):
-            allowed, message = await _run_db(_discord_public_results_access, button_interaction.user.id, button_interaction.channel_id, button_interaction.guild_id)
-            if not allowed:
-                await button_interaction.response.send_message(message, ephemeral=True)
-                return
-            body, state, items = await _run_db(_public_results_discord_page, tag_id, page)
-            await button_interaction.response.edit_message(content=body, view=PublicResultsView((*state, items) if state[0] in {'tags', 'results'} else state))
+            await button_interaction.response.defer()
+            try:
+                allowed, message = await _run_db(
+                    _discord_public_results_access,
+                    button_interaction.user.id,
+                    button_interaction.channel_id,
+                    button_interaction.guild_id,
+                )
+                if not allowed:
+                    await button_interaction.edit_original_response(content=message, view=None)
+                    return
+                body, state, items = await _run_db(_public_results_discord_page, tag_id, page)
+                if state and state[0] in {'tags', 'results'}:
+                    next_view = PublicResultsView((*state, items))
+                elif state:
+                    next_view = PublicResultsView(state)
+                else:
+                    next_view = None
+                await button_interaction.edit_original_response(content=body, view=next_view)
+            except Exception as exc:
+                _append_bot_log(
+                    'discord: publicresults callback failed '
+                    f'tag={tag_id or "tags"} page={page} error={type(exc).__name__}'
+                )
+                await button_interaction.edit_original_response(
+                    content='Discord could not load those Public Results. Please try again.',
+                    view=self,
+                )
         return callback
 
     def _tag_callback(self, tag_id):
@@ -487,6 +582,42 @@ def _render_custom_command_reply(template, interaction, args_text):
     return render_notification_template(template.reply_text, context)
 
 
+def _discord_command_media_filename(object_key):
+    extension = os.path.splitext(str(object_key or '').lower())[1]
+    if extension not in {'.gif', '.jpg', '.jpeg', '.png', '.webp', '.mp4'}:
+        extension = '.bin'
+    return f'command-media{extension}'
+
+
+def _discord_command_content(value):
+    content = str(value or '').strip()
+    if len(content) <= 2000:
+        return content
+    return f'{content[:1997]}...'
+
+
+async def _edit_discord_command_response(interaction, response):
+    if not isinstance(response, dict):
+        response = {'content': response}
+
+    content = _discord_command_content(response.get('content'))
+    media_bytes = response.get('media_bytes')
+    attachments = []
+    if media_bytes:
+        attachments.append(discord.File(
+            io.BytesIO(media_bytes),
+            filename=response.get('media_filename') or 'command-media.bin',
+        ))
+    if not content and not attachments:
+        content = 'Command completed without a configured response.'
+
+    await interaction.edit_original_response(
+        content=content or None,
+        attachments=attachments,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+
 def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id, guild_id, args_text):
     template = db.session.get(TelegramCommandTemplate, template_id)
     if template is None or not template.is_active:
@@ -521,7 +652,25 @@ def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id,
 
     reply_text = _render_custom_command_reply(template, command_interaction, args_text)
     _record_custom_command_invocation(template, channel_id)
-    return reply_text or "Command completed without a configured response."
+    if not template.response_image_key:
+        return reply_text or "Command completed without a configured response."
+
+    try:
+        media_bytes, _ = read_result_file(
+            template.response_image_key,
+            DISCORD_COMMAND_MEDIA_MAX_BYTES,
+        )
+    except (StorageConfigurationError, StorageReadError) as exc:
+        append_notification_log(
+            f'discord: custom command media unavailable: {type(exc).__name__}'
+        )
+        return reply_text or 'The configured command media is temporarily unavailable.'
+
+    return {
+        'content': reply_text,
+        'media_bytes': media_bytes,
+        'media_filename': _discord_command_media_filename(template.response_image_key),
+    }
 
 
 class DiscordBot(commands.Bot):
@@ -534,9 +683,25 @@ class DiscordBot(commands.Bot):
             await interaction.response.send_message(message, ephemeral=True)
 
     async def setup_hook(self):
+        self._dynamic_command_names = set()
         self._register_static_commands()
         self._register_dynamic_commands()
-        await self._sync_commands()
+        synced_commands, sync_scope = await self._sync_commands()
+        _append_bot_log(
+            f"discord: synchronized {len(synced_commands)} command(s) to {sync_scope}"
+        )
+
+        request_id = str(_config_value(COMMAND_SYNC_REQUEST_KEY) or '').strip()
+        self._last_command_sync_request_id = request_id
+        if request_id:
+            _record_command_sync_result(
+                request_id,
+                self._command_sync_status(len(synced_commands), sync_scope),
+            )
+        self._command_sync_watcher_task = asyncio.create_task(
+            self._watch_command_sync_requests(),
+            name='discord-command-sync-watcher',
+        )
 
     def _register_static_commands(self):
         @self.tree.command(name="help", description="Show available commands")
@@ -634,6 +799,10 @@ class DiscordBot(commands.Bot):
             await interaction.edit_original_response(content=text, view=view)
 
     def _register_dynamic_commands(self):
+        for command_name in getattr(self, '_dynamic_command_names', set()):
+            self.tree.remove_command(command_name)
+        self._dynamic_command_names = set()
+
         with APP.app_context():
             templates = TelegramCommandTemplate.query.filter_by(is_active=True).order_by(TelegramCommandTemplate.command.asc()).all()
 
@@ -641,14 +810,14 @@ class DiscordBot(commands.Bot):
 
         for template in templates:
             command_name = _normalize_command_name(template.command)
-            if not command_name or command_name in reserved_names:
+            if not command_name or command_name in reserved_names or command_name in self._dynamic_command_names:
                 _append_bot_log(f"discord: skipped dynamic command collision or invalid name: {template.command}", debug=True)
                 continue
 
             def _make_dynamic_command(template):
                 async def dynamic_command(interaction: discord.Interaction, args: str | None = None):
                     await interaction.response.defer(ephemeral=True)
-                    text = await _run_db(
+                    response = await _run_db(
                         _run_dynamic_command,
                         template.id,
                         interaction.user.id,
@@ -657,7 +826,7 @@ class DiscordBot(commands.Bot):
                         interaction.guild_id,
                         str(args or "").strip(),
                     )
-                    await interaction.edit_original_response(content=text)
+                    await _edit_discord_command_response(interaction, response)
 
                 return dynamic_command
 
@@ -669,14 +838,75 @@ class DiscordBot(commands.Bot):
                     callback=_make_dynamic_command(template),
                 )
             )
+            self._dynamic_command_names.add(command_name)
 
     async def _sync_commands(self):
         guild_id = str(_config_value('discord_guild_id') or '').strip()
         if guild_id:
             guild = discord.Object(id=int(guild_id))
-            await self.tree.sync(guild=guild)
-            return
-        await self.tree.sync()
+            self.tree.clear_commands(guild=guild)
+            self.tree.copy_global_to(guild=guild)
+            guild_commands = await self.tree.sync(guild=guild)
+            global_commands = await self.tree.sync()
+            return (
+                guild_commands,
+                f'guild {guild_id} and {len(global_commands)} global command(s)',
+            )
+        return await self.tree.sync(), 'global scope'
+
+    @staticmethod
+    def _command_sync_status(command_count, sync_scope):
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        return f'Synchronized {command_count} command(s) to {sync_scope} at {timestamp}.'
+
+    async def _watch_command_sync_requests(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                await self._process_pending_command_sync()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _append_bot_log(
+                    f'discord: command synchronization watcher error: {type(exc).__name__}'
+                )
+            await asyncio.sleep(COMMAND_SYNC_POLL_SECONDS)
+
+    async def _process_pending_command_sync(self):
+        request_id = str(
+            await _run_db(_config_value, COMMAND_SYNC_REQUEST_KEY, '') or ''
+        ).strip()
+        if not request_id or request_id == self._last_command_sync_request_id:
+            return False
+
+        # Mark first so a failed request does not create an unbounded retry loop.
+        self._last_command_sync_request_id = request_id
+        try:
+            self._register_dynamic_commands()
+            synced_commands, sync_scope = await self._sync_commands()
+            status = self._command_sync_status(len(synced_commands), sync_scope)
+            _append_bot_log(f'discord: {status.lower()}')
+        except Exception as exc:
+            status = (
+                'Command synchronization failed at '
+                f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')} "
+                f'({type(exc).__name__}). Check the Discord worker log.'
+            )
+            _append_bot_log(
+                f'discord: requested command synchronization failed: {type(exc).__name__}'
+            )
+        await _run_db(_record_command_sync_result, request_id, status)
+        return True
+
+    async def close(self):
+        watcher = getattr(self, '_command_sync_watcher_task', None)
+        if watcher is not None:
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
+        await super().close()
 
 
 async def _run_bot():

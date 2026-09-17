@@ -18,7 +18,7 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
 from datetime import datetime, date
-from datetime import timedelta
+from datetime import timedelta, timezone
 from functools import wraps
 from itertools import zip_longest
 from sqlalchemy import and_, or_
@@ -53,7 +53,21 @@ from .models import (
     PaymentOption,
     ResultAnalysisRun,
 )
-from .export import generate_test_export
+from .system_accounts import is_reserved_identity
+from .saas import (
+    entitlement_revision,
+    entitlement_enabled,
+    entitlements,
+    managed_admin_docs_url,
+    managed_mode_enabled,
+    managed_user_docs_url,
+    managed_public_url,
+    report_instance_event,
+    subscription_access_allowed,
+    subscription_is_readonly,
+    subscription_status,
+)
+from .export import generate_sanitized_test_export, generate_test_export
 from .notifications import (
     append_notification_log,
     read_notification_log,
@@ -94,6 +108,29 @@ from .result_analysis.settings import ENV_KEYS, PROVIDERS, get_analysis_settings
 main_bp = Blueprint('main', __name__)
 
 
+@main_bp.before_request
+def enforce_managed_tenant_contract():
+    if request.method in {'GET', 'HEAD', 'OPTIONS'}:
+        return None
+
+    recovery_actions = {
+        'main.logout',
+        'main.login',
+        'main.password_reset',
+        'main.request_managed_support',
+        'main.emergency_disable_managed_support',
+    }
+    if subscription_is_readonly() and request.endpoint not in recovery_actions:
+        flash('This tenant is in read-only recovery mode. Write actions are disabled until the subscription is restored.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    if not subscription_access_allowed() and request.endpoint not in recovery_actions:
+        flash('This tenant is not allowed to perform write actions right now.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    return None
+
+
 @main_bp.route('/version')
 def version_info():
     return render_template(
@@ -101,7 +138,25 @@ def version_info():
         app_name=APP_NAME,
         app_version=APP_VERSION,
         app_release=APP_RELEASE,
+        plan_details={
+            'managed': managed_mode_enabled(),
+            'subscription_status': subscription_status(),
+            'entitlement_revision': entitlement_revision(),
+            'entitlements': sorted(entitlements()),
+        },
     )
+
+
+@main_bp.route('/terms')
+def terms_of_service():
+    """Public terms for the web application and its bot integrations."""
+    return render_template('terms.html')
+
+
+@main_bp.route('/privacy')
+def privacy_policy():
+    """Public privacy notice for the web application and its integrations."""
+    return render_template('privacy.html')
 
 
 # ==================== FORMS ====================
@@ -617,6 +672,9 @@ def _build_telegram_deep_link(token_value):
 
 
 def _resolve_telegram_webhook_url(config_map):
+    managed_url = managed_public_url()
+    if managed_url:
+        return f"{managed_url}{url_for('main.telegram_webhook')}"
     explicit_url = str(config_map.get('telegram_webhook_url') or '').strip()
     if explicit_url:
         if explicit_url.endswith('/telegram/webhook'):
@@ -630,6 +688,9 @@ def _resolve_telegram_webhook_url(config_map):
 
 
 def _resolve_service_base_url(config_map):
+    managed_url = managed_public_url()
+    if managed_url:
+        return managed_url
     service_base = str(config_map.get('service_base_url') or '').strip()
     if service_base:
         return service_base.rstrip('/')
@@ -1190,6 +1251,9 @@ def register():
         return redirect(url_for('main.dashboard'))
     form = RegisterForm()
     if form.validate_on_submit():
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'warning')
+            return render_template('register.html', form=form)
         if User.query.filter_by(username=form.username.data).first():
             flash('Username already taken.', 'warning')
             return render_template('register.html', form=form)
@@ -1241,7 +1305,9 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
-        if user and user.check_password(form.password.data):
+        if user and user.check_password(form.password.data) and user.is_active and (
+            not user.is_reserved_support_account or user.support_access_active
+        ):
             login_user(user, remember=form.remember.data)
             flash(f'Welcome back, {user.username}!', 'success')
             next_page = request.args.get('next')
@@ -1265,6 +1331,9 @@ def password_reset():
     form = PasswordResetForm()
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
+        if user is not None and user.is_reserved_support_account:
+            flash('No account matched that username.', 'warning')
+            return redirect(url_for('main.login'))
         if user:
             selected_channel = form.notification_channel.data or user.notification_channel or 'email'
             if selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip():
@@ -1295,6 +1364,9 @@ def password_reset():
 @admin_required
 def send_password_reset_admin(user_id):
     user = User.query.get_or_404(user_id)
+    if user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.manage_users'))
     new_password = os.urandom(6).hex()
     user.set_password(new_password)
     sent = send_password_reset(user, new_password)
@@ -1312,6 +1384,9 @@ def send_password_reset_admin(user_id):
 def profile():
     """Allow users to update their own profile info and password."""
     form = ProfileForm(obj=current_user)
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
     if form.validate_on_submit():
         existing_username = User.query.filter(User.username == form.username.data, User.id != current_user.id).first()
         existing_email = User.query.filter(User.email == form.email.data, User.id != current_user.id).first()
@@ -1376,6 +1451,9 @@ def profile():
 @main_bp.route('/profile/telegram-link-token', methods=['POST'])
 @login_required
 def create_telegram_link_token():
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
     token = _issue_telegram_link_token(current_user)
     db.session.commit()
 
@@ -1391,6 +1469,9 @@ def create_telegram_link_token():
 @main_bp.route('/profile/discord-link-token', methods=['POST'])
 @login_required
 def create_discord_link_token():
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
     token = _issue_discord_link_token(current_user)
     db.session.commit()
 
@@ -2401,7 +2482,10 @@ def telegram_webhook():
                 'Telegram callback processing failed chat=%s message=%s data=%s',
                 callback_chat_id, callback_message_id, callback_data[:120],
             )
-        answer_telegram_callback_query(callback_query.get('id'), callback_notice)
+        if callback_notice:
+            answer_telegram_callback_query(callback_query.get('id'), callback_notice)
+        else:
+            answer_telegram_callback_query(callback_query.get('id'))
         if handled:
             db.session.commit()
         else:
@@ -3210,19 +3294,7 @@ def edit_test(test_id):
         clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
         upload_file = request.files.get('results_image')
         has_new_upload = bool(upload_file and upload_file.filename)
-        if not result_link and not has_new_upload and (clear_existing_image or not result.results_image_key):
-            flash('Provide a results link or upload an image/PDF.', 'danger')
-            public_results = PublicResult.query.order_by(PublicResult.posted_at.desc()).all()
-            return render_template(
-                'admin/public_results.html',
-                form=form,
-                public_results=public_results,
-                editing_result=result,
-                tag_suggestions=get_all_tag_names(),
-                storage_settings=get_storage_settings(),
-                editing_result_image_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
-                **_analysis_template_context(result),
-            )
+        test.results_link = (form.results_link.data or '').strip() or None
         if has_new_upload:
             try:
                 new_key = upload_result_image(upload_file, 'group-tests')
@@ -3864,7 +3936,9 @@ def admin_settings():
             'telegram': bool(configs.get('telegram_bot_token')),
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
             'storage': bool(str(configs.get('storage_enabled') or '').lower() == 'true'),
-            'result_analysis': analysis_settings['enabled'],
+            'result_analysis': analysis_settings['enabled'] and entitlement_enabled('result_analysis'),
+            'result_analysis_in_plan': entitlement_enabled('result_analysis'),
+            'discord_in_plan': entitlement_enabled('discord_bot'),
         },
     )
 
@@ -3883,6 +3957,8 @@ _ANALYSIS_SECRET_PLACEHOLDER = '••••••••••••'
 @login_required
 @admin_required
 def result_analysis_config():
+    if not entitlement_enabled('result_analysis'):
+        abort(404)
     form = ResultAnalysisSettingsForm()
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     effective = get_analysis_settings()
@@ -3959,6 +4035,8 @@ def result_analysis_config():
 @login_required
 @admin_required
 def test_result_analysis_provider(provider):
+    if not entitlement_enabled('result_analysis'):
+        abort(404)
     if provider not in PROVIDERS:
         abort(404)
     config = None
@@ -4024,6 +4102,7 @@ def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None)
 @admin_required
 def bot_integrations():
     form = BotIntegrationsForm()
+    discord_in_plan = entitlement_enabled('discord_bot')
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     existing_discord_bot_token = str(configs.get('discord_bot_token') or '').strip()
     existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
@@ -4047,12 +4126,12 @@ def bot_integrations():
             'telegram_digest_enabled': 'true' if form.telegram_digest_enabled.data else 'false',
             'telegram_digest_window_minutes': str(int(form.telegram_digest_window_minutes.data or 10)),
             'service_base_url': form.service_base_url.data,
-            'discord_bot_token': submitted_discord_bot_token,
-            'discord_application_id': form.discord_application_id.data,
-            'discord_guild_id': form.discord_guild_id.data,
-            'discord_status_channel_id': form.discord_status_channel_id.data,
-            'discord_webhook_url': form.discord_webhook_url.data,
-            'discord_webhook_username': form.discord_webhook_username.data,
+            'discord_bot_token': submitted_discord_bot_token if discord_in_plan else existing_discord_bot_token,
+            'discord_application_id': form.discord_application_id.data if discord_in_plan else configs.get('discord_application_id'),
+            'discord_guild_id': form.discord_guild_id.data if discord_in_plan else configs.get('discord_guild_id'),
+            'discord_status_channel_id': form.discord_status_channel_id.data if discord_in_plan else configs.get('discord_status_channel_id'),
+            'discord_webhook_url': form.discord_webhook_url.data if discord_in_plan else configs.get('discord_webhook_url'),
+            'discord_webhook_username': form.discord_webhook_username.data if discord_in_plan else configs.get('discord_webhook_username'),
             'root_webhook_url': form.root_webhook_url.data,
             'root_webhook_name': form.root_webhook_name.data,
         })
@@ -4091,12 +4170,46 @@ def bot_integrations():
         'admin/bot_integrations.html',
         form=form,
         webhook_secret_mask=mask_secret(existing_webhook_secret),
+        discord_command_sync={
+            'pending': bool(configs.get('discord_command_sync_request_id')) and (
+                configs.get('discord_command_sync_request_id')
+                != configs.get('discord_command_sync_processed_id')
+            ),
+            'status': configs.get('discord_command_sync_status'),
+        },
         integration_status={
             'telegram': bool(configs.get('telegram_bot_token')),
             'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
             'root': bool(configs.get('root_webhook_url')),
         },
+        discord_in_plan=discord_in_plan,
     )
+
+
+@main_bp.route('/admin/settings/bots/discord/sync-commands', methods=['POST'])
+@login_required
+@admin_required
+def synchronize_discord_commands():
+    if not entitlement_enabled('discord_bot'):
+        abort(404)
+    bot_token = NotificationConfig.query.filter_by(key='discord_bot_token').first()
+    if not bot_token or not str(bot_token.value or '').strip():
+        flash('Configure and save a Discord bot token before synchronizing commands.', 'danger')
+        return redirect(url_for('main.bot_integrations'))
+
+    requested_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    request_id = f'{requested_at}-{secrets.token_hex(4)}'
+    _save_notification_config_values({
+        'discord_command_sync_request_id': request_id,
+        'discord_command_sync_status': (
+            f'Command synchronization requested at {requested_at}. '
+            'Waiting for the Discord worker.'
+        ),
+    })
+    db.session.commit()
+    append_notification_log('discord: administrator requested command synchronization')
+    flash('Discord command synchronization queued. The worker normally processes it within 5 seconds.', 'success')
+    return redirect(url_for('main.bot_integrations'))
 
 
 @main_bp.route('/admin/settings/commands')
@@ -4798,7 +4911,61 @@ def storage_config():
 def manage_users():
     """Admin page to view all users."""
     users = User.query.order_by(User.created_at.desc()).all()
-    return render_template('admin/manage_users.html', users=users)
+    support_user = User.query.filter_by(system_account_key='control_plane_support').first()
+    support_status = None
+    if support_user is not None:
+        if support_user.support_access_active:
+            support_status = 'enabled'
+        elif support_user.support_state == 'enabled' and support_user.support_expires_at is not None:
+            support_status = 'expired'
+        else:
+            support_status = 'disabled'
+    return render_template('admin/manage_users.html', users=users, support_user=support_user, support_status=support_status)
+
+
+@main_bp.route('/admin/managed-support/request', methods=['POST'])
+@login_required
+@admin_required
+def request_managed_support():
+    """Ask the private control plane to make temporary support access available."""
+    reason = str(request.form.get('reason') or '').strip()
+    if len(reason) < 8 or len(reason) > 500:
+        flash('Support access requires a reason between 8 and 500 characters.', 'danger')
+        return redirect(url_for('main.manage_users'))
+    consent_reference = f'support-request:{current_user.id}:{secrets.token_urlsafe(16)}'
+    result = report_instance_event('support_access_requested', {
+        'reason': reason,
+        'consent_reference': consent_reference,
+    })
+    if result is False:
+        flash('Support access request could not be delivered. Contact the service operator.', 'danger')
+    else:
+        flash('Support access request sent to the service operator.', 'success')
+    return redirect(url_for('main.manage_users'))
+
+
+@main_bp.route('/admin/managed-support/emergency-disable', methods=['POST'])
+@login_required
+@admin_required
+def emergency_disable_managed_support():
+    """Immediately disable the reserved support account and notify the control plane."""
+    support_user = User.query.filter_by(system_account_key='control_plane_support').first()
+    if support_user is not None:
+        support_user.is_active = False
+        support_user.support_state = 'disabled'
+        support_user.support_expires_at = None
+        support_user.session_epoch += 1
+        db.session.commit()
+    result = report_instance_event('support_emergency_disabled', {
+        'requested_by_user_id': current_user.id,
+        'requested_by_username': current_user.username,
+        'support_account_disabled': support_user is not None,
+    })
+    if result is False:
+        flash('Support access was disabled locally, but the control plane notification failed.', 'warning')
+    else:
+        flash('Support access was disabled and the control plane was notified.', 'success')
+    return redirect(url_for('main.manage_users'))
 
 
 @main_bp.route('/admin/users/new', methods=['GET', 'POST'])
@@ -4808,6 +4975,9 @@ def create_user():
     """Admin creates a new user."""
     form = UserForm()
     if form.validate_on_submit():
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'danger')
+            return render_template('admin/create_user.html', form=form)
         if User.query.filter_by(username=form.username.data).first():
             flash('Username already exists.', 'danger')
             return render_template('admin/create_user.html', form=form)
@@ -4850,6 +5020,9 @@ def create_user():
 def edit_user(user_id):
     """Admin edits an existing user."""
     user = User.query.get_or_404(user_id)
+    if user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.manage_users'))
     form = UserForm(obj=user)
     form.password.validators = [Optional(), Length(min=6)]
 
@@ -4893,6 +5066,9 @@ def edit_user(user_id):
 def toggle_user_active(user_id):
     """Quick toggle active/inactive."""
     user = User.query.get_or_404(user_id)
+    if user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.manage_users'))
     user.is_active = not user.is_active
     db.session.commit()
     status = "activated" if user.is_active else "deactivated"
@@ -5113,4 +5289,21 @@ def export_test(test_id):
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
         download_name=filename
+    )
+
+
+@main_bp.route('/test/<int:test_id>/recovery-export')
+@login_required
+def recovery_export_test(test_id):
+    """Export only non-personal group-test data for suspended managed tenants."""
+    if not subscription_is_readonly() or not current_user.is_admin:
+        abort(403)
+    test = GroupTest.query.get_or_404(test_id)
+    output = generate_sanitized_test_export(test)
+    filename = f"group_test_{test.id}_recovery_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename,
     )

@@ -21,7 +21,7 @@ from datetime import datetime, date
 from datetime import timedelta, timezone
 from functools import wraps
 from itertools import zip_longest
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 import secrets
@@ -52,6 +52,8 @@ from .models import (
     UserDigestEvent,
     PaymentOption,
     ResultAnalysisRun,
+    group_test_tags,
+    public_result_tags,
 )
 from .system_accounts import is_reserved_identity
 from .links import safe_http_url, validate_http_link
@@ -230,7 +232,7 @@ class GroupTestForm(FlaskForm):
     # results_link only relevant when closed; shown in template conditionally
     results_link = StringField('Results Link (URL - shown only to approved members when Closed)',
                                validators=[Optional(), Length(max=500), validate_http_link])
-    tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    tag_text = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     payment_option_ids = SelectMultipleField('Available Payment Options', coerce=int, choices=[], validators=[Optional()])
     
     submit = SubmitField('Save Group Test')
@@ -240,7 +242,7 @@ class PublicResultForm(FlaskForm):
     title = StringField('Result Title', validators=[DataRequired(), Length(max=200)])
     summary = TextAreaField('Summary / Notes', validators=[Optional()])
     results_link = StringField('Results Link (optional when a file is uploaded)', validators=[Optional(), Length(max=500), validate_http_link])
-    tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    tag_text = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     submit = SubmitField('Save Public Result')
 
 
@@ -1216,6 +1218,114 @@ def apply_tags_to_record(record, tag_text):
 
 def get_all_tag_names():
     return [tag.name for tag in Tag.query.order_by(Tag.name).all()]
+
+
+# (association table, owning column, usage counter name)
+_TAG_LINKS = (
+    (group_test_tags, 'group_test_id', 'tests'),
+    (public_result_tags, 'public_result_id', 'results'),
+)
+
+
+def _tag_record_ids(link_table, owner_column, tag_id):
+    return {
+        row[0]
+        for row in db.session.execute(
+            select(link_table.c[owner_column]).where(link_table.c.tag_id == tag_id)
+        )
+    }
+
+
+def _tag_usage(tag_ids):
+    """tag id -> usage counts, in two queries rather than one per tag."""
+    wanted = set(tag_ids)
+    usage = {tag_id: {'tests': 0, 'results': 0} for tag_id in wanted}
+    if not wanted:
+        return usage
+    for link_table, owner_column, counter in _TAG_LINKS:
+        rows = db.session.execute(select(link_table.c.tag_id, link_table.c[owner_column]))
+        for tag_id, _owner_id in rows:
+            if tag_id in wanted:
+                usage[tag_id][counter] += 1
+    return usage
+
+
+def _levenshtein_distance(left, right):
+    if abs(len(left) - len(right)) > 2:
+        return 3
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        for j, right_char in enumerate(right):
+            current.append(min(
+                previous[j + 1] + 1,
+                current[j] + 1,
+                previous[j] + (0 if left_char == right_char else 1),
+            ))
+        previous = current
+    return previous[-1]
+
+
+def _duplicate_tag_pairs(tags):
+    """Candidate merge pairs for an admin: shared stem or a two-character edit apart.
+
+    Buckets on the first three characters so this stays quadratic only inside a
+    bucket. It only *suggests*; deciding whether two tags mean the same thing is
+    the admin's call, so there is no automatic data cleanup here.
+    """
+    buckets = {}
+    for tag in tags:
+        slug = re.sub(r'[^a-z0-9]', '', tag.name.lower())
+        if len(slug) < 3:
+            continue
+        buckets.setdefault(slug[:3], []).append(tag)
+
+    pairs = []
+    for bucket in buckets.values():
+        if len(bucket) < 2 or len(bucket) > 40:
+            continue
+        for index, left in enumerate(bucket):
+            for right in bucket[index + 1:]:
+                left_name = left.name.lower().strip()
+                right_name = right.name.lower().strip()
+                distance = _levenshtein_distance(left_name, right_name)
+                shares_stem = left_name.startswith(right_name) or right_name.startswith(left_name)
+                if distance <= 2 or shares_stem:
+                    pairs.append({'left': left, 'right': right, 'distance': distance})
+    pairs.sort(key=lambda pair: (pair['distance'], pair['left'].name.lower(), pair['right'].name.lower()))
+    return pairs
+
+
+def _merge_tag_links(source_id, target_id):
+    """Re-point links from source to target, dropping the ones target already has.
+
+    The association tables have composite primary keys, so a record tagged with both
+    source and target would collide on a plain update.
+    """
+    moved = {}
+    for link_table, owner_column, counter in _TAG_LINKS:
+        source_rows = _tag_record_ids(link_table, owner_column, source_id)
+        target_rows = _tag_record_ids(link_table, owner_column, target_id)
+        overlap = source_rows & target_rows
+        if overlap:
+            db.session.execute(
+                delete(link_table).where(
+                    link_table.c.tag_id == source_id,
+                    link_table.c[owner_column].in_(overlap),
+                )
+            )
+        remaining = source_rows - overlap
+        if remaining:
+            db.session.execute(
+                update(link_table)
+                .where(
+                    link_table.c.tag_id == source_id,
+                    link_table.c[owner_column].in_(remaining),
+                )
+                .values(tag_id=target_id)
+            )
+        moved[counter] = len(remaining)
+    return moved
 
 
 def parse_item_results(names, results):
@@ -3266,7 +3376,7 @@ def create_test():
     populate_donor_shipping_choices(form)
     populate_payment_option_choices(form)
     if not form.is_submitted():
-        form.tag_names.data = ''
+        form.tag_text.data = ''
         form.payment_option_ids.data = []
     if form.validate_on_submit():
         lab_items = []
@@ -3334,7 +3444,7 @@ def create_test():
             test.payment_options = PaymentOption.query.filter(PaymentOption.id.in_(selected_payment_ids)).all()
         db.session.add(test)
         db.session.flush()
-        apply_tags_to_record(test, form.tag_names.data)
+        apply_tags_to_record(test, form.tag_text.data)
         db.session.commit()
         if uploaded_image_key:
             _queue_uploaded_result_analysis(test, current_user.id)
@@ -3356,8 +3466,11 @@ def edit_test(test_id):
     form = GroupTestForm(obj=test)  # Pre-populate
     populate_donor_shipping_choices(form)
     populate_payment_option_choices(form, include_ids=[option.id for option in test.payment_options])
+    # tag_text has no matching model attribute, so it never arrives via obj=; and a
+    # re-render that omitted the field must not save an empty list and clear the tags.
+    if 'tag_text' not in request.form:
+        form.tag_text.data = test.tag_names()
     if not form.is_submitted():
-        form.tag_names.data = test.tag_names()
         form.payment_option_ids.data = [option.id for option in test.payment_options if option.is_active]
     if form.donor_shipping_reimbursed_by_id.data in (None, '') and test.donor_shipping_reimbursed_by_id:
         form.donor_shipping_reimbursed_by_id.data = test.donor_shipping_reimbursed_by_id
@@ -3428,7 +3541,7 @@ def edit_test(test_id):
             obsolete_image_keys.append(test.results_image_key)
             test.results_image_key = None
 
-        apply_tags_to_record(test, form.tag_names.data)
+        apply_tags_to_record(test, form.tag_text.data)
         selected_payment_ids = form.payment_option_ids.data or []
         if selected_payment_ids:
             test.payment_options = PaymentOption.query.filter(PaymentOption.id.in_(selected_payment_ids)).all()
@@ -4147,8 +4260,14 @@ def add_participant_to_test(test_id):
 def admin_settings():
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     analysis_settings = get_analysis_settings()
+    all_tags = Tag.query.all()
+    tag_usage = _tag_usage([tag.id for tag in all_tags])
     return render_template(
         'admin/settings.html',
+        tag_count=len(all_tags),
+        unused_tag_count=sum(
+            1 for counts in tag_usage.values() if not (counts['tests'] or counts['results'])
+        ),
         settings_status={
             'email': bool(configs.get('mailjet_sender_email')),
             'telegram': bool(configs.get('telegram_bot_token')),
@@ -5041,6 +5160,167 @@ def toggle_payment_option(option_id):
     return redirect(url_for('main.payment_options'))
 
 
+@main_bp.route('/admin/tags')
+@login_required
+@admin_required
+def tags():
+    all_tags = Tag.query.order_by(Tag.name.asc()).all()
+    usage = _tag_usage([tag.id for tag in all_tags])
+    rows = [
+        {
+            'tag': tag,
+            'tests': usage[tag.id]['tests'],
+            'results': usage[tag.id]['results'],
+            'total': usage[tag.id]['tests'] + usage[tag.id]['results'],
+        }
+        for tag in all_tags
+    ]
+    # Unused tags first: that set is safe to act on without any consequences, so it
+    # is where a cleanup pass on an existing deployment starts.
+    rows.sort(key=lambda row: (1 if row['total'] else 0, -row['total'], row['tag'].name.lower()))
+
+    # The merge picker is driven by query params so a row's "Merge" link, a rename
+    # clash, and a duplicate suggestion can all pre-fill it without any scripting.
+    merge_source_id = request.args.get('merge_source', type=int)
+    merge_target_id = request.args.get('merge_target', type=int)
+    merge_source = next((tag for tag in all_tags if tag.id == merge_source_id), None)
+    merge_options = [
+        {'id': tag.id, 'name': tag.name}
+        for tag in all_tags
+        if merge_source is None or tag.id != merge_source.id
+    ]
+
+    # Suggest which way round each merge goes: keep the better-used spelling and
+    # absorb the weaker one into it, alphabetical only when usage ties.
+    duplicate_pairs = []
+    for pair in _duplicate_tag_pairs(all_tags):
+        left, right = pair['left'], pair['right']
+        left_total = usage[left.id]['tests'] + usage[left.id]['results']
+        right_total = usage[right.id]['tests'] + usage[right.id]['results']
+        if left_total < right_total or (left_total == right_total and left.name.lower() > right.name.lower()):
+            source, target = left, right
+        else:
+            source, target = right, left
+        duplicate_pairs.append({'source': source, 'target': target, 'distance': pair['distance']})
+
+    return render_template(
+        'admin/tags.html',
+        tag_rows=rows,
+        duplicate_pairs=duplicate_pairs,
+        unused_count=sum(1 for row in rows if not row['total']),
+        merge_source=merge_source,
+        merge_counts=usage,
+        merge_options=merge_options,
+        merge_target_id=merge_target_id,
+    )
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/rename', methods=['POST'])
+@login_required
+@admin_required
+def rename_tag(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+    new_name = (request.form.get('name') or '').strip()
+
+    if not new_name:
+        flash('A tag needs a name.', 'danger')
+        return redirect(url_for('main.tags'))
+    if len(new_name) > 120:
+        flash('Tag names are limited to 120 characters.', 'danger')
+        return redirect(url_for('main.tags'))
+
+    normalized = new_name.lower()
+    clash = Tag.query.filter(
+        Tag.normalized_name == normalized,
+        Tag.id != tag.id,
+    ).first()
+    if clash is not None:
+        # normalized_name is unique, so this rename would become a merge. Offer the
+        # merge preselected rather than making the admin find both tags again.
+        flash(
+            f'A tag named "{clash.name}" already exists. Use Merge to move these tags instead.',
+            'danger',
+        )
+        return redirect(url_for('main.tags', merge_source=tag.id, merge_target=clash.id))
+    if new_name == tag.name:
+        flash('That tag already has this name.', 'info')
+        return redirect(url_for('main.tags'))
+
+    tag.name = new_name
+    # Both columns are unique and the create path looks up by normalized_name only,
+    # so they have to move together or they desynchronise.
+    tag.normalized_name = normalized
+    db.session.commit()
+    flash(
+        f'Tag renamed to "{new_name}". Tags drive dashboard grouping and sorting, '
+        'so tests may appear in different sections.',
+        'success',
+    )
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/merge', methods=['POST'])
+@login_required
+@admin_required
+def merge_tag(tag_id):
+    source = Tag.query.get_or_404(tag_id)
+    target_id = request.form.get('into_tag_id', type=int)
+    target = Tag.query.get_or_404(target_id) if target_id else None
+
+    if target is None:
+        flash('Choose the tag to merge into.', 'danger')
+        return redirect(url_for('main.tags'))
+    if target.id == source.id:
+        flash('A tag cannot be merged into itself.', 'danger')
+        return redirect(url_for('main.tags'))
+
+    source_name = source.name
+    target_name = target.name
+    try:
+        moved = _merge_tag_links(source.id, target.id)
+        db.session.delete(source)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash('The tags changed while you were merging them. Reload and try again.', 'danger')
+        return redirect(url_for('main.tags'))
+
+    # Tag links are reached through relationships declared on the other side only, so
+    # anything already loaded in this session has to be re-read.
+    db.session.expire_all()
+    flash(
+        f'Merged "{source_name}" into "{target_name}" '
+        f'({moved["tests"]} group tests, {moved["results"]} public results updated).',
+        'success',
+    )
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_tag(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+    counts = _tag_usage([tag.id])[tag.id]
+
+    if counts['tests'] or counts['results']:
+        # Deleting would silently untag live records; renaming or merging keeps them tagged.
+        flash(
+            f'"{tag.name}" is attached to {counts["tests"]} group tests and '
+            f'{counts["results"]} public results. Rename it, or merge it into another '
+            'tag, instead of deleting it.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    name = tag.name
+    db.session.delete(tag)
+    db.session.commit()
+    db.session.expire_all()
+    flash(f'Deleted unused tag "{name}".', 'success')
+    return redirect(url_for('main.tags'))
+
+
 @main_bp.route('/admin/storage-config', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -5402,7 +5682,7 @@ def manage_public_results():
         )
         db.session.add(result)
         db.session.flush()
-        apply_tags_to_record(result, form.tag_names.data)
+        apply_tags_to_record(result, form.tag_text.data)
         db.session.commit()
         if uploaded_image_key:
             _queue_uploaded_result_analysis(result, current_user.id)
@@ -5426,8 +5706,8 @@ def edit_public_result(result_id):
     result = PublicResult.query.get_or_404(result_id)
     form = PublicResultForm(obj=result)
     form.submit.label.text = 'Save Changes'
-    if not form.is_submitted():
-        form.tag_names.data = result.tag_names()
+    if 'tag_text' not in request.form:
+        form.tag_text.data = result.tag_names()
 
     if form.validate_on_submit():
         result.item_results = parse_item_results(
@@ -5468,7 +5748,7 @@ def edit_public_result(result_id):
             result.results_image_key = None
             delete_result_image(old_key)
 
-        apply_tags_to_record(result, form.tag_names.data)
+        apply_tags_to_record(result, form.tag_text.data)
         db.session.commit()
         if has_new_upload and result.results_image_key:
             _queue_uploaded_result_analysis(result, current_user.id)

@@ -25,8 +25,8 @@
                 <div class="col-md-3 mb-3">{{ form.size.label(class="form-label") }}{{ form.size(class="form-control") }}</div>
             </div>
             <div class="mb-3">
-                {{ form.tag_names.label(class="form-label") }}
-                {{ form.tag_names(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
+                {{ form.tag_text.label(class="form-label") }}
+                {{ form.tag_text(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
                 <div class="input-group">
                     <select class="form-select" data-tag-menu="true">
                         <option value="">Choose an existing tag</option>
@@ -36,7 +36,7 @@
                     </select>
                     <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
                 </div>
-                <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas.</small>
+                <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas. <a href="{{ url_for('main.tags') }}">Rename or merge tags</a>.</small>
             </div>
             <div class="mb-3">
                 {{ form.payment_option_ids.label(class="form-label") }}

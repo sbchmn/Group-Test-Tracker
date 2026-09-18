@@ -1150,7 +1150,7 @@ class SecurityTests(unittest.TestCase):
                 "title": "File-only result",
                 "results_link": "",
                 "summary": "",
-                "tag_names": "",
+                "tag_text": "",
                 "results_image": (io.BytesIO(b"pdf-bytes"), "certificate.pdf"),
                 "submit": "Save Public Result",
             },
@@ -1175,7 +1175,7 @@ class SecurityTests(unittest.TestCase):
         self.client.post("/login", data={"username": "empty-form-admin", "password": "secret"})
         response = self.client.post(
             "/admin/public-results",
-            data={"title": "Missing source", "results_link": "", "summary": "", "tag_names": ""},
+            data={"title": "Missing source", "results_link": "", "summary": "", "tag_text": ""},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -3020,7 +3020,7 @@ class SecurityTests(unittest.TestCase):
         self.client.post("/login", data={"username": "pr-admin", "password": "secret"})
         response = self.client.post(
             f"/admin/public-results/{result_id}/edit",
-            data={"title": "COA", "results_link": "javascript:alert(1)", "summary": "", "tag_names": ""},
+            data={"title": "COA", "results_link": "javascript:alert(1)", "summary": "", "tag_text": ""},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -3203,3 +3203,334 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("reserved", response.get_data(as_text=True))
         with self.app.app_context():
             self.assertEqual(db.session.get(User, target_id).username, "target-user")
+
+
+class TagManagementTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / "test.db"
+        self.app = create_app({
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{self.db_path}",
+            "NOTIFICATION_LOG_PATH": str(Path(self.temp_dir.name) / "notification.log"),
+        })
+        self.app.config["WTF_CSRF_ENABLED"] = False
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        with self.app.app_context():
+            db.session.remove()
+            db.engine.dispose()
+        self.temp_dir.cleanup()
+
+    def _login(self, username="tags-admin", is_admin=True):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username=username, email=f"{username}@example.com", is_admin=is_admin)
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+        self.client.post("/login", data={"username": username, "password": "secret"})
+
+    def _tagged_test(self, title, tag_names):
+        from app.routes import apply_tags_to_record
+
+        with self.app.app_context():
+            author = User.query.filter_by(is_admin=True).first()
+            test = GroupTest(title=title, status="recruiting", created_by=author.id)
+            db.session.add(test)
+            db.session.flush()
+            apply_tags_to_record(test, ", ".join(tag_names))
+            db.session.commit()
+            return test.id
+
+    def _tagged_result(self, title, tag_names):
+        from app.routes import apply_tags_to_record
+
+        with self.app.app_context():
+            author = User.query.filter_by(is_admin=True).first()
+            result = PublicResult(title=title, created_by=author.id)
+            db.session.add(result)
+            db.session.flush()
+            apply_tags_to_record(result, ", ".join(tag_names))
+            db.session.commit()
+            return result.id
+
+    def _tag_ids(self):
+        with self.app.app_context():
+            return {tag.name: tag.id for tag in Tag.query.all()}
+
+    def _test_tag_names(self, test_id):
+        with self.app.app_context():
+            return sorted(tag.name for tag in db.session.get(GroupTest, test_id).tags)
+
+    def _result_tag_names(self, result_id):
+        with self.app.app_context():
+            return sorted(tag.name for tag in db.session.get(PublicResult, result_id).tags)
+
+    def test_tags_page_lists_each_tag_with_its_usage(self):
+        self._login()
+        self._tagged_test("Used twice", ["Tirz", "Shed GB#3"])
+        self._tagged_test("Used once", ["Tirz"])
+        with self.app.app_context():
+            db.session.add(Tag(name="Orphan", normalized_name="orphan"))
+            db.session.commit()
+
+        page = self.client.get("/admin/tags").get_data(as_text=True)
+
+        self.assertIn("Tirz", page)
+        self.assertIn("Shed GB#3", page)
+        self.assertIn("Orphan", page)
+        self.assertIn("Unused", page)
+        self.assertIn("2 tests", page)
+        # The removable-with-no-consequences tag should be presented first.
+        self.assertLess(page.index("Orphan"), page.index("Tirz"))
+
+    def test_settings_hub_links_to_tag_management(self):
+        self._login()
+        page = self.client.get("/admin/settings").get_data(as_text=True)
+        self.assertIn("/admin/tags", page)
+
+    def test_rename_updates_name_and_normalized_name_together(self):
+        self._login()
+        self._tagged_test("Typo", ["Tirzephide"])
+        tag_id = self._tag_ids()["Tirzephide"]
+
+        response = self.client.post(
+            f"/admin/tags/{tag_id}/rename", data={"name": "Tirzepatide"}, follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            renamed = db.session.get(Tag, tag_id)
+            self.assertEqual(renamed.name, "Tirzepatide")
+            self.assertEqual(renamed.normalized_name, "tirzepatide")
+
+    def test_rename_can_fix_casing_without_colliding(self):
+        self._login()
+        self._tagged_test("Case", ["Tirz"])
+        tag_id = self._tag_ids()["Tirz"]
+
+        self.client.post(f"/admin/tags/{tag_id}/rename", data={"name": "TIRZ"})
+
+        with self.app.app_context():
+            self.assertEqual(db.session.get(Tag, tag_id).name, "TIRZ")
+            self.assertEqual(db.session.get(Tag, tag_id).normalized_name, "tirz")
+
+    def test_rename_onto_an_existing_tag_offers_a_merge_instead(self):
+        self._login()
+        self._tagged_test("Both", ["Tirz", "Tirzepatide"])
+        ids = self._tag_ids()
+
+        response = self.client.post(
+            f"/admin/tags/{ids['Tirz']}/rename", data={"name": "tirzepatide"}, follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        location = response.headers["Location"]
+        self.assertIn(f"merge_source={ids['Tirz']}", location)
+        self.assertIn(f"merge_target={ids['Tirzepatide']}", location)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(Tag, ids["Tirz"]).name, "Tirz")
+            self.assertEqual(Tag.query.count(), 2)
+
+    def test_rename_with_an_empty_name_is_refused(self):
+        self._login()
+        self._tagged_test("Blank", ["Tirz"])
+        tag_id = self._tag_ids()["Tirz"]
+
+        response = self.client.post(
+            f"/admin/tags/{tag_id}/rename", data={"name": "   "}, follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("needs a name", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertEqual(db.session.get(Tag, tag_id).name, "Tirz")
+
+    def test_merge_retags_group_tests_and_public_results_and_removes_the_source(self):
+        self._login()
+        misspelt_test = self._tagged_test("Keep me", ["Tirzephide"])
+        misspelt_result = self._tagged_result("Keep me too", ["Tirzephide"])
+        correct_test = self._tagged_test("Newer spelling", ["Tirzepatide"])
+        ids = self._tag_ids()
+
+        response = self.client.post(
+            f"/admin/tags/{ids['Tirzephide']}/merge",
+            data={"into_tag_id": ids["Tirzepatide"]},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Merged", response.get_data(as_text=True))
+        self.assertEqual(self._test_tag_names(misspelt_test), ["Tirzepatide"])
+        self.assertEqual(self._result_tag_names(misspelt_result), ["Tirzepatide"])
+        self.assertEqual(self._test_tag_names(correct_test), ["Tirzepatide"])
+        with self.app.app_context():
+            self.assertEqual([tag.name for tag in Tag.query.all()], ["Tirzepatide"])
+
+    def test_merge_when_a_record_carries_both_tags_leaves_exactly_one_link(self):
+        self._login()
+        test_id = self._tagged_test("Double tagged", ["Tirzepatide", "Tirzephide"])
+        ids = self._tag_ids()
+
+        response = self.client.post(
+            f"/admin/tags/{ids['Tirzephide']}/merge",
+            data={"into_tag_id": ids["Tirzepatide"]},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("changed while you were merging", response.get_data(as_text=True))
+        self.assertEqual(self._test_tag_names(test_id), ["Tirzepatide"])
+        with self.app.app_context():
+            from sqlalchemy import func, select
+            from app.models import group_test_tags
+            link_rows = db.session.execute(select(func.count()).select_from(group_test_tags)).scalar()
+            self.assertEqual(link_rows, 1)
+            self.assertIsNone(db.session.get(Tag, ids["Tirzephide"]))
+
+    def test_merge_leaves_no_links_pointing_at_the_removed_tag(self):
+        self._login()
+        self._tagged_test("One", ["Tirzephide"])
+        self._tagged_test("Two", ["Tirzephide", "Shed GB#3"])
+        ids = self._tag_ids()
+
+        self.client.post(
+            f"/admin/tags/{ids['Tirzephide']}/merge",
+            data={"into_tag_id": ids["Shed GB#3"]},
+            follow_redirects=True,
+        )
+
+        with self.app.app_context():
+            from sqlalchemy import select
+            from app.models import group_test_tags
+            dangling = db.session.execute(
+                select(group_test_tags.c.group_test_id).where(group_test_tags.c.tag_id == ids["Tirzephide"])
+            ).all()
+            self.assertEqual(dangling, [])
+
+    def test_merge_requires_a_different_target_tag(self):
+        self._login()
+        self._tagged_test("Self", ["Tirz"])
+        ids = self._tag_ids()
+
+        response = self.client.post(
+            f"/admin/tags/{ids['Tirz']}/merge",
+            data={"into_tag_id": ids["Tirz"]},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("cannot be merged into itself", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertIsNotNone(db.session.get(Tag, ids["Tirz"]))
+
+    def test_merge_without_choosing_a_target_changes_nothing(self):
+        self._login()
+        self._tagged_test("Noop", ["Tirz"])
+        ids = self._tag_ids()
+
+        response = self.client.post(
+            f"/admin/tags/{ids['Tirz']}/merge", data={"into_tag_id": ""}, follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Choose the tag to merge into", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertEqual(Tag.query.count(), 1)
+
+    def test_delete_is_refused_while_the_tag_is_in_use(self):
+        self._login()
+        test_id = self._tagged_test("In use", ["Tirz"])
+        tag_id = self._tag_ids()["Tirz"]
+
+        response = self.client.post(f"/admin/tags/{tag_id}/delete", follow_redirects=True)
+
+        self.assertIn("attached to 1 group test", response.get_data(as_text=True))
+        self.assertEqual(self._test_tag_names(test_id), ["Tirz"])
+        with self.app.app_context():
+            self.assertIsNotNone(db.session.get(Tag, tag_id))
+
+    def test_delete_removes_a_tag_that_nothing_uses(self):
+        self._login()
+        with self.app.app_context():
+            orphan = Tag(name="Mistake", normalized_name="mistake")
+            db.session.add(orphan)
+            db.session.commit()
+            orphan_id = orphan.id
+
+        response = self.client.post(f"/admin/tags/{orphan_id}/delete", follow_redirects=True)
+
+        page = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        # The flash names the tag it removed, so assert on the list state instead.
+        self.assertIn("Deleted unused tag", page)
+        self.assertIn("0 total", page)
+        self.assertIn("No tags yet", page)
+        with self.app.app_context():
+            self.assertIsNone(db.session.get(Tag, orphan_id))
+
+    def test_near_duplicate_names_are_surfaced_for_merging(self):
+        self._login()
+        self._tagged_test("Original", ["Tirzepatide"])
+        self._tagged_test("Spelt wrong", ["Tirzephide"])
+        self._tagged_test("Unrelated", ["Shed GB#3"])
+
+        page = self.client.get("/admin/tags").get_data(as_text=True)
+
+        self.assertIn("Possible duplicates", page)
+        self.assertIn("Merge these", page)
+
+    def test_the_merge_picker_prefills_from_a_row_link(self):
+        self._login()
+        self._tagged_test("Prefill", ["Tirz"])
+        tag_id = self._tag_ids()["Tirz"]
+
+        page = self.client.get(f"/admin/tags?merge_source={tag_id}").get_data(as_text=True)
+
+        self.assertIn("Merge Tirz", page)
+        self.assertIn(f"/admin/tags/{tag_id}/merge", page)
+        # The source tag must never be offered as its own merge target.
+        self.assertIn("Choose a tag", page)
+
+    def test_tag_management_is_admin_only(self):
+        self._login("plain-user", is_admin=False)
+
+        for method, path, data in (
+            ("get", "/admin/tags", None),
+            ("post", "/admin/tags/1/rename", {"name": "Anything"}),
+            ("post", "/admin/tags/1/merge", {"into_tag_id": 2}),
+            ("post", "/admin/tags/1/delete", None),
+        ):
+            response = getattr(self.client, method)(path, data=data)
+            self.assertIn(response.status_code, (302, 403), f"{method.upper()} {path} was not blocked")
+
+    def test_edit_test_renders_existing_tags_without_leaking_the_model_method(self):
+        self._login()
+        test_id = self._tagged_test("Rendered", ["Shed GB#3"])
+
+        # An invalid submission re-renders the form; the tag box must show the real
+        # tag rather than the repr of GroupTest.tag_names.
+        response = self.client.post(
+            f"/admin/edit-test/{test_id}",
+            data={"title": "Rendered", "status": "closed", "results_link": "javascript:alert(1)"},
+        )
+
+        page = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Shed GB#3", page)
+        self.assertNotIn("bound method", page)
+
+    def test_a_post_that_omits_the_tag_field_does_not_clear_existing_tags(self):
+        self._login()
+        test_id = self._tagged_test("Preserved", ["Tirz", "Shed GB#3"])
+
+        response = self.client.post(
+            f"/admin/edit-test/{test_id}",
+            data={"title": "Preserved", "status": "testing"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._test_tag_names(test_id), ["Shed GB#3", "Tirz"])

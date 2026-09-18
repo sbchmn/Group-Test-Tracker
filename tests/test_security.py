@@ -2355,6 +2355,9 @@ class SecurityTests(unittest.TestCase):
             user = User(username="profiletg", email="profiletg@example.com")
             user.set_password("secret")
             db.session.add(user)
+            # A bot token is what makes Telegram linkable at all; the username only
+            # decides whether a clickable t.me deep link can be built from it.
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
             db.session.add(NotificationConfig(key="telegram_bot_username", value="group_test_tracker_bot"))
             db.session.commit()
 
@@ -2374,6 +2377,8 @@ class SecurityTests(unittest.TestCase):
             user = User(username="profiletg2", email="profiletg2@example.com")
             user.set_password("secret")
             db.session.add(user)
+            # Token present, username absent: the premise of this test.
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
             db.session.commit()
 
         self.client.post("/login", data={"username": "profiletg2", "password": "secret"}, follow_redirects=True)

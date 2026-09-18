@@ -95,6 +95,8 @@ from .notifications import (
 )
 from .bot_channels import (
     available_notification_channel_choices,
+    channel_available,
+    channel_link_available,
     chat_channels,
     configured_status,
     entitlement_for,
@@ -1530,6 +1532,19 @@ def _apply_available_channels(form, current=None):
         _config_values_map(), current=current)
 
 
+def _require_link_channel(channel):
+    """Whether a member may mint a link token for this channel here.
+
+    The profile hides the button, but the POST is the actual boundary: minting a token
+    for an integration that is not configured produces a link nobody can redeem and a
+    token sitting in the database until it expires.
+    """
+    if channel_link_available(channel, _config_values_map()):
+        return True
+    flash('That messaging integration is not configured on this instance.', 'danger')
+    return False
+
+
 @main_bp.route('/password-reset', methods=['GET', 'POST'])
 @limiter.limit('3 per hour', methods=['POST'])
 def password_reset():
@@ -1640,29 +1655,39 @@ def profile():
         flash('Profile updated.', 'success')
         return redirect(url_for('main.profile'))
 
-    telegram_active_token = active_link_token('telegram', current_user)
+    # A bot link section is only offered when the member could actually complete the
+    # link on this instance, so the profile never mints a token nobody can redeem.
+    link_configs = _config_values_map()
+    telegram_enabled = channel_link_available('telegram', link_configs)
+    discord_enabled = channel_link_available('discord', link_configs)
+    root_enabled = channel_link_available('root', link_configs)
+
+    telegram_active_token = active_link_token('telegram', current_user) if telegram_enabled else None
     telegram_link_token = telegram_active_token.token if telegram_active_token else None
     telegram_link_url = _build_telegram_deep_link(telegram_link_token) if telegram_link_token else None
     telegram_start_command = f"/start {telegram_link_token}" if telegram_link_token else None
 
-    discord_active_token = active_link_token('discord', current_user)
+    discord_active_token = active_link_token('discord', current_user) if discord_enabled else None
     discord_link_token = discord_active_token.token if discord_active_token else None
     discord_start_command = f"/start {discord_link_token}" if discord_link_token else None
 
-    root_active_token = active_link_token('root', current_user)
+    root_active_token = active_link_token('root', current_user) if root_enabled else None
     root_link_token = root_active_token.token if root_active_token else None
     root_start_command = f"/start {root_link_token}" if root_link_token else None
 
     return render_template(
         'profile.html',
         form=form,
+        telegram_enabled=telegram_enabled,
         telegram_link_url=telegram_link_url,
         telegram_link_token=telegram_link_token,
         telegram_start_command=telegram_start_command,
         telegram_chat_id=current_user.telegram_chat_id,
+        discord_enabled=discord_enabled,
         discord_link_token=discord_link_token,
         discord_start_command=discord_start_command,
         discord_user_id=current_user.discord_user_id,
+        root_enabled=root_enabled,
         root_link_token=root_link_token,
         root_start_command=root_start_command,
         root_user_id=current_user.root_user_id,
@@ -1675,6 +1700,8 @@ def create_telegram_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
+    if not _require_link_channel('telegram'):
+        return redirect(url_for('main.profile'))
     token = issue_link_token('telegram', current_user)
     db.session.commit()
 
@@ -1693,6 +1720,8 @@ def create_discord_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
+    if not _require_link_channel('discord'):
+        return redirect(url_for('main.profile'))
     token = issue_link_token('discord', current_user)
     db.session.commit()
 
@@ -1710,6 +1739,8 @@ def create_root_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
+    if not _require_link_channel('root'):
+        return redirect(url_for('main.profile'))
     token = issue_link_token('root', current_user)
     if token is None:
         flash('Could not create Root link token.', 'danger')

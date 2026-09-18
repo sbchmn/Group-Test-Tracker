@@ -23,6 +23,11 @@ class ChannelSpec:
     any_of_keys: tuple = ()
     entitlement: str = None
     supports_direct_message: bool = True
+    # Extra credentials needed before a member can link an account, beyond what makes
+    # the channel merely "configured". Discord is configured by a bot token *or* a
+    # webhook, but only the token runs the gateway worker that receives /start, so a
+    # webhook-only install cannot link anyone and must not offer the button.
+    link_required_keys: tuple = ()
 
 
 CHANNELS = (
@@ -41,6 +46,7 @@ CHANNELS = (
         label="Discord",
         any_of_keys=("discord_bot_token", "discord_webhook_url"),
         entitlement="discord_bot",
+        link_required_keys=("discord_bot_token",),
     ),
     ChannelSpec(
         name="root",
@@ -96,6 +102,38 @@ def chat_channels():
     return tuple(name for name in CHANNEL_NAMES if name != "email")
 
 
+def channel_available(name, configs):
+    """Whether this instance can use a channel right now: entitled *and* configured.
+
+    Distinct from whether a channel can address one person -- see
+    ``supports_direct_message`` on the spec. Root is unavailable-checked here and still
+    unusable as a personal channel, because linking works fine in a shared channel.
+    """
+    channel = _BY_NAME.get(name)
+    if channel is None:
+        return False
+    if channel.entitlement and not entitlement_enabled(channel.entitlement):
+        return False
+    return is_configured(name, configs)
+
+
+def channel_link_available(name, configs):
+    """Whether a member could actually complete account linking for this channel.
+
+    Narrower than ``channel_available``: a channel can be usable for broadcasts while
+    lacking the credential that runs the inbound command path, so offering a link
+    button would mint a token nobody can redeem.
+
+    Independent of ``supports_direct_message``. Root cannot deliver a personal message
+    but can absolutely link an account, because the member posts /start into a channel
+    the bridge reads.
+    """
+    channel = _BY_NAME.get(name)
+    if channel is None or not channel_available(name, configs):
+        return False
+    return all(_value_is_set(configs, key) for key in channel.link_required_keys)
+
+
 def notification_channel_choices():
     """The ``User.notification_channel`` options, in presentation order.
 
@@ -132,9 +170,7 @@ def available_notification_channel_choices(configs, current=None):
             continue
         if not channel.supports_direct_message:
             continue
-        if channel.entitlement and not entitlement_enabled(channel.entitlement):
-            continue
-        if not is_configured(channel.name, configs):
+        if not channel_available(channel.name, configs):
             continue
         choices.append((channel.name, channel.label))
 

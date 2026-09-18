@@ -16,13 +16,13 @@ from . import create_app, db
 from .saas import entitlement_enabled, managed_public_url
 from .models import (
     DiscordCommandInvocation,
-    DiscordLinkToken,
     GroupTest,
     NotificationConfig,
     Participation,
     TelegramCommandTemplate,
     User,
 )
+from .bot_identity import claim_link_token
 from .links import safe_http_url
 from .notifications import append_notification_log, render_notification_template, send_discord_status_channel_message
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
@@ -95,42 +95,21 @@ def _get_user_by_discord_id(discord_user_id):
     return User.query.filter_by(discord_user_id=str(discord_user_id)).first()
 
 
-def _get_active_link_token(token_value):
-    token = DiscordLinkToken.query.filter_by(token=token_value).first()
-    if token is None:
-        return None
-    if token.used_at is not None or token.expires_at < datetime.utcnow():
-        return None
-    return token
-
-
 def _claim_discord_link(token_value, discord_user_id, discord_username):
-    """Atomically consume a link token without moving an existing account link."""
-    token = (
-        DiscordLinkToken.query
-        .filter_by(token=str(token_value or "").strip())
-        .with_for_update()
-        .first()
+    """Consume a link token through the shared identity layer.
+
+    Returns ``(user, error)`` with error None on success. Reason names keep the
+    spelling this module's callers already branch on.
+    """
+    user, reason = claim_link_token(
+        "discord",
+        token_value,
+        external_id=discord_user_id,
+        username=discord_username,
     )
-    if token is None or token.used_at is not None or token.expires_at < datetime.utcnow():
-        return None, "invalid"
+    if reason != "ok":
+        return None, {"external-owned": "discord-owned"}.get(reason, reason)
 
-    discord_user_id = str(discord_user_id).strip()
-    existing_owner = User.query.filter_by(discord_user_id=discord_user_id).first()
-    if existing_owner is not None and existing_owner.id != token.user_id:
-        return None, "discord-owned"
-
-    user = db.session.get(User, token.user_id)
-    if user is None:
-        return None, "missing-user"
-    if not user.is_active:
-        return None, "inactive-user"
-    if user.discord_user_id and str(user.discord_user_id) != discord_user_id:
-        return None, "user-owned"
-
-    user.discord_user_id = discord_user_id
-    user.discord_username = discord_username
-    token.used_at = datetime.utcnow()
     try:
         db.session.commit()
     except IntegrityError:

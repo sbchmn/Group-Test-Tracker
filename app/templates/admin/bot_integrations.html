@@ -142,15 +142,44 @@
                     <h5 class="card-title"><i class="bi bi-broadcast"></i> Root</h5>
                     <span class="badge text-bg-{{ 'success' if integration_status.root else 'secondary' }}">{{ 'Configured' if integration_status.root else 'Needs setup' }}</span>
                 </div>
-                <p class="card-text text-muted">Configure the outbound webhook used for Root notifications.</p>
+                <p class="card-text text-muted">
+                    Root hosts its own bot and accepts no pushes, so delivery runs through a
+                    bridge that posts events to us and polls for outbound messages.
+                    {% if not root_in_plan %}<span class="badge text-bg-secondary">Not in this plan</span>{% endif %}
+                </p>
                 <div class="mb-3">
-                    {{ form.root_webhook_url.label(class="form-label") }}
-                    {{ form.root_webhook_url(class="form-control", placeholder="https://root.example/webhook") }}
+                    {{ form.root_community_id.label(class="form-label") }}
+                    {{ form.root_community_id(class="form-control", placeholder="Community GUID Root assigns you", disabled=not root_in_plan) }}
                 </div>
                 <div class="mb-3">
-                    {{ form.root_webhook_name.label(class="form-label") }}
-                    {{ form.root_webhook_name(class="form-control", placeholder="Group Test Manager") }}
+                    {{ form.root_status_channel_id.label(class="form-label") }}
+                    {{ form.root_status_channel_id(class="form-control", placeholder="Channel GUID that receives status updates", disabled=not root_in_plan) }}
                 </div>
+                <div class="mb-3">
+                    {{ form.root_bridge_key_id.label(class="form-label") }}
+                    {{ form.root_bridge_key_id(class="form-control", placeholder="Generated with the secret", disabled=not root_in_plan) }}
+                </div>
+                <div class="mb-3">
+                    {{ form.root_bridge_secret.label(class="form-label") }}
+                    {{ form.root_bridge_secret(class="form-control", autocomplete="off", disabled=not root_in_plan) }}
+                    <div class="form-text">Stored masked. Generate a new pair if it is lost.</div>
+                </div>
+                {% if root_in_plan %}
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-outline-primary btn-sm"
+                            formaction="{{ url_for('main.generate_root_bridge_credentials') }}">
+                        Generate Bridge Credentials
+                    </button>
+                    <button type="submit" class="btn btn-outline-secondary btn-sm"
+                            formaction="{{ url_for('main.send_root_test_message') }}"
+                            {% if not root_bridge_enabled %}disabled{% endif %}>
+                        Queue Test Message
+                    </button>
+                </div>
+                {% if not root_bridge_enabled %}
+                <div class="form-text mt-2">Queue a test message once a key id, secret and status channel are saved.</div>
+                {% endif %}
+                {% endif %}
             </div>
         </div>
     </div>

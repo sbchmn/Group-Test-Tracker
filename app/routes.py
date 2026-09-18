@@ -45,8 +45,6 @@ from .models import (
     Tag,
     PublicResult,
     DashboardHiddenGroupTest,
-    TelegramLinkToken,
-    DiscordLinkToken,
     TelegramWebhookUpdate,
     TelegramStatusDigestEvent,
     UserDigestEvent,
@@ -77,7 +75,11 @@ from .notifications import (
     send_password_reset,
     send_group_test_notification,
     render_notification_template,
+    select_template_body,
+    template_bodies,
     send_notification_message,
+    send_root_message,
+    send_root_status_channel_message,
     send_telegram_status_channel_message,
     send_discord_status_channel_message,
     send_telegram_chat_message,
@@ -91,6 +93,16 @@ from .notifications import (
     download_telegram_photo,
     normalize_telegram_thread_id,
 )
+from .bot_channels import (
+    available_notification_channel_choices,
+    chat_channels,
+    configured_status,
+    entitlement_for,
+    is_configured,
+    notification_channel_choices,
+)
+from .bot_identity import active_link_token, claim_link_token, issue_link_token
+from .root_bridge import generate_bridge_key_id, generate_bridge_secret
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
 from .storage import (
     StorageConfigurationError,
@@ -329,7 +341,7 @@ class UserForm(FlaskForm):
     is_admin = BooleanField('Administrator')
     is_active = BooleanField('Active', default=True)
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
@@ -344,7 +356,7 @@ class ProfileForm(FlaskForm):
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
     discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
@@ -359,6 +371,8 @@ class NotificationTemplateForm(FlaskForm):
     email_subject = StringField('Email Subject', validators=[Optional(), Length(max=200)])
     email_body = TextAreaField('Email Message (HTML)', validators=[Optional()])
     telegram_body = TextAreaField('Telegram Message', validators=[Optional()])
+    discord_body = TextAreaField('Discord Message', validators=[Optional()])
+    root_body = TextAreaField('Root Message', validators=[Optional()])
     hide_from_participant_notifications = BooleanField('Hide from "Notify Test Participants"')
     is_default_password_reset = BooleanField('Default Password Reset Template')
     is_default_registration_welcome = BooleanField('Default Registration Welcome Template')
@@ -391,8 +405,10 @@ class BotIntegrationsForm(FlaskForm):
     discord_status_channel_id = StringField('Discord Status Channel ID', validators=[Optional(), Length(max=120)])
     discord_webhook_url = StringField('Discord Webhook URL', validators=[Optional(), URL(require_tld=False), Length(max=500)])
     discord_webhook_username = StringField('Discord Display Name', validators=[Optional(), Length(max=80)])
-    root_webhook_url = StringField('Root Webhook URL', validators=[Optional(), URL(require_tld=False), Length(max=500)])
-    root_webhook_name = StringField('Root Display Name', validators=[Optional(), Length(max=80)])
+    root_community_id = StringField('Root Community ID', validators=[Optional(), Length(max=120)])
+    root_status_channel_id = StringField('Root Status Channel ID', validators=[Optional(), Length(max=120)])
+    root_bridge_key_id = StringField('Root Bridge Key ID', validators=[Optional(), Length(max=80)])
+    root_bridge_secret = StringField('Root Bridge Secret', validators=[Optional(), Length(max=128)])
     submit = SubmitField('Save Bot Integrations')
 
 
@@ -523,7 +539,12 @@ class PaymentOptionForm(FlaskForm):
 
 class PasswordResetForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
+    # validate_choice is off here on purpose. Narrowed choices are for display only,
+    # and rejecting a submitted channel would turn "that transport is unavailable"
+    # into a visibly different response, breaking the uniform reset reply. The view
+    # decides transport; profile and admin forms keep strict validation because there
+    # the value is persisted.
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email', validate_choice=False)
     submit = SubmitField('Send Reset')
 
 
@@ -794,34 +815,6 @@ def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
     return True
 
 
-def _issue_telegram_link_token(user):
-    if user is None:
-        return None
-
-    token_value = secrets.token_urlsafe(24)
-    token = TelegramLinkToken(
-        user_id=user.id,
-        token=token_value,
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-    db.session.add(token)
-    return token
-
-
-def _issue_discord_link_token(user):
-    if user is None:
-        return None
-
-    token_value = secrets.token_urlsafe(24)
-    token = DiscordLinkToken(
-        user_id=user.id,
-        token=token_value,
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-    db.session.add(token)
-    return token
-
-
 def _is_telegram_webhook_ip_allowed(source_ip, config_map):
     allowed = str(config_map.get('telegram_webhook_allowed_ips') or '').strip()
     if not allowed:
@@ -1041,9 +1034,18 @@ def _send_status_update_to_telegram(test, previous_status):
 
     digest_text = "\n".join(lines)
     action_buttons = _status_channel_action_buttons(pending_events, config_map)
+    telegram_expected = bool(str(config_map.get('telegram_status_chat_id') or '').strip())
     sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML', buttons=action_buttons)
-    send_discord_status_channel_message(digest_text, buttons=action_buttons)
-    if sent:
+    # Root renders no markup and no buttons; send_root_message flattens the digest to
+    # text and send_root_status_channel_message appends the button targets as links.
+    discord_sent = send_discord_status_channel_message(digest_text, buttons=action_buttons)
+    root_sent = send_root_status_channel_message(digest_text, buttons=action_buttons)
+    # sent_at is one flag shared by three transports, so it only advances when the
+    # transports that actually apply have delivered. A provider the tenant never
+    # configured returns False and must not hold the queue open forever -- that would
+    # re-broadcast the same events on every digest cycle -- while a configured Telegram
+    # that failed still defers the queue exactly as it always has.
+    if (sent if telegram_expected else (discord_sent or root_sent)):
         sent_at = datetime.utcnow()
         for item in pending_events:
             item.sent_at = sent_at
@@ -1071,8 +1073,6 @@ def _notify_status_change_after_commit(test, previous_status):
 def _send_new_test_created_to_telegram(test, test_url=None):
     config_map = _config_values_map()
     target_chat = str(config_map.get('telegram_status_chat_id') or '').strip()
-    if not target_chat:
-        return
 
     message_text = _render_telegram_status_template(
         config_map,
@@ -1088,9 +1088,12 @@ def _send_new_test_created_to_telegram(test, test_url=None):
         },
     )
 
-    sent = send_telegram_status_channel_message(message_text)
+    # Each transport checks its own configuration, so an absent Telegram chat must not
+    # suppress the Discord and Root broadcasts for tenants that use those instead.
+    sent = send_telegram_status_channel_message(message_text) if target_chat else False
     send_discord_status_channel_message(message_text)
-    if not sent:
+    send_root_status_channel_message(message_text)
+    if target_chat and not sent:
         append_notification_log(f'telegram: failed to send new test created message for test {test.id}')
 
 
@@ -1517,12 +1520,23 @@ def logout():
     return redirect(url_for('main.index'))
 
 
+def _apply_available_channels(form, current=None):
+    """Narrow a form's "Notify via" options to channels that can actually deliver.
+
+    Must run before validation: SelectField checks the submitted value against
+    ``choices``, so an un-gated form would accept a provider the tenant cannot use.
+    """
+    form.notification_channel.choices = available_notification_channel_choices(
+        _config_values_map(), current=current)
+
+
 @main_bp.route('/password-reset', methods=['GET', 'POST'])
 @limiter.limit('3 per hour', methods=['POST'])
 def password_reset():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     form = PasswordResetForm()
+    _apply_available_channels(form)
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
         reset_sent = False
@@ -1571,6 +1585,7 @@ def send_password_reset_admin(user_id):
 def profile():
     """Allow users to update their own profile info and password."""
     form = ProfileForm(obj=current_user)
+    _apply_available_channels(form, current=current_user.notification_channel)
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
@@ -1625,24 +1640,18 @@ def profile():
         flash('Profile updated.', 'success')
         return redirect(url_for('main.profile'))
 
-    active_token = (
-        current_user.telegram_link_tokens
-        .filter(TelegramLinkToken.used_at.is_(None), TelegramLinkToken.expires_at >= datetime.utcnow())
-        .order_by(TelegramLinkToken.created_at.desc())
-        .first()
-    )
-    telegram_link_token = active_token.token if active_token else None
+    telegram_active_token = active_link_token('telegram', current_user)
+    telegram_link_token = telegram_active_token.token if telegram_active_token else None
     telegram_link_url = _build_telegram_deep_link(telegram_link_token) if telegram_link_token else None
     telegram_start_command = f"/start {telegram_link_token}" if telegram_link_token else None
 
-    discord_active_token = (
-        current_user.discord_link_tokens
-        .filter(DiscordLinkToken.used_at.is_(None), DiscordLinkToken.expires_at >= datetime.utcnow())
-        .order_by(DiscordLinkToken.created_at.desc())
-        .first()
-    )
+    discord_active_token = active_link_token('discord', current_user)
     discord_link_token = discord_active_token.token if discord_active_token else None
     discord_start_command = f"/start {discord_link_token}" if discord_link_token else None
+
+    root_active_token = active_link_token('root', current_user)
+    root_link_token = root_active_token.token if root_active_token else None
+    root_start_command = f"/start {root_link_token}" if root_link_token else None
 
     return render_template(
         'profile.html',
@@ -1654,6 +1663,9 @@ def profile():
         discord_link_token=discord_link_token,
         discord_start_command=discord_start_command,
         discord_user_id=current_user.discord_user_id,
+        root_link_token=root_link_token,
+        root_start_command=root_start_command,
+        root_user_id=current_user.root_user_id,
     )
 
 
@@ -1663,7 +1675,7 @@ def create_telegram_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
-    token = _issue_telegram_link_token(current_user)
+    token = issue_link_token('telegram', current_user)
     db.session.commit()
 
     deep_link = _build_telegram_deep_link(token.token)
@@ -1681,7 +1693,7 @@ def create_discord_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
-    token = _issue_discord_link_token(current_user)
+    token = issue_link_token('discord', current_user)
     db.session.commit()
 
     if token is None:
@@ -1689,6 +1701,24 @@ def create_discord_link_token():
     else:
         flash('Discord link token generated.', 'success')
 
+    return redirect(url_for('main.profile'))
+
+
+@main_bp.route('/profile/root-link-token', methods=['POST'])
+@login_required
+def create_root_link_token():
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
+    token = issue_link_token('root', current_user)
+    if token is None:
+        flash('Could not create Root link token.', 'danger')
+        return redirect(url_for('main.profile'))
+    db.session.commit()
+
+    # Root has no bot-to-user DM, so unlike Telegram there is no deep link to press:
+    # the member posts the command themselves into a Root channel the bridge reads.
+    flash('Root link token generated. Post the /start command shown below in your Root channel.', 'success')
     return redirect(url_for('main.profile'))
 
 
@@ -2800,30 +2830,26 @@ def telegram_webhook():
             db.session.commit()
             return jsonify({'ok': True})
 
-        token = TelegramLinkToken.query.filter_by(token=token_value).first()
-        if token is None or token.used_at is not None or token.expires_at < datetime.utcnow():
-            send_telegram_chat_message(chat_id, 'This link token is invalid or expired. Please generate a new link token from your profile.')
+        linked_account, claim_reason = claim_link_token(
+            'telegram',
+            token_value,
+            external_id=telegram_user_id,
+            chat_id=chat_id,
+            username=incoming_username,
+        )
+        if claim_reason != 'ok':
+            refusal_messages = {
+                'inactive-user': 'This account is deactivated. Contact an administrator for account support.',
+                'external-owned': 'This Telegram account is already linked to a different user. Contact an admin for relink support.',
+                'user-owned': 'This account is already linked to a different Telegram user. Contact an admin for relink support.',
+            }
+            send_telegram_chat_message(
+                chat_id,
+                refusal_messages.get(claim_reason, 'This link token is invalid or expired. Please generate a new link token from your profile.'),
+            )
             db.session.commit()
             return jsonify({'ok': True})
 
-        if not token.user.is_active:
-            send_telegram_chat_message(chat_id, 'This account is deactivated. Contact an administrator for account support.')
-            db.session.commit()
-            return jsonify({'ok': True})
-
-        if telegram_user_id:
-            existing_owner = User.query.filter_by(telegram_user_id=telegram_user_id).first()
-            if existing_owner is not None and existing_owner.id != token.user_id:
-                send_telegram_chat_message(chat_id, 'This Telegram account is already linked to a different user. Contact an admin for relink support.')
-                db.session.commit()
-                return jsonify({'ok': True})
-
-        token.user.telegram_chat_id = chat_id
-        if telegram_user_id:
-            token.user.telegram_user_id = telegram_user_id
-        if incoming_username:
-            token.user.tg_username = incoming_username
-        token.used_at = datetime.utcnow()
         db.session.commit()
         send_telegram_chat_message(chat_id, 'Your Telegram account is now linked. Use /help to see available commands.')
         return jsonify({'ok': True})
@@ -3221,22 +3247,17 @@ def _notify_payment_claim(test, part):
     }
     if template is not None:
         subject = render_notification_template(template.email_subject or 'Payment confirmation needed', context)
-        email_body = render_notification_template(template.email_body or '', context)
-        telegram_body = render_notification_template(template.telegram_body or '', context)
+        bodies = template_bodies(template, context)
     else:
         subject = f"Payment confirmation needed: {test.title}"
-        email_body = ''
-        telegram_body = ''
+        bodies = {}
     fallback = (
         f"{context['username']} reported paying ${context['amount_paid']} toward \"{test.title}\" "
         f"(${context['amount_owed']} owed). Confirm or reject the claim in the Admin Action Queue: {context['test_link']}"
     )
     for admin_user in User.query.filter_by(is_admin=True, is_active=True).all():
         channel = admin_user.notification_channel or 'email'
-        if channel == 'telegram':
-            body = telegram_body or fallback
-        else:
-            body = email_body or fallback
+        body = select_template_body(bodies, channel) or fallback
         send_notification_message(admin_user, channel, subject, body)
 
 
@@ -4318,13 +4339,11 @@ def admin_settings():
         tag_count=len(active_tags),
         unused_tag_count=unused_tag_count,
         settings_status={
-            'email': bool(configs.get('mailjet_sender_email')),
-            'telegram': bool(configs.get('telegram_bot_token')),
-            'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
+            **configured_status(configs, ('email', 'telegram', 'discord')),
             'storage': bool(str(configs.get('storage_enabled') or '').lower() == 'true'),
             'result_analysis': analysis_settings['enabled'] and entitlement_enabled('result_analysis'),
             'result_analysis_in_plan': entitlement_enabled('result_analysis'),
-            'discord_in_plan': entitlement_enabled('discord_bot'),
+            'discord_in_plan': entitlement_enabled(entitlement_for('discord')),
         },
     )
 
@@ -4488,11 +4507,14 @@ def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None)
 @admin_required
 def bot_integrations():
     form = BotIntegrationsForm()
-    discord_in_plan = entitlement_enabled('discord_bot')
+    discord_in_plan = entitlement_enabled(entitlement_for('discord'))
+    root_in_plan = entitlement_enabled(entitlement_for('root'))
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     existing_discord_bot_token = str(configs.get('discord_bot_token') or '').strip()
     existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
     existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
+    existing_root_bridge_secret = str(configs.get('root_bridge_secret') or '').strip()
+    existing_root_bridge_key_id = str(configs.get('root_bridge_key_id') or '').strip()
 
     if form.validate_on_submit():
         submitted_discord_bot_token = (form.discord_bot_token.data or '').strip()
@@ -4502,6 +4524,16 @@ def bot_integrations():
         if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
             submitted_telegram_bot_token = existing_telegram_bot_token
         webhook_secret = (form.telegram_webhook_secret.data or '').strip()
+        # The bridge pair is minted out-of-band by the generate action, so a form
+        # rendered before a generation posts these back blank. Blank and the masked
+        # echo both mean "unchanged" -- same convention as telegram_webhook_secret --
+        # and the two keys move together or the bridge stops authenticating.
+        submitted_root_bridge_secret = (form.root_bridge_secret.data or '').strip()
+        if not submitted_root_bridge_secret or submitted_root_bridge_secret == mask_secret(existing_root_bridge_secret):
+            submitted_root_bridge_secret = existing_root_bridge_secret
+        submitted_root_bridge_key_id = (form.root_bridge_key_id.data or '').strip()
+        if not submitted_root_bridge_key_id:
+            submitted_root_bridge_key_id = existing_root_bridge_key_id
 
         _save_notification_config_values({
             'telegram_bot_token': submitted_telegram_bot_token,
@@ -4518,8 +4550,10 @@ def bot_integrations():
             'discord_status_channel_id': form.discord_status_channel_id.data if discord_in_plan else configs.get('discord_status_channel_id'),
             'discord_webhook_url': form.discord_webhook_url.data if discord_in_plan else configs.get('discord_webhook_url'),
             'discord_webhook_username': form.discord_webhook_username.data if discord_in_plan else configs.get('discord_webhook_username'),
-            'root_webhook_url': form.root_webhook_url.data,
-            'root_webhook_name': form.root_webhook_name.data,
+            'root_community_id': form.root_community_id.data if root_in_plan else configs.get('root_community_id'),
+            'root_status_channel_id': form.root_status_channel_id.data if root_in_plan else configs.get('root_status_channel_id'),
+            'root_bridge_key_id': submitted_root_bridge_key_id if root_in_plan else existing_root_bridge_key_id,
+            'root_bridge_secret': submitted_root_bridge_secret if root_in_plan else existing_root_bridge_secret,
         })
         if webhook_secret:
             _save_notification_config_values({'telegram_webhook_secret': webhook_secret})
@@ -4549,8 +4583,10 @@ def bot_integrations():
         form.discord_status_channel_id.data = configs.get('discord_status_channel_id')
         form.discord_webhook_url.data = configs.get('discord_webhook_url')
         form.discord_webhook_username.data = configs.get('discord_webhook_username')
-        form.root_webhook_url.data = configs.get('root_webhook_url')
-        form.root_webhook_name.data = configs.get('root_webhook_name')
+        form.root_community_id.data = configs.get('root_community_id')
+        form.root_status_channel_id.data = configs.get('root_status_channel_id')
+        form.root_bridge_key_id.data = configs.get('root_bridge_key_id')
+        form.root_bridge_secret.data = mask_secret(existing_root_bridge_secret)
 
     return render_template(
         'admin/bot_integrations.html',
@@ -4563,12 +4599,10 @@ def bot_integrations():
             ),
             'status': configs.get('discord_command_sync_status'),
         },
-        integration_status={
-            'telegram': bool(configs.get('telegram_bot_token')),
-            'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
-            'root': bool(configs.get('root_webhook_url')),
-        },
+        integration_status=configured_status(configs, chat_channels()),
         discord_in_plan=discord_in_plan,
+        root_in_plan=root_in_plan,
+        root_bridge_enabled=root_in_plan and is_configured('root', configs),
     )
 
 
@@ -4576,7 +4610,7 @@ def bot_integrations():
 @login_required
 @admin_required
 def synchronize_discord_commands():
-    if not entitlement_enabled('discord_bot'):
+    if not entitlement_enabled(entitlement_for('discord')):
         abort(404)
     bot_token = NotificationConfig.query.filter_by(key='discord_bot_token').first()
     if not bot_token or not str(bot_token.value or '').strip():
@@ -4595,6 +4629,45 @@ def synchronize_discord_commands():
     db.session.commit()
     append_notification_log('discord: administrator requested command synchronization')
     flash('Discord command synchronization queued. The worker normally processes it within 5 seconds.', 'success')
+    return redirect(url_for('main.bot_integrations'))
+
+
+@main_bp.route('/admin/settings/bots/root/bridge-credentials', methods=['POST'])
+@login_required
+@admin_required
+def generate_root_bridge_credentials():
+    """Mint a key id + HMAC secret pair for this tenant's Root bridge.
+
+    The secret is rendered exactly once here. Every later view shows it masked, so a
+    lost secret means generating a new pair and updating the bridge, never reading the
+    stored value back out of the UI.
+    """
+    if not entitlement_enabled(entitlement_for('root')):
+        abort(404)
+
+    key_id = generate_bridge_key_id()
+    secret = generate_bridge_secret()
+    _save_notification_config_values({
+        'root_bridge_key_id': key_id,
+        'root_bridge_secret': secret,
+    })
+    db.session.commit()
+    append_notification_log('root: bridge credentials generated')
+    return render_template('admin/root_bridge_credentials.html', key_id=key_id, secret=secret)
+
+
+@main_bp.route('/admin/settings/bots/root/test-message', methods=['POST'])
+@login_required
+@admin_required
+def send_root_test_message():
+    """Queue a message through the Root outbox so an admin can prove the wiring."""
+    if not entitlement_enabled(entitlement_for('root')):
+        abort(404)
+
+    if send_root_message('Test message from Group Test Manager.'):
+        flash('Root test message queued. It appears once the bridge polls for it.', 'success')
+    else:
+        flash('Could not queue the Root test message. Save a Root status channel ID first.', 'danger')
     return redirect(url_for('main.bot_integrations'))
 
 
@@ -4666,6 +4739,8 @@ def notification_templates():
             email_subject=form.email_subject.data,
             email_body=form.email_body.data,
             telegram_body=form.telegram_body.data,
+            discord_body=form.discord_body.data,
+            root_body=form.root_body.data,
             hide_from_participant_notifications=form.hide_from_participant_notifications.data,
             is_default_password_reset=form.is_default_password_reset.data,
             is_default_registration_welcome=form.is_default_registration_welcome.data,
@@ -4719,6 +4794,8 @@ def edit_notification_template(template_id):
         template.email_subject = form.email_subject.data
         template.email_body = form.email_body.data
         template.telegram_body = form.telegram_body.data
+        template.discord_body = form.discord_body.data
+        template.root_body = form.root_body.data
         template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
         template.is_default_password_reset = form.is_default_password_reset.data
         template.is_default_registration_welcome = form.is_default_registration_welcome.data
@@ -5620,6 +5697,7 @@ def emergency_disable_managed_support():
 def create_user():
     """Admin creates a new user."""
     form = UserForm()
+    _apply_available_channels(form)
     if form.validate_on_submit():
         if is_reserved_identity(form.username.data, form.email.data):
             flash('That username or email is reserved.', 'danger')
@@ -5670,6 +5748,7 @@ def edit_user(user_id):
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.manage_users'))
     form = UserForm(obj=user)
+    _apply_available_channels(form, current=user.notification_channel)
     form.password.validators = [Optional(), Length(min=6)]
 
     if form.validate_on_submit():

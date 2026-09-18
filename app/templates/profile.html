@@ -86,6 +86,27 @@
                         {% endif %}
                     </div>
 
+                    <div class="alert alert-light border">
+                        <div class="fw-semibold mb-1">Root Link Status</div>
+                        {% if root_user_id %}
+                            <div class="small text-success mb-2">Linked Root user ID: {{ root_user_id }}</div>
+                        {% else %}
+                            <div class="small text-warning mb-2">Not linked yet. Generate a link, then post the start command in your Root channel.</div>
+                        {% endif %}
+
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <button type="submit" formaction="{{ url_for('main.create_root_link_token') }}" formmethod="post" class="btn btn-sm btn-outline-primary">Generate Root Link</button>
+                        </div>
+
+                        {% if root_link_token %}
+                            <label class="form-label small mb-1">Start Command</label>
+                            <input type="text" class="form-control form-control-sm mb-2" value="{{ root_start_command }}" readonly>
+                            <label class="form-label small mb-1">Token</label>
+                            <input type="text" class="form-control form-control-sm" value="{{ root_link_token }}" readonly>
+                            <div class="form-text">Root has no direct messages, so this command is posted in a channel other members can read. The token works once and expires after 24 hours.</div>
+                        {% endif %}
+                    </div>
+
                     <div class="mb-3 form-check">
                         {{ form.receive_group_test_notifications(class="form-check-input") }}
                         {{ form.receive_group_test_notifications.label(class="form-check-label") }}

@@ -8,7 +8,7 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import BotCommandMessage, GroupTest, NotificationConfig, NotificationTemplate, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.models import BotCommandMessage, BotLinkToken, GroupTest, NotificationConfig, NotificationTemplate, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramWebhookUpdate, User
 from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
 from app.routes import _process_public_results_telegram
 
@@ -154,7 +154,7 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Google Analytics and cookies", privacy)
         self.assertIn("Telegram bot processing", privacy)
         self.assertIn("Discord bot processing", privacy)
-        self.assertIn("Root and other webhook notifications", privacy)
+        self.assertIn("Discord and Root notifications", privacy)
         self.assertIn("OpenAI", privacy)
         self.assertIn("xAI (Grok)", privacy)
         self.assertIn("Anthropic (Claude)", privacy)
@@ -219,7 +219,10 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Discord Bot Token", bot_page)
         self.assertIn("Synchronize Commands", bot_page)
         self.assertIn("/admin/settings/bots/discord/sync-commands", bot_page)
-        self.assertIn("Root Webhook URL", bot_page)
+        self.assertIn("Root Community ID", bot_page)
+        self.assertIn("Root Status Channel ID", bot_page)
+        self.assertIn("/admin/settings/bots/root/bridge-credentials", bot_page)
+        self.assertIn("/admin/settings/bots/root/test-message", bot_page)
 
         save_response = self.client.post(
             "/admin/settings/bots",
@@ -230,8 +233,10 @@ class SecurityTests(unittest.TestCase):
                 "discord_status_channel_id": "channel-123",
                 "discord_webhook_url": "https://discord.example/webhook",
                 "discord_webhook_username": "Tracker Bot",
-                "root_webhook_url": "https://root.example/webhook",
-                "root_webhook_name": "Root Bot",
+                "root_community_id": "community-123",
+                "root_status_channel_id": "root-channel-123",
+                "root_bridge_key_id": "root-key-123",
+                "root_bridge_secret": "root-secret-value",
                 "submit": "Save Bot Integrations",
             },
             follow_redirects=False,
@@ -241,7 +246,8 @@ class SecurityTests(unittest.TestCase):
             values = {item.key: item.value for item in NotificationConfig.query.all()}
         self.assertEqual(values["discord_bot_token"], "discord-token")
         self.assertEqual(values["discord_status_channel_id"], "channel-123")
-        self.assertEqual(values["root_webhook_url"], "https://root.example/webhook")
+        self.assertEqual(values["root_community_id"], "community-123")
+        self.assertEqual(values["root_bridge_secret"], "root-secret-value")
 
         sync_response = self.client.post(
             "/admin/settings/bots/discord/sync-commands",
@@ -391,6 +397,8 @@ class SecurityTests(unittest.TestCase):
             admin = User(username="discord-admin", email="discord-admin@example.com", is_admin=True)
             admin.set_password("secret")
             db.session.add(admin)
+            # Discord must be configured for it to appear as a selectable channel.
+            db.session.add(NotificationConfig(key="discord_bot_token", value="123456:ABC"))
             db.session.commit()
 
         self.client.post("/login", data={"username": "discord-admin", "password": "secret"}, follow_redirects=True)
@@ -721,7 +729,7 @@ class SecurityTests(unittest.TestCase):
             user.set_password("secret")
             db.session.add(user)
             db.session.flush()
-            token = TelegramLinkToken(
+            token = BotLinkToken(provider="telegram",
                 user_id=user.id,
                 token="token-abc",
                 expires_at=datetime.utcnow() + timedelta(hours=1),
@@ -1788,7 +1796,7 @@ class SecurityTests(unittest.TestCase):
             db.session.add_all([owner, target])
             db.session.flush()
 
-            token = TelegramLinkToken(
+            token = BotLinkToken(provider="telegram",
                 user_id=target.id,
                 token="token-owner-clash",
                 expires_at=datetime.utcnow() + timedelta(hours=1),
@@ -1812,7 +1820,7 @@ class SecurityTests(unittest.TestCase):
 
         with self.app.app_context():
             refreshed_target = User.query.get(target_id)
-            refreshed_token = TelegramLinkToken.query.get(token_id)
+            refreshed_token = BotLinkToken.query.get(token_id)
             self.assertIsNone(refreshed_target.telegram_chat_id)
             self.assertIsNone(refreshed_target.telegram_user_id)
             self.assertIsNone(refreshed_token.used_at)
@@ -2786,7 +2794,7 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("/login", dashboard.headers["Location"])
         self.client.post("/profile/telegram-link-token", follow_redirects=False)
         with self.app.app_context():
-            self.assertEqual(TelegramLinkToken.query.count(), 0)
+            self.assertEqual(BotLinkToken.query.count(), 0)
 
     def test_admin_cannot_deactivate_own_account(self):
         with self.app.app_context():
@@ -2867,7 +2875,7 @@ class SecurityTests(unittest.TestCase):
             user.set_password("secret")
             db.session.add(user)
             db.session.flush()
-            token = TelegramLinkToken(
+            token = BotLinkToken(provider="telegram",
                 user_id=user.id, token="dead-token", expires_at=datetime.utcnow() + timedelta(hours=1),
             )
             db.session.add(token)
@@ -2888,7 +2896,7 @@ class SecurityTests(unittest.TestCase):
             refreshed = db.session.get(User, user_id)
             self.assertIsNone(refreshed.telegram_chat_id)
             self.assertIsNone(refreshed.telegram_user_id)
-            self.assertIsNone(db.session.get(TelegramLinkToken, token_id).used_at)
+            self.assertIsNone(db.session.get(BotLinkToken, token_id).used_at)
 
     def test_telegram_deactivated_admin_cannot_update_command_response(self):
         with self.app.app_context():

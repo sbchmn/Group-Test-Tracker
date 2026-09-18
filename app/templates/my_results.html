@@ -206,7 +206,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                                 </div>
                                             </div>
                                         {% endif %}
-                                        <a href="{{ result.results_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Open Results</a>
+                                        <a href="{{ result.results_link | http_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Open Results</a>
                                     </div>
                                     {% if result.results_image_url and not result.lab_item_results %}
                                         <div class="flex-shrink-0 result-main-image">

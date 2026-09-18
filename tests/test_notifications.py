@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.error import HTTPError
@@ -12,7 +12,7 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
+from app.models import GroupTest, DiscordLinkToken, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
 from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message
 
 
@@ -430,6 +430,54 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(mock_post.call_args.args[0], "https://discord.example/webhook")
         self.assertEqual(mock_post.call_args.args[1]["content"], "Discord body")
         self.assertEqual(mock_post.call_args.args[1]["username"], "Tracker Bot")
+
+    def test_discord_webhook_splits_bodies_past_the_two_thousand_character_limit(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_webhook_url", value="https://discord.example/webhook"),
+                NotificationConfig(key="discord_webhook_username", value="Tracker Bot"),
+            ])
+            db.session.commit()
+
+            body = "\n".join(f"line {index}" for index in range(400))
+
+            with patch("app.notifications.post_json", return_value=(True, "ok")) as mock_post:
+                result = send_notification_message(
+                    User(username="longbody", email="longbody@example.com"),
+                    "discord",
+                    "Subject",
+                    body,
+                )
+
+        self.assertTrue(result)
+        self.assertGreater(len(body), 2000)
+        self.assertGreater(mock_post.call_count, 1)
+        contents = [call.args[1]["content"] for call in mock_post.call_args_list]
+        self.assertTrue(all(len(content) <= 2000 for content in contents))
+        self.assertEqual("".join(contents).replace("\n", ""), body.replace("\n", ""))
+        self.assertTrue(all(call.args[1]["username"] == "Tracker Bot" for call in mock_post.call_args_list))
+
+    def test_discord_webhook_failure_on_an_early_chunk_stops_the_remaining_ones(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_webhook_url", value="https://discord.example/webhook"),
+            ])
+            db.session.commit()
+
+            body = "\n".join(f"line {index}" for index in range(400))
+
+            with patch("app.notifications.post_json", return_value=(False, "429 rate limited")) as mock_post:
+                result = send_notification_message(
+                    User(username="chunkfail", email="chunkfail@example.com"),
+                    "discord",
+                    "Subject",
+                    body,
+                )
+
+        self.assertFalse(result)
+        self.assertEqual(mock_post.call_count, 1)
 
     def test_send_notification_message_delivers_root_webhook(self):
         with self.app.app_context():
@@ -1358,6 +1406,53 @@ class NotificationTests(unittest.TestCase):
             pending = UserDigestEvent.query.filter_by(user_id=user.id, sent_at=None).count()
             self.assertEqual(pending, 1)
 
+    def test_send_due_user_digests_keeps_earlier_receipts_when_a_later_user_raises(self):
+        with self.app.app_context():
+            from app.notifications import send_due_user_digests
+
+            db.create_all()
+            users = []
+            for index in (1, 2):
+                user = User(
+                    username=f"digest_isolate_{index}",
+                    email=f"digest_isolate_{index}@example.com",
+                    digest_frequency="hourly",
+                    digest_hourly_minute_utc=0,
+                    receive_group_test_notifications=True,
+                    is_active=True,
+                )
+                user.set_password("secret")
+                db.session.add(user)
+                db.session.flush()
+                db.session.add(UserDigestEvent(
+                    user_id=user.id,
+                    test_id=index,
+                    test_title=f"Isolated {index}",
+                    old_status="recruiting",
+                    new_status="testing",
+                ))
+                users.append(user)
+            db.session.commit()
+
+            now = datetime(2026, 8, 31, 12, 5, 0)
+            with patch(
+                "app.notifications.send_mailjet_message",
+                side_effect=[True, RuntimeError("smtp connection reset")],
+            ):
+                result = send_due_user_digests(now=now)
+
+            self.assertEqual(result["users"], 1)
+            self.assertEqual(result["events"], 1)
+            self.assertEqual(
+                UserDigestEvent.query.filter_by(user_id=users[0].id, sent_at=None).count(), 0,
+                "the delivered user's receipt was rewound by a later user's failure",
+            )
+            self.assertEqual(
+                UserDigestEvent.query.filter_by(user_id=users[1].id, sent_at=None).count(), 1,
+            )
+            self.assertEqual(User.query.get(users[0].id).digest_last_sent_at, now)
+            self.assertIsNone(User.query.get(users[1].id).digest_last_sent_at)
+
     def test_group_test_notifications_use_each_participants_amount(self):
         with self.app.app_context():
             db.create_all()
@@ -1472,6 +1567,166 @@ class NotificationTests(unittest.TestCase):
                 {"name": "MASS", "result": "98.7% purity"},
                 {"name": "STERILITY", "result": "Pass"},
             ])
+
+    def test_discord_link_claim_rejects_deactivated_account(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="ddead", email="ddead@example.com", is_active=False)
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.flush()
+            token = DiscordLinkToken(
+                user_id=user.id, token="dead-dtoken", expires_at=datetime.utcnow() + timedelta(hours=1),
+            )
+            db.session.add(token)
+            db.session.commit()
+            user_id = user.id
+            token_id = token.id
+
+            claimed, error = discord_bot._claim_discord_link("dead-dtoken", "555", "ddead")
+            self.assertIsNone(claimed)
+            self.assertEqual(error, "inactive-user")
+            message = discord_bot._link_discord_account("dead-dtoken", "555", "ddead")
+            self.assertIn("deactivated", message)
+            self.assertIsNone(db.session.get(User, user_id).discord_user_id)
+            self.assertIsNone(db.session.get(DiscordLinkToken, token_id).used_at)
+
+    def test_discord_linked_and_dynamic_commands_block_deactivated_accounts(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="dcmd", email="dcmd@example.com", discord_user_id="4242", is_active=False)
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.flush()
+            template = TelegramCommandTemplate(command="/dync", reply_text="Template reply", is_active=True)
+            db.session.add(template)
+            db.session.commit()
+            user_id = user.id
+            template_id = template.id
+
+            blocked = discord_bot._linked_user_response("4242", lambda u: "builder ran")
+            self.assertIn("deactivated", blocked)
+            self.assertNotIn("builder ran", blocked)
+
+            dynamic = discord_bot._run_dynamic_command(template_id, 4242, "name", "chan", None, "")
+            self.assertIn("deactivated", dynamic)
+
+            user.is_active = True
+            db.session.commit()
+            self.assertEqual(discord_bot._linked_user_response("4242", lambda u: "builder ran"), "builder ran")
+
+    def test_discord_public_results_dm_requires_active_linked_user(self):
+        with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):
+            from app import discord_bot
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="dmdad", email="dmdad@example.com", discord_user_id="4343", is_active=False)
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+
+            allowed, message = discord_bot._discord_public_results_access(4343, "dm-channel", None)
+            self.assertFalse(allowed)
+            self.assertIn("deactivated", message)
+
+            allowed_unknown, message_unknown = discord_bot._discord_public_results_access(9999, "dm-channel", None)
+            self.assertFalse(allowed_unknown)
+            self.assertIn("not linked", message_unknown)
+
+            db.session.get(User, user_id).is_active = True
+            db.session.commit()
+            allowed_active, message_active = discord_bot._discord_public_results_access(4343, "dm-channel", None)
+            self.assertTrue(allowed_active, msg=message_active)
+
+    def test_mailjet_send_passes_network_timeout(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="timeout-mailer", email="timeout-mailer@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.add_all([
+                NotificationConfig(key="mailjet_api_key", value="api-key"),
+                NotificationConfig(key="mailjet_secret_key", value="secret-key"),
+                NotificationConfig(key="mailjet_sender_email", value="sender@example.com"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"message":"success"}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                self.assertTrue(send_mailjet_message(user, "Hello", "Body"))
+
+        self.assertGreater(mock_urlopen.call_args.kwargs.get("timeout", 0), 0)
+
+    def test_telegram_send_message_passes_network_timeout(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:abcdef"),
+                NotificationConfig(key="telegram_status_chat_id", value="-100555"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true,"result":{}}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                self.assertTrue(send_telegram_status_channel_message("Timeout check"))
+
+        self.assertGreater(mock_urlopen.call_args.kwargs.get("timeout", 0), 0)
+
+    def test_discord_api_post_passes_network_timeout(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_bot_token", value="discord-bot-token"),
+                NotificationConfig(key="discord_status_channel_id", value="99001"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"id":"1"}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                self.assertTrue(send_discord_status_channel_message("Timeout check"))
+
+        self.assertGreater(mock_urlopen.call_args.kwargs.get("timeout", 0), 0)
+
+    def test_telegram_api_post_passes_network_timeout(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:abcdef"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true,"result":{"message_id":77}}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                message_id = send_telegram_command_response("555", "Timeout check")
+
+        self.assertEqual(message_id, "77")
+        self.assertGreater(mock_urlopen.call_args.kwargs.get("timeout", 0), 0)
 
 
 if __name__ == "__main__":

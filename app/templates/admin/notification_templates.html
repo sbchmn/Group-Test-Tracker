@@ -46,6 +46,10 @@
                     {{ form.is_default_registration_welcome.label(class="form-check-label") }}
                 </div>
                 <div class="col-md-4 form-check mt-2">
+                    {{ form.is_default_payment_review(class="form-check-input") }}
+                    {{ form.is_default_payment_review.label(class="form-check-label") }}
+                </div>
+                <div class="col-md-4 form-check mt-2">
                     {{ form.is_active(class="form-check-input") }}
                     {{ form.is_active.label(class="form-check-label") }}
                 </div>
@@ -90,7 +94,7 @@
                 {% for template in templates %}
                 <tr>
                     <td>{{ template.name }}</td>
-                    <td>{% if template.is_default_password_reset %}Password Reset{% elif template.is_default_registration_welcome %}Registration Welcome{% else %}Participant{% endif %}</td>
+                    <td>{% if template.is_default_password_reset %}Password Reset{% elif template.is_default_registration_welcome %}Registration Welcome{% elif template.is_default_payment_review %}Payment Review{% else %}Participant{% endif %}</td>
                     <td>{% if template.is_active %}Yes{% else %}No{% endif %}</td>
                     <td class="text-end">
                         <a href="{{ url_for('main.edit_notification_template', template_id=template.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>

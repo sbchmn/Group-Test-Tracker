@@ -14,9 +14,13 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Completed plan-aware administration UI:** Core managed plans hide the Result Analysis settings action and reject direct access, keep the Discord card visible but read-only with an explicit plan notice, reject Discord command synchronization, show provisioned plan status and entitlements on Version, and place user/admin documentation links only in the footer.
 - **Current managed-contract update:** Instance-to-Control-Plane events now use the top-level `type` contract. Reserved support state persists credential version and expiry, expires fail closed in login/session loading, and support requests require a bounded reason plus a generated consent reference. Status events include application, schema, contract, entitlement, component, readiness, and bounded resource fields.
 - **Current edit-test fix:** Group-test editing no longer executes a copied Public Results validation branch that referenced undefined `result_link` and `result` variables. Open tests can be edited without a results link or file, covered by a focused security regression.
-- **Migration execution check:** `flask --app run.py db upgrade` was verified against a fresh temporary SQLite database; all 22 revisions applied successfully through head `b3c4d5e6f7a8`.
+- **Migration execution check:** The 23-revision chain through head `c4d5e6f7a8b9` (payment claim/verification fields plus `is_default_payment_review`) applies cleanly via the executed Alembic upgrade tests in `tests.test_schema_migration` on 2026-09-17; the earlier 22-revision chain through `b3c4d5e6f7a8` had been verified manually against a fresh temporary SQLite database on 2026-09-16.
 - **Web security hardening:** Added Flask-Limiter controls for login and password-reset POSTs, same-origin validation for the login `next` parameter, uniform password-reset responses, baseline security headers, and DOM-property assignment for dynamic admin form values. Production multi-worker deployments should set `RATELIMIT_STORAGE_URI` to a shared backend such as Redis.
+- **Completed reliability fixes (2026-09-17):** Every notifications-module outbound call now carries an explicit 10-second socket timeout, and status notifications plus obsolete-media deletion run only after the domain commit on all administrator edit paths; a transport or storage-delete failure can no longer roll back or wedge a saved edit. Covered by nine new regression tests; the full suite passed 206 tests in 191.554s.
+- **Completed payment-review workflow (2026-09-17):** Participants can no longer self-certify lab-fee payment. Reporting payment stores a claim, notifies administrators through the new default Payment Review notification template, and raises an item in the existing single Action Queue list with Confirm Payment/Reject Report buttons; Manage Participants gained clearly labelled Confirm Payment/Mark Paid/Unmark Paid/Reject Payment Report/Unapprove controls with verifier and timestamp audit fields. Only administrator confirmation sets `paid_lab`, which remains the results-access gate. Covered by the 23-revision migration chain and the full 215-test suite.
+- **Completed deactivation-revocation fix (2026-09-17):** Deactivating an account now takes effect immediately everywhere: `load_user` rejects inactive users so existing web session and remember-me cookies stop authenticating, the deactivation paths bump the session epoch as a second revocation layer, linked Telegram/Discord commands, link-token claims, admin reply updates, and password resets all deny inactive accounts, and administrators cannot deactivate themselves. Account-free public group bot behavior is intentionally unchanged. Covered by ten new security/notifications tests plus a fixed test-environment leak; the full suite passed 225 tests in 238.176s.
 - **License and attribution status:** The repository now uses a proprietary commercial license naming Solomon N. Bachman as copyright holder. Deployment, operation, copying, modification, and redistribution require prior written commercial authorization, subject to Third-Party Component licenses. The Version page shows only the license and attribution list; `THIRD_PARTY_NOTICES.md` records the 2026-09-17 direct/transitive installed-environment review. PyMuPDF requires an explicit AGPL-or-commercial licensing decision before redistribution.
+- **Release notes:** Added `CHANGELOG.md`, covering the undated initial schema baseline, dated 2026 feature waves, the current 4.0 managed SaaS release, schema history, and validation milestones.
 
 ## Current Implementation Map — Group-Test Edit Regression
 
@@ -340,9 +344,10 @@ Remaining Phase 0 work is operational configuration (DigitalOcean IDs/scopes, DN
 - Administrative workflows require application-level `User.is_admin`; provider moderator status is not a substitute.
 - Provider account links are token-based, single-use, conflict checked, and bound to stable provider IDs.
 - Telegram webhook traffic fails closed without a configured matching secret.
+- Deactivation is immediate and total for the identified account: session loading rejects inactive users, deactivation bumps the session epoch, linked bot commands and link-token claims deny inactive accounts, password resets skip them, and administrators cannot deactivate themselves. Requests that carry no resolved account — public group commands under destination scope — remain available by design.
 - Non-private bot commands are disabled unless the specific command and destination scope explicitly allow them.
 - Callback and reply actions revalidate identity, command ownership, and destination scope.
-- Group-test result links and files require administrator access or approved-and-paid participation.
+- Group-test result links and files require administrator access or approved participation whose lab-fee payment an administrator has confirmed.
 - Uploaded content is size bounded, type validated, stored under generated keys, and never trusted based only on a client filename.
 - Secrets remain masked in admin interfaces and must not appear in logs or rendered messages.
 - Result-analysis diagnostics retain only bounded status/code/request-ID context, redact credential patterns, exclude report content and raw responses, and rely on template auto-escaping.
@@ -356,12 +361,13 @@ Remaining Phase 0 work is operational configuration (DigitalOcean IDs/scopes, DN
 ## Reliability Invariants
 
 - Schema changes are additive Alembic revisions; existing migrations are immutable.
-- Database changes commit before external notifications are attempted.
+- Database changes commit before external notifications are attempted. Administrator status dispatch and obsolete-media deletion run only after the domain commit; a dispatch failure is logged and cannot roll back the saved edit.
 - External delivery failures do not roll back committed domain changes.
 - Duplicate webhook and digest events are handled idempotently.
-- External calls use explicit timeouts and bounded retry behavior.
+- External calls use explicit timeouts and bounded retry behavior. All synchronous provider sends use `OUTBOUND_HTTP_TIMEOUT_SECONDS` (10 seconds) at every `urlopen` site in `app/notifications.py`.
 - Provider diagnostic writes are best-effort, process-safe on Linux, and cannot alter provider or worker outcomes; the log discards oldest entries when its configured size is reached.
 - Payment selection does not alter accounting or prove payment.
+- A participant-reported payment never grants results access by itself; only an administrator confirmation sets `paid_lab`, records the verifier and timestamp, and clears the pending report from the Action Queue.
 - Replacing stored media commits the new reference before best-effort deletion of the previous object.
 - Provider-specific adapters format and transport messages; business authorization stays in shared application logic.
 - Optional Telegram thread IDs are normalized at configuration, persistence, matching, and transport boundaries; invalid values are treated as unset.
@@ -377,12 +383,14 @@ Remaining Phase 0 work is operational configuration (DigitalOcean IDs/scopes, DN
 
 ## Validation Baseline
 
-Latest local validation on 2026-09-16, after the managed SaaS/control-plane integration changes:
+Latest local validation on 2026-09-17, after the deactivation-revocation hardening:
 
 ```text
-C:\Users\sbachman\AppData\Local\Programs\Python\Python312\python.exe -m unittest
-188 tests passed in 175.470s
+python -m unittest
+225 tests passed in 238.176s
 ```
+
+Earlier the same day: 215 tests in 221.301s after the participant payment-review workflow, 206 tests in 191.554s after the outbound-timeout and commit-ordering fixes, and 188 tests in 175.470s on 2026-09-16 after the managed SaaS/control-plane integration changes.
 
 This local result is not backed by a GitHub Actions check. The provider/network paths use mocks; production credentials, real control-plane event delivery, and the real-report evaluation corpus were not exercised. The run emitted existing `datetime.utcnow`, SQLAlchemy `Query.get`, Flask-SQLAlchemy, and Python `audioop` deprecation warnings.
 
@@ -438,6 +446,51 @@ After each edit phase:
 4. Record exact results and remaining risks.
 
 ## Current Change Record
+
+### Deactivation Revocation Hardening
+
+- **Date:** 2026-09-17
+- **Scope:** Make account deactivation revoke access immediately across web sessions and both bot providers while preserving account-free public group commands, closing the fourth High finding of the 2026-09-17 full-repository review.
+- **Target files/modules:** `app/__init__.py` (`load_user`), `app/routes.py` (password reset, Telegram webhook private path, `/start` token claim, admin reply lookup, `toggle_user_active`, `edit_user`), `app/discord_bot.py` (link claim, linked responders, dynamic commands, Discord DM gate), `tests/test_security.py`, `tests/test_notifications.py`, and documentation.
+- **Intended behavior:** Deactivating a user ends existing web sessions at the next request (`load_user` returns `None` for inactive accounts) and bumps `session_epoch` on both deactivation paths as a second revocation layer; reactivation restores access. Linked Telegram/Discord commands, custom private commands, `/submitcoa` (already enforced), admin reply updates, link-token claims, and password resets deny or skip inactive accounts. Requests that resolve no account — `/testing`, scope-permitted group `/publicresults`, and group custom commands — are unchanged by design. Administrators cannot deactivate their own accounts through either path.
+- **Assumptions:** flask-login 0.6.x defers `is_active` enforcement entirely to `load_user` (verified against the installed package); support accounts already fail closed through `support_access_active`, which additionally requires `is_active`.
+- **Security risks/checks:** The webhook remains secret-authenticated; the new guard sits after linked-user resolution and returns a neutral message; the admin reply query now filters `is_active=True`; password reset keeps its uniform response so the skip reveals nothing; reserved support behavior is unchanged.
+- **Reliability risks/checks:** Reactivation needs no epoch change because a fresh login issues the current epoch; no schema change; no new external calls.
+- **Optimization checks:** One additional boolean check per request on the session path; no queries added.
+- **Validation plan:** New `tests.test_security` cases (session revocation via live cookie, self-deactivation block, reset skip with control, private command denial, inert link token, admin reply denial, public group command unaffected) and new `tests.test_notifications` Discord cases (link claim, linked/dynamic command denial, DM public-results gate), then the full suite.
+- **Applied edits:** `load_user` inactive rejection; epoch bumps plus self-deactivation blocks in `toggle_user_active`/`edit_user`; inactive-account guards in the webhook private path, `/start` token consumption, `is_active=True` on the admin reply query; password-reset inactive skip; `_claim_discord_link` `inactive-user` outcome with dedicated message, `_linked_user_response`, `_run_dynamic_command`, and the Discord DM public-results branch. Test fix: `tests.test_security` leaked `GTT_DEPLOYMENT_MODE=managed` through a raw `os.environ.update`, breaking any later in-process `app.discord_bot` import; converted to a cleanup-managed `patch.dict`, which also repairs ordering-dependent Discord test failures in the existing suite.
+- **Validation:** `tests.test_security` + `tests.test_notifications` passed 156 tests in 153.751s; the full `python -m unittest` passed 225 tests in 238.176s on 2026-09-17. Existing `datetime.utcnow`/`Query.get` deprecation warnings remain.
+- **Remaining risks:** Telegram group chats can still receive replies that quote no personal data from a deactivated linked account when the same chat ID is shared with another user (identity there is chat-scoped by design); password change on the profile page still neither requires the current password nor rotates the session (separate finding); the readiness probe remains intentionally static.
+
+### Participant Payment Review Workflow
+
+- **Date:** 2026-09-17
+- **Scope:** Convert self-reported lab-fee payment into an administrator-verified workflow: participant reports raise one Action Queue item per claim with type-specific buttons and an administrator notification; only confirmation sets `paid_lab`, the flag that gates results access.
+- **Target files/modules:** `app/models.py` (Participation claim/verification fields, `User.participations` relationship now pinned to `Participation.user_id`), `migrations/versions/c4d5e6f7a8b9_add_payment_review_fields.py`, `app/saas.py` (schema-revision default), `app/__init__.py` (default Payment Review template seed), `app/routes.py` (participant form/route, queue query, payment actions, bulk-approve guard, admin edit guard), `app/templates/participant_update_status.html`, `app/templates/admin/action_queue.html`, `app/templates/admin/manage_participants.html`, `app/templates/admin/notification_templates.html`, focused tests, and documentation.
+- **Intended behavior:** Participants report payment via a checkbox on their status page (amendable while pending; unchecking withdraws). The first report notifies active administrators through the default Payment Review notification template (`amount_paid`, `amount_owed`, `username`, `test_title`, `test_id`, `test_link` variables; inline fallback when no template exists). Join requests and payment reports share the single Action Queue list; each row shows only its type's buttons: Approve/Deny for requests, Confirm Payment/Reject Report for reports. Bulk selection and Approve All Filtered act only on join requests. Manage Participants shows Confirm Payment or Mark Paid, Unmark Paid, Reject Payment Report, and Unapprove per approved row. Confirmation sets `paid_lab`, records `payment_verified_at`/`payment_verified_by_id`, and clears the claim; rejection needs no reason and allows re-reporting. Deny, unapprove, and admin-edit unapprove clear pending claims. The results gate is unchanged and now genuinely admin-verified.
+- **Assumptions:** Payment verification is independent of amount reconciliation (post-closure additions can change everyone's owed share, so no amount check gates access or confirmation); participants marked paid before this wave remain grandfathered; administrators may mark payment without a report.
+- **Security risks/checks:** All payment mutations are POST-only, CSRF-protected, admin-gated; the participant-facing form no longer accepts `paid_lab` at all; bulk actions cannot touch claim rows; `payment_verified_by_id` is taken only from the session user; template rendering stays variable substitution plus auto-escaping.
+- **Reliability risks/checks:** Notifications are sent after the claim commit; the admin relationship had to pin `foreign_keys='Participation.user_id'` because the new verifier FK created a second join path; the additive migration uses `batch_alter_table` for SQLite/Postgres compatibility; the managed contract's schema-revision default moved to `c4d5e6f7a8b9`.
+- **Optimization checks:** Queue merge is a single OR-filtered indexed query with existing 25-row pagination; no new per-request queries outside the claim notification path.
+- **Validation plan:** `tests.test_schema_migration` (model parity, migration-text, executed 23-revision upgrade), `tests.test_participant_removal` (queue/bulk regressions), `tests.test_security` payment flow suite (claim does not grant access; queue presentation; confirm grants and audits; reject; bulk skip; unapprove clear; admin-edit verification; template notification with silent amend; manage-page button states), then full `python -m unittest`.
+- **Validation:** Focused runs passed (19 payment-pattern tests; 17 migration/removal tests including the full executed Alembic chain); the full suite passed 215 tests in 221.301s on 2026-09-17. Existing `datetime.utcnow`/`Query.get` deprecation warnings remain.
+- **Remaining risks:** Deployment must run `flask db upgrade head` before the new code serves traffic (the `Procfile` still has no release-phase migration step); `payment_verified_by_id` intentionally has no cascade because the application never deletes users — a future user-deletion feature must handle it; participant confirmation/rejection notices are not sent (admin-side notification only, by current scope decision).
+
+### Outbound HTTP Timeouts and Commit-Ordering Hardening
+
+- **Date:** 2026-09-17
+- **Scope:** Close the two High reliability findings from the 2026-09-17 full-repository security and reliability review: synchronous provider calls without socket timeouts, and external notification/storage deletion performed before the domain commit.
+- **Target files/modules:** `app/notifications.py`, `app/routes.py`, `tests/test_notifications.py`, `tests/test_security.py`, and this project map.
+- **Intended behavior:** Every `urlopen` used by the notifications module carries an explicit 10-second socket timeout; the administrator test edit, quick results-link close, command-template media replacement, and Public Result deletion persist domain state first and only then perform best-effort obsolete-object deletion and Telegram/Discord status dispatch; transport failures are logged and never roll back or wedge a committed edit.
+- **Assumptions:** gthread workers (2×4 in `Procfile`) do not preempt hung request threads, so per-call timeouts are the only bound on request-path provider waits; `delete_result_image` already swallows storage errors internally, so post-commit deletion stays best-effort.
+- **Security risks/checks:** No authorization, CSRF, or session boundaries changed; deferral moves only side effects that were already administrator-gated; failure logging writes bounded non-sensitive lines through the existing notification log.
+- **Reliability risks/checks:** Domain commit precedes media deletion and status dispatch on every changed path; a raising status dispatch is caught, logged, and rolled back only for its own digest rows; deferred deletes survive commit failure (objects are never destroyed while still referenced).
+- **Optimization checks:** No new queries, polls, or external calls; the status dispatch's digest rows simply move to a second commit.
+- **Validation plan:** Per the change-type table, `tests.test_notifications` plus `tests.test_security` with new focused regression tests, then full `python -m unittest` and `git diff --check`.
+- **Applied edits:** Added `OUTBOUND_HTTP_TIMEOUT_SECONDS` to `app/notifications.py` and applied it at the Mailjet send, Telegram `sendMessage`, Discord API post, generic Telegram API post, and Telegram file-download call sites. Added `_notify_status_change_after_commit` to `app/routes.py`; `edit_test` and `set_results_link` now commit before status dispatch; `edit_test` collects obsolete result-image keys and deletes them after commit; `_apply_command_response_media` returns obsolete keys for both command-template callers to delete after commit; `delete_public_result` deletes the object after the row is committed.
+- **Security/reliability/optimization review:** Timeouts apply on success and error paths alike; the notification-failure test proves a raising Telegram transport keeps the committed status change and still returns the redirect; the deferred-delete tests prove a storage failure cannot undo a committed edit (previously it rolled the whole edit back).
+- **Validation:** Four new timeout tests and five new commit-ordering regression tests passed; `python -m unittest` passed the full suite 206 tests in 191.554s on 2026-09-17 in the working tree on branch `SaaS-Test` (baseline commit 6d7c42e). Existing `datetime.utcnow`/`Query.get` deprecation warnings remain.
+- **Remaining risks:** Provider calls remain synchronous on the request path — a 10-second hang is still a 10-second wait; durable outbox/queue delivery stays a deferred priority. `delete_test` still leaves any stored results object orphaned in the bucket (documented lifecycle cleanup applies).
 
 ### Managed SaaS Control-Plane Parity
 

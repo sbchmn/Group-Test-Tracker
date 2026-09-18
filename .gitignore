@@ -5,3 +5,18 @@ __pycache__/
 *$py.class
 *.pyo
 *.pyd
+
+# Local environment and secrets
+.env
+
+# Databases and runtime logs (never commit live state)
+*.db
+instance/*.log
+
+# Ad-hoc test captures and scratch files
+tmp_debug.py
+*-test-output.txt
+*-output.txt
+*-stderr.txt
+*-stdout.txt
+test_output.txt

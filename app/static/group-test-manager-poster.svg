@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500" role="img" aria-labelledby="title desc">
+  <title id="title">Group Test Manager pricing poster</title>
+  <desc id="desc">Group Test Manager: stop chasing spreadsheets. Four monthly plans: Core 49 dollars, Core plus Discord 69 dollars, Core plus AI Analysis 74 dollars, and GTM Complete 89 dollars.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10151b"/>
+      <stop offset="0.58" stop-color="#18242a"/>
+      <stop offset="1" stop-color="#0e1115"/>
+    </linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d9ff55"/>
+      <stop offset="1" stop-color="#8ee35d"/>
+    </linearGradient>
+    <linearGradient id="coral" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff9b6a"/>
+      <stop offset="1" stop-color="#ff5f6d"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#b9e6a2" stroke-opacity="0.075" stroke-width="1"/>
+    </pattern>
+    <clipPath id="roundClip"><rect x="54" y="54" width="1092" height="1392" rx="34"/></clipPath>
+  </defs>
+
+  <rect width="1200" height="1500" fill="#0b0e12"/>
+  <rect x="54" y="54" width="1092" height="1392" rx="34" fill="url(#bg)" stroke="#36434a" stroke-width="2"/>
+  <g clip-path="url(#roundClip)">
+    <rect x="54" y="54" width="1092" height="1392" fill="url(#grid)"/>
+    <circle cx="1050" cy="150" r="150" fill="#ff795f" opacity="0.18" filter="url(#glow)"/>
+    <circle cx="170" cy="1270" r="190" fill="#b4ef65" opacity="0.1" filter="url(#glow)"/>
+    <path d="M810 54L1146 390V54Z" fill="url(#coral)" opacity="0.92"/>
+    <path d="M54 1210L290 1446H54Z" fill="url(#lime)" opacity="0.9"/>
+  </g>
+
+  <g font-family="Arial, Helvetica, sans-serif" fill="#f5f4ed">
+    <g transform="translate(112 128)">
+      <rect width="72" height="72" rx="18" fill="url(#lime)"/>
+      <path d="M22 22h28c9 0 16 7 16 16v8c0 9-7 16-16 16H38l-8 9v-9h-8c-9 0-16-7-16-16v-8c0-9 7-16 16-16Z" fill="#10151b"/>
+      <circle cx="29" cy="42" r="4" fill="#d9ff55"/>
+      <circle cx="43" cy="42" r="4" fill="#d9ff55"/>
+      <circle cx="57" cy="42" r="4" fill="#d9ff55"/>
+    </g>
+    <text x="210" y="153" font-size="25" font-weight="700" letter-spacing="4" fill="#d9ff55">GROUP TEST MANAGER</text>
+    <text x="210" y="184" font-size="15" letter-spacing="3" fill="#aab7b5">OPERATIONS FOR INDEPENDENT TESTING GROUPS</text>
+
+    <text x="112" y="326" font-size="83" font-weight="800" letter-spacing="-2">STOP CHASING</text>
+    <text x="112" y="416" font-size="83" font-weight="800" letter-spacing="-2">SPREADSHEETS.</text>
+    <rect x="114" y="458" width="360" height="12" rx="6" fill="url(#lime)"/>
+    <text x="112" y="528" font-size="28" font-weight="700" fill="#f5f4ed">Run cleaner group tests.</text>
+    <text x="112" y="568" font-size="22" fill="#b9c2c0">Participants, payments, results, and</text>
+    <text x="112" y="601" font-size="22" fill="#b9c2c0">notifications in one sharp control room.</text>
+
+    <g transform="translate(112 670)">
+      <rect width="976" height="114" rx="18" fill="#121a1e" stroke="#435158"/>
+      <circle cx="53" cy="57" r="25" fill="url(#lime)"/>
+      <path d="M43 58l7 7 14-17" fill="none" stroke="#10151b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="98" y="51" font-size="21" font-weight="700">ONE PLACE TO KEEP THE WHOLE RUN MOVING</text>
+      <text x="98" y="82" font-size="18" fill="#aab7b5">Track every request, approval, payment claim, and result handoff.</text>
+    </g>
+
+    <g transform="translate(112 830)">
+      <g>
+        <rect width="226" height="255" rx="20" fill="#e9f1d9"/>
+        <text x="24" y="42" font-size="18" font-weight="700" fill="#1c2a27" letter-spacing="1">CORE</text>
+        <text x="24" y="105" font-size="63" font-weight="800" fill="#10151b">$49</text>
+        <text x="154" y="103" font-size="18" fill="#42534c">/mo</text>
+        <path d="M24 132H202" stroke="#b6c99f"/>
+        <text x="24" y="168" font-size="15" fill="#26372f">Group tests</text>
+        <text x="24" y="193" font-size="15" fill="#26372f">Participant tracking</text>
+        <text x="24" y="218" font-size="15" fill="#26372f">Telegram Bot</text>
+        <text x="24" y="243" font-size="15" fill="#26372f">Results Library</text>
+      </g>
+      <g transform="translate(250)">
+        <rect width="226" height="255" rx="20" fill="#202f35" stroke="#79c3bc" stroke-width="2"/>
+        <text x="24" y="42" font-size="18" font-weight="700" fill="#91e1d9" letter-spacing="1">CORE + DISCORD</text>
+        <text x="24" y="105" font-size="63" font-weight="800" fill="#f5f4ed">$69</text>
+        <text x="154" y="103" font-size="18" fill="#aab7b5">/mo</text>
+        <path d="M24 132H202" stroke="#425c62"/>
+        <text x="24" y="170" font-size="16" fill="#d9e3df">Everything in Core</text>
+        <text x="24" y="198" font-size="16" fill="#d9e3df">Discord bot + alerts</text>
+        <text x="24" y="226" font-size="16" fill="#d9e3df">Server-ready workflows</text>
+      </g>
+      <g transform="translate(500)">
+        <rect width="226" height="255" rx="20" fill="#202f35" stroke="#f39a70" stroke-width="2"/>
+        <text x="24" y="42" font-size="18" font-weight="700" fill="#ffad7d" letter-spacing="1">CORE + AI</text>
+        <text x="24" y="105" font-size="63" font-weight="800" fill="#f5f4ed">$74</text>
+        <text x="154" y="103" font-size="18" fill="#aab7b5">/mo</text>
+        <path d="M24 132H202" stroke="#6a514c"/>
+        <text x="24" y="170" font-size="16" fill="#d9e3df">Everything in Core</text>
+        <text x="24" y="198" font-size="16" fill="#d9e3df">AI report analysis</text>
+        <text x="24" y="226" font-size="16" fill="#d9e3df">Admin review queue</text>
+      </g>
+      <g transform="translate(750)">
+        <rect width="226" height="255" rx="20" fill="url(#coral)"/>
+        <text x="24" y="42" font-size="18" font-weight="800" fill="#22181a" letter-spacing="1">GTM COMPLETE</text>
+        <text x="24" y="105" font-size="63" font-weight="800" fill="#10151b">$89</text>
+        <text x="154" y="103" font-size="18" fill="#382523">/mo</text>
+        <path d="M24 132H202" stroke="#d56e62"/>
+        <text x="24" y="170" font-size="16" fill="#251b1c">Core + Discord</text>
+        <text x="24" y="198" font-size="16" fill="#251b1c">Core + AI Analysis</text>
+        <text x="24" y="226" font-size="16" fill="#251b1c">Best value. Full control.</text>
+      </g>
+    </g>
+
+    <g transform="translate(112 1120)">
+      <text x="0" y="0" font-size="18" font-weight="700" fill="#d9ff55" letter-spacing="3">BUILT FOR THE FAST-MOVING OPERATOR</text>
+      <text x="0" y="48" font-size="22" fill="#f5f4ed">Less admin drag. More signal. Every group on the same page.</text>
+      <rect x="0" y="82" width="430" height="64" rx="32" fill="url(#lime)"/>
+      <text x="215" y="122" text-anchor="middle" font-size="22" font-weight="800" fill="#10151b" letter-spacing="1">GET YOUR GROUP MOVING</text>
+      <rect x="0" y="168" width="480" height="58" rx="29" fill="#202f35" stroke="#ff9b6a" stroke-width="2"/>
+      <text x="24" y="204" font-size="13" font-weight="700" fill="#ffad7d" letter-spacing="2">VISIT</text>
+      <text x="101" y="204" font-size="24" font-weight="800" fill="#f5f4ed" letter-spacing="0">https://grouptest.online</text>
+    </g>
+
+    <text x="112" y="1370" font-size="17" fill="#93a09e">https://grouptest.online  •  Monthly plans  •  Cancel anytime</text>
+    <text x="112" y="1410" font-size="12" fill="#778481">For lawful testing coordination only. Not a laboratory, medical, payment, or shipping service.</text>
+  </g>
+</svg>

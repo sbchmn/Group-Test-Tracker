@@ -8,7 +8,7 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import BotCommandMessage, GroupTest, NotificationConfig, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.models import BotCommandMessage, GroupTest, NotificationConfig, NotificationTemplate, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
 from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
 from app.routes import _process_public_results_telegram
 
@@ -317,7 +317,7 @@ class SecurityTests(unittest.TestCase):
             db.session.add(admin)
             db.session.commit()
 
-        os.environ.update({
+        env_patcher = patch.dict(os.environ, {
             "GTT_DEPLOYMENT_MODE": "managed",
             "GTT_ENTITLEMENTS": "",
             "GTT_ENTITLEMENT_REVISION": "9",
@@ -325,6 +325,8 @@ class SecurityTests(unittest.TestCase):
             "GTT_USER_DOCUMENTATION_URL": "https://docs.example/user",
             "GTT_ADMIN_DOCUMENTATION_URL": "https://docs.example/admin",
         })
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
         self.client.post("/login", data={"username": "core-plan-admin", "password": "secret"}, follow_redirects=True)
 
         settings_page = self.client.get("/admin/settings").get_data(as_text=True)
@@ -2374,3 +2376,830 @@ class SecurityTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("Start Command", body)
         self.assertIn("/start", body)
+
+    def test_edit_test_image_clear_defers_object_delete_until_after_commit(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="defer-admin", email="defer-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(
+                title="Deferred delete",
+                status="closed",
+                created_by=admin.id,
+                results_link="https://example.test/coa",
+                results_image_key="group-tests/old.pdf",
+            )
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "defer-admin", "password": "secret"})
+        with patch("app.routes.delete_result_image", side_effect=RuntimeError("storage delete exploded")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    f"/admin/edit-test/{test_id}",
+                    data={
+                        "title": "Renamed despite delete failure",
+                        "status": "closed",
+                        "results_link": "https://example.test/coa",
+                        "clear_results_image": "1",
+                    },
+                )
+        with self.app.app_context():
+            refreshed = db.session.get(GroupTest, test_id)
+            self.assertEqual(refreshed.title, "Renamed despite delete failure")
+            self.assertIsNone(refreshed.results_image_key)
+
+    def test_edit_test_status_notification_failure_keeps_committed_edit(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="notify-admin", email="notify-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-100777"))
+            test = GroupTest(title="Notify ordering", status="recruiting", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "notify-admin", "password": "secret"})
+        with patch("app.routes.send_telegram_status_channel_message", side_effect=RuntimeError("telegram down")) as mock_send, \
+                patch("app.routes.send_discord_status_channel_message", return_value=False):
+            response = self.client.post(
+                f"/admin/edit-test/{test_id}",
+                data={"title": "Notify ordering", "status": "closed", "results_link": "https://example.test/coa"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        mock_send.assert_called_once()
+        with self.app.app_context():
+            refreshed = db.session.get(GroupTest, test_id)
+            self.assertEqual(refreshed.status, "closed")
+            self.assertEqual(refreshed.results_link, "https://example.test/coa")
+
+    def test_set_results_link_notifies_only_after_commit(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="link-admin", email="link-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            db.session.add(NotificationConfig(key="telegram_status_chat_id", value="-100888"))
+            test = GroupTest(title="Quick close", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "link-admin", "password": "secret"})
+        sent_before_commit = []
+
+        def record_then_fail(*args, **kwargs):
+            with self.app.app_context():
+                sent_before_commit.append(db.session.get(GroupTest, test_id).status)
+            raise RuntimeError("telegram down")
+
+        with patch("app.routes.send_telegram_status_channel_message", side_effect=record_then_fail), \
+                patch("app.routes.send_discord_status_channel_message", return_value=False):
+            response = self.client.post(
+                f"/admin/set-results/{test_id}",
+                data={"results_link": "https://example.test/quick"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(sent_before_commit, ["closed"])
+        with self.app.app_context():
+            refreshed = db.session.get(GroupTest, test_id)
+            self.assertEqual(refreshed.status, "closed")
+            self.assertIsNotNone(refreshed.results_posted_at)
+
+    def test_command_template_media_delete_defers_until_after_commit(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="cmd-admin", email="cmd-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            template = TelegramCommandTemplate(
+                command="/holdtest",
+                reply_text="Old text",
+                response_image_key="bot-commands/old.png",
+                is_active=True,
+            )
+            db.session.add(template)
+            db.session.commit()
+            template_id = template.id
+
+        self.client.post("/login", data={"username": "cmd-admin", "password": "secret"})
+        with patch("app.routes.delete_result_image", side_effect=RuntimeError("storage delete exploded")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    f"/admin/telegram-command-templates/{template_id}/edit",
+                    data={
+                        "command": "/holdtest",
+                        "reply_text": "New text",
+                        "remove_response_image": "true",
+                        "is_active": "true",
+                    },
+                )
+        with self.app.app_context():
+            refreshed = db.session.get(TelegramCommandTemplate, template_id)
+            self.assertEqual(refreshed.reply_text, "New text")
+            self.assertIsNone(refreshed.response_image_key)
+
+    def test_delete_public_result_removes_row_before_object_delete(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="pr-admin", email="pr-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            result = PublicResult(
+                title="Gone",
+                results_image_key="public-results/x.pdf",
+                created_by=admin.id,
+            )
+            db.session.add(result)
+            db.session.commit()
+            result_id = result.id
+
+        self.client.post("/login", data={"username": "pr-admin", "password": "secret"})
+        with patch("app.routes.delete_result_image", side_effect=RuntimeError("storage delete exploded")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(f"/admin/public-results/{result_id}/delete")
+        with self.app.app_context():
+            self.assertIsNone(db.session.get(PublicResult, result_id))
+
+    def _payment_review_fixture(self, claimed=False):
+        """Admin + approved participant on a closed test with a stored result file."""
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="pay-admin", email="pay-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            member = User(username="pay-member", email="pay-member@example.com")
+            member.set_password("secret")
+            outsider = User(username="pay-outsider", email="pay-outsider@example.com")
+            outsider.set_password("secret")
+            db.session.add_all([admin, member, outsider])
+            db.session.flush()
+            test = GroupTest(
+                title="Payment gate test",
+                status="closed",
+                created_by=admin.id,
+                results_link="https://example.test/coa",
+                results_image_key="group-tests/coa.pdf",
+            )
+            db.session.add(test)
+            db.session.flush()
+            part = Participation(
+                group_test_id=test.id,
+                user_id=member.id,
+                name="pay-member",
+                approved=True,
+                approved_at=datetime.utcnow(),
+                denied=False,
+                amount_owed=50.0,
+                payment_claimed_at=datetime.utcnow() if claimed else None,
+            )
+            pending_part = Participation(
+                group_test_id=test.id,
+                user_id=outsider.id,
+                name="pay-outsider",
+                approved=False,
+                denied=False,
+            )
+            db.session.add_all([part, pending_part])
+            db.session.commit()
+            return {
+                "test_id": test.id,
+                "part_id": part.id,
+                "pending_part_id": pending_part.id,
+                "admin_id": admin.id,
+            }
+
+    def test_participant_payment_claim_requires_admin_confirmation(self):
+        ids = self._payment_review_fixture()
+        self.client.post("/login", data={"username": "pay-member", "password": "secret"})
+
+        blocked = self.client.get(f"/result-image/group-test/{ids['test_id']}")
+        self.assertEqual(blocked.status_code, 403)
+
+        response = self.client.post(
+            f"/test/{ids['test_id']}/my-status",
+            data={"order_status": "pending", "payment_claim": "true", "amount_paid": "50"},
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            self.assertIsNotNone(part.payment_claimed_at)
+            self.assertFalse(part.paid_lab)
+        self.assertEqual(
+            self.client.get(f"/result-image/group-test/{ids['test_id']}").status_code,
+            403,
+        )
+
+    def test_payment_report_shares_queue_section_and_confirmation_grants_results(self):
+        ids = self._payment_review_fixture(claimed=True)
+        self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
+
+        queue_page = self.client.get("/admin/action-queue").get_data(as_text=True)
+        self.assertIn('<span class="badge text-bg-info">Payment Report</span>', queue_page)
+        self.assertIn("Join Request", queue_page)
+        self.assertIn("Confirm Payment", queue_page)
+        self.assertIn("pay-member", queue_page)
+
+        response = self.client.post(f"/admin/payment/confirm/{ids['part_id']}", data={})
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            self.assertTrue(part.paid_lab)
+            self.assertIsNone(part.payment_claimed_at)
+            self.assertIsNotNone(part.payment_verified_at)
+            self.assertEqual(part.payment_verified_by_id, ids["admin_id"])
+
+        after = self.client.get("/admin/action-queue").get_data(as_text=True)
+        self.assertNotIn('<span class="badge text-bg-info">Payment Report</span>', after)
+
+        self.client.get("/logout")
+        self.client.post("/login", data={"username": "pay-member", "password": "secret"})
+        # 503 = storage not configured; authorization passed the paid gate.
+        self.assertEqual(
+            self.client.get(f"/result-image/group-test/{ids['test_id']}").status_code,
+            503,
+        )
+
+    def test_rejecting_payment_report_keeps_participant_unpaid(self):
+        ids = self._payment_review_fixture(claimed=True)
+        self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
+
+        response = self.client.post(f"/admin/payment/reject-claim/{ids['part_id']}", data={})
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            self.assertIsNone(part.payment_claimed_at)
+            self.assertFalse(part.paid_lab)
+        self.client.get("/logout")
+        self.client.post("/login", data={"username": "pay-member", "password": "secret"})
+        self.assertEqual(
+            self.client.get(f"/result-image/group-test/{ids['test_id']}").status_code,
+            403,
+        )
+
+    def test_bulk_approve_filtered_skips_payment_reports(self):
+        ids = self._payment_review_fixture(claimed=True)
+        self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
+
+        response = self.client.post(
+            "/admin/action-queue/approve-filtered",
+            data={"confirm_text": "APPROVE FILTERED", "status": "all", "q": ""},
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            claimed = db.session.get(Participation, ids["part_id"])
+            pending = db.session.get(Participation, ids["pending_part_id"])
+            self.assertTrue(pending.approved)
+            self.assertFalse(claimed.paid_lab)
+            self.assertIsNotNone(claimed.payment_claimed_at)
+
+    def test_unapprove_clears_payment_claim(self):
+        ids = self._payment_review_fixture(claimed=True)
+        self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
+
+        response = self.client.post(
+            f"/admin/manage-participants/{ids['test_id']}/unapprove/{ids['part_id']}",
+            data={},
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            self.assertFalse(part.approved)
+            self.assertIsNone(part.payment_claimed_at)
+
+    def test_admin_edit_marking_paid_records_verification_and_clears_claim(self):
+        ids = self._payment_review_fixture(claimed=True)
+        self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
+
+        response = self.client.post(
+            f"/admin/update-participant/{ids['part_id']}",
+            data={
+                "name": "pay-member",
+                "tg_username": "",
+                "approved": "true",
+                "verified": "false",
+                "active": "true",
+                "order_status": "pending",
+                "us_based": "true",
+                "vial_donor": "false",
+                "state": "",
+                "pay_vial_collector": "false",
+                "pay_lab": "false",
+                "paid_lab": "true",
+                "amount_paid": "50",
+                "notes": "",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            self.assertTrue(part.paid_lab)
+            self.assertIsNone(part.payment_claimed_at)
+            self.assertIsNotNone(part.payment_verified_at)
+            self.assertEqual(part.payment_verified_by_id, ids["admin_id"])
+
+    def test_first_payment_report_notifies_administrators_via_template(self):
+        ids = self._payment_review_fixture()
+        with self.app.app_context():
+            db.session.add(NotificationTemplate(
+                name="Custom payment review",
+                email_subject="PAY REVIEW {{ test_title }}",
+                email_body="{{ username }} paid ${{ amount_paid }} of ${{ amount_owed }} for {{ test_title }}",
+                telegram_body="",
+                hide_from_participant_notifications=True,
+                is_default_payment_review=True,
+                is_active=True,
+            ))
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "pay-member", "password": "secret"})
+        with patch("app.routes.send_notification_message") as mock_send:
+            self.client.post(
+                f"/test/{ids['test_id']}/my-status",
+                data={"order_status": "pending", "payment_claim": "true", "amount_paid": "50"},
+            )
+        subjects = [call.args[2] for call in mock_send.call_args_list]
+        self.assertIn("PAY REVIEW Payment gate test", subjects)
+
+        with patch("app.routes.send_notification_message") as mock_amend:
+            self.client.post(
+                f"/test/{ids['test_id']}/my-status",
+                data={"order_status": "pending", "payment_claim": "true", "amount_paid": "75"},
+            )
+        mock_amend.assert_not_called()
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            self.assertEqual(part.amount_paid, 75.0)
+            self.assertIsNotNone(part.payment_claimed_at)
+
+    def test_manage_participants_page_marks_payment_states(self):
+        ids = self._payment_review_fixture(claimed=True)
+        self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
+        page = self.client.get(f"/admin/manage-participants/{ids['test_id']}").get_data(as_text=True)
+        self.assertIn("Confirm Payment", page)
+        self.assertIn("Reject Payment Report", page)
+        self.assertIn("Payment reported", page)
+        self.assertNotIn(" Mark Paid</button>", page)
+
+        with self.app.app_context():
+            part = db.session.get(Participation, ids["part_id"])
+            part.payment_claimed_at = None
+            db.session.commit()
+        page = self.client.get(f"/admin/manage-participants/{ids['test_id']}").get_data(as_text=True)
+        self.assertIn(" Mark Paid</button>", page)
+
+    def test_deactivation_revokes_existing_web_session(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="revoke-admin", email="revoke-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            victim = User(username="revoke-victim", email="revoke-victim@example.com")
+            victim.set_password("secret")
+            db.session.add_all([admin, victim])
+            db.session.commit()
+            victim_id = victim.id
+
+        # Victim holds a live, authenticated session.
+        self.client.post("/login", data={"username": "revoke-victim", "password": "secret"})
+        self.assertEqual(self.client.get("/dashboard").status_code, 200)
+
+        admin_client = self.app.test_client()
+        admin_client.post("/login", data={"username": "revoke-admin", "password": "secret"})
+        toggle = admin_client.post(f"/admin/users/{victim_id}/toggle-active")
+        self.assertEqual(toggle.status_code, 302)
+        with self.app.app_context():
+            self.assertFalse(db.session.get(User, victim_id).is_active)
+
+        # The already-issued cookie must stop working immediately.
+        dashboard = self.client.get("/dashboard", follow_redirects=False)
+        self.assertEqual(dashboard.status_code, 302)
+        self.assertIn("/login", dashboard.headers["Location"])
+        self.client.post("/profile/telegram-link-token", follow_redirects=False)
+        with self.app.app_context():
+            self.assertEqual(TelegramLinkToken.query.count(), 0)
+
+    def test_admin_cannot_deactivate_own_account(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="selfadmin", email="selfadmin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+            admin_id = admin.id
+
+        self.client.post("/login", data={"username": "selfadmin", "password": "secret"})
+        response = self.client.post(f"/admin/users/{admin_id}/toggle-active", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("cannot deactivate your own account", response.get_data(as_text=True))
+        with self.app.app_context():
+            refreshed = db.session.get(User, admin_id)
+            self.assertTrue(refreshed.is_active)
+
+    def test_password_reset_skips_deactivated_accounts(self):
+        with self.app.app_context():
+            db.create_all()
+            gone = User(username="gone-user", email="gone-user@example.com")
+            gone.set_password("original")
+            live = User(username="live-user", email="live-user@example.com")
+            live.set_password("original")
+            db.session.add_all([gone, live])
+            db.session.commit()
+            gone_id = gone.id
+            gone_hash = gone.password_hash
+            gone.is_active = False
+            db.session.commit()
+
+        # Control: active accounts still receive resets, proving the patched call point works.
+        with patch("app.routes.send_password_reset") as mock_send:
+            mock_send.return_value = True
+            self.client.post("/password-reset", data={"username": "live-user", "notification_channel": "email"})
+        self.assertTrue(mock_send.called)
+
+        # Deactivated account: no delivery attempt, no password change, uniform response.
+        with patch("app.routes.send_password_reset") as mock_send_inactive:
+            mock_send_inactive.return_value = True
+            response = self.client.post(
+                "/password-reset",
+                data={"username": "gone-user", "notification_channel": "email"},
+                follow_redirects=True,
+            )
+        self.assertFalse(mock_send_inactive.called)
+        self.assertIn("If an account matches", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertEqual(db.session.get(User, gone_id).password_hash, gone_hash)
+
+    def test_telegram_deactivated_linked_user_denied_private_commands(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(
+                username="tg-dead", email="tg-dead@example.com",
+                telegram_user_id="77001", telegram_chat_id="77001", is_active=False,
+            )
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={"message": {"chat": {"id": 77001, "type": "private"},
+                                   "from": {"id": 77001, "username": "deadguy"},
+                                   "text": "/tests"}},
+            )
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        self.assertIn("deactivated", mock_send.call_args.args[1])
+
+    def test_telegram_deactivated_user_link_token_is_inert(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="token-dead", email="token-dead@example.com", is_active=False)
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.flush()
+            token = TelegramLinkToken(
+                user_id=user.id, token="dead-token", expires_at=datetime.utcnow() + timedelta(hours=1),
+            )
+            db.session.add(token)
+            db.session.commit()
+            user_id = user.id
+            token_id = token.id
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            self.client.post(
+                "/telegram/webhook",
+                json={"message": {"chat": {"id": 77002, "type": "private"},
+                                   "from": {"id": 77002, "username": "newowner"},
+                                   "text": "/start dead-token"}},
+            )
+        mock_send.assert_called_once()
+        self.assertIn("deactivated", mock_send.call_args.args[1])
+        with self.app.app_context():
+            refreshed = db.session.get(User, user_id)
+            self.assertIsNone(refreshed.telegram_chat_id)
+            self.assertIsNone(refreshed.telegram_user_id)
+            self.assertIsNone(db.session.get(TelegramLinkToken, token_id).used_at)
+
+    def test_telegram_deactivated_admin_cannot_update_command_response(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(
+                username="dead-cmd-admin", email="dead-cmd-admin@example.com",
+                is_admin=True, is_active=False,
+                telegram_user_id="9003", telegram_chat_id="-1009003",
+            )
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            template = TelegramCommandTemplate(
+                command="/groupbuy", reply_text="Old text", allow_admin_bot_updates=True, is_active=True,
+            )
+            db.session.add(template)
+            db.session.flush()
+            db.session.add(BotCommandMessage(
+                command_template_id=template.id, provider="telegram",
+                chat_id="-1009003", message_id="88",
+            ))
+            db.session.commit()
+
+        self.client.post(
+            "/telegram/webhook",
+            json={"message": {"chat": {"id": -1009003, "type": "supergroup"},
+                               "from": {"id": 9003, "username": "deadadmin"},
+                               "text": "Hijacked text",
+                               "reply_to_message": {"message_id": 88, "from": {"is_bot": True}}}},
+        )
+        with self.app.app_context():
+            refreshed = TelegramCommandTemplate.query.filter_by(command="/groupbuy").first()
+            self.assertEqual(refreshed.reply_text, "Old text")
+
+    def test_telegram_public_group_commands_unaffected_by_deactivation(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            self.client.post(
+                "/telegram/webhook",
+                json={"message": {"chat": {"id": -100555, "type": "supergroup"},
+                                   "from": {"id": 77003, "username": "whoever"},
+                                   "text": "/testing"}},
+            )
+        mock_send.assert_called_once()
+        reply = mock_send.call_args.args[1]
+        self.assertIn("Sign up:", reply)
+        self.assertNotIn("deactivated", reply)
+
+    def test_safe_http_url_allows_only_plain_http_urls(self):
+        from app.links import safe_http_url
+
+        self.assertEqual(safe_http_url("https://example.test/a"), "https://example.test/a")
+        self.assertEqual(safe_http_url("HTTP://Example.test/a"), "HTTP://Example.test/a")
+        self.assertIsNone(safe_http_url("javascript:alert(1)"))
+        self.assertIsNone(safe_http_url("data:text/html;base64,PHNjcmlwdD4="))
+        self.assertIsNone(safe_http_url("file:///etc/passwd"))
+        self.assertIsNone(safe_http_url("#"))
+        self.assertIsNone(safe_http_url("about:blank"))
+        self.assertIsNone(safe_http_url("https://"))
+        self.assertIsNone(safe_http_url("https://ex ample.test/"))
+        # A scheme split across a control character must not read as a scheme.
+        self.assertIsNone(safe_http_url("java\nscript:alert(1)"))
+        self.assertIsNone(safe_http_url("\tjavascript:alert(1)"))
+
+    def test_edit_test_form_rejects_non_http_results_link(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="scheme-admin", email="scheme-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Scheme test", status="closed", created_by=admin.id,
+                             results_link="https://example.test/original")
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "scheme-admin", "password": "secret"})
+        response = self.client.post(
+            f"/admin/edit-test/{test_id}",
+            data={"title": "Scheme test", "status": "closed", "results_link": "javascript:alert(1)"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("http:// or https://", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertEqual(db.session.get(GroupTest, test_id).results_link, "https://example.test/original")
+
+    def test_quick_results_link_route_rejects_non_http_scheme(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="quicklink-admin", email="quicklink-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Quick link", status="testing", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "quicklink-admin", "password": "secret"})
+        response = self.client.post(
+            f"/admin/set-results/{test_id}",
+            data={"results_link": "javascript:alert(document.domain)"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            refreshed = db.session.get(GroupTest, test_id)
+            self.assertIsNone(refreshed.results_link)
+            # A rejected link must not silently carry out the route's other effect.
+            self.assertEqual(refreshed.status, "testing")
+
+    def test_public_result_edit_form_rejects_non_http_results_link(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="pr-admin", email="pr-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            result = PublicResult(title="COA", results_link="https://coa.example/original", created_by=admin.id)
+            db.session.add(result)
+            db.session.commit()
+            result_id = result.id
+
+        self.client.post("/login", data={"username": "pr-admin", "password": "secret"})
+        response = self.client.post(
+            f"/admin/public-results/{result_id}/edit",
+            data={"title": "COA", "results_link": "javascript:alert(1)", "summary": "", "tag_names": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(PublicResult, result_id).results_link, "https://coa.example/original")
+
+    def test_legacy_javascript_results_link_is_inert_when_rendered(self):
+        # Write-time validation cannot reach rows stored before it existed, so the
+        # templates have to neutralise them independently.
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="legacy-admin", email="legacy-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            db.session.add(PublicResult(
+                title="Legacy COA", results_link="javascript:alert(document.domain)", created_by=admin.id,
+            ))
+            db.session.commit()
+            result_id = PublicResult.query.filter_by(title="Legacy COA").one().id
+
+        anonymous = self.app.test_client()
+        public_page = anonymous.get(f"/public-results/{result_id}").get_data(as_text=True)
+        self.assertNotIn("javascript:alert", public_page)
+        self.assertNotIn("<script", public_page)
+
+        self.client.post("/login", data={"username": "legacy-admin", "password": "secret"})
+        admin_page = self.client.get("/admin/public-results").get_data(as_text=True)
+        self.assertNotIn("javascript:alert", admin_page)
+
+    def test_profile_rejects_password_change_without_current_password(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="profile-user", email="profile-user@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+
+        self.client.post("/login", data={"username": "profile-user", "password": "secret"})
+        response = self.client.post("/profile", data={
+            "username": "profile-user",
+            "email": "profile-user@example.com",
+            "receive_group_test_notifications": "y",
+            "notification_channel": "email",
+            "digest_frequency": "off",
+            "digest_hourly_minute_utc": "0",
+            "digest_daily_hour_utc": "9",
+            "password": "attackersecret",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("current password is required", response.get_data(as_text=True))
+        with self.app.app_context():
+            refreshed = db.session.get(User, user_id)
+            self.assertTrue(refreshed.check_password("secret"))
+            self.assertFalse(refreshed.check_password("attackersecret"))
+            self.assertEqual(refreshed.session_epoch, 0)
+
+    def test_profile_password_change_rotates_epoch_and_ends_sessions(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="rotator", email="rotator@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+
+        self.client.post("/login", data={"username": "rotator", "password": "secret"})
+        response = self.client.post("/profile", data={
+            "username": "rotator",
+            "email": "rotator@example.com",
+            "receive_group_test_notifications": "y",
+            "notification_channel": "email",
+            "digest_frequency": "off",
+            "digest_hourly_minute_utc": "0",
+            "digest_daily_hour_utc": "9",
+            "password": "newsecret",
+            "current_password": "secret",
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+        with self.app.app_context():
+            refreshed = db.session.get(User, user_id)
+            self.assertTrue(refreshed.check_password("newsecret"))
+            self.assertEqual(refreshed.session_epoch, 1)
+
+        # The pre-rotation cookie must no longer authenticate anywhere.
+        self.assertEqual(self.client.get("/profile").status_code, 302)
+        reauthenticated = self.app.test_client()
+        login = reauthenticated.post("/login", data={"username": "rotator", "password": "newsecret"})
+        self.assertEqual(login.status_code, 302)
+
+    def test_profile_rejects_email_change_without_current_password(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="mailswap", email="mailswap@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+
+        self.client.post("/login", data={"username": "mailswap", "password": "secret"})
+        response = self.client.post("/profile", data={
+            "username": "mailswap",
+            "email": "attacker@evil.example",
+            "receive_group_test_notifications": "y",
+            "notification_channel": "email",
+            "digest_frequency": "off",
+            "digest_hourly_minute_utc": "0",
+            "digest_daily_hour_utc": "9",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(User, user_id).email, "mailswap@example.com")
+
+    def test_profile_rejects_reserved_support_identity(self):
+        from app.models import RESERVED_SUPPORT_EMAIL, RESERVED_SUPPORT_USERNAME
+
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="renamer", email="renamer@example.com")
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+
+        self.client.post("/login", data={"username": "renamer", "password": "secret"})
+        response = self.client.post("/profile", data={
+            "username": RESERVED_SUPPORT_USERNAME,
+            "email": RESERVED_SUPPORT_EMAIL,
+            "receive_group_test_notifications": "y",
+            "notification_channel": "email",
+            "digest_frequency": "off",
+            "digest_hourly_minute_utc": "0",
+            "digest_daily_hour_utc": "9",
+            "current_password": "secret",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("reserved", response.get_data(as_text=True))
+        with self.app.app_context():
+            refreshed = db.session.get(User, user_id)
+            self.assertEqual(refreshed.username, "renamer")
+            self.assertEqual(refreshed.email, "renamer@example.com")
+
+    def test_edit_user_rejects_reserved_support_identity(self):
+        from app.models import RESERVED_SUPPORT_USERNAME
+
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="identity-admin", email="identity-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            target = User(username="target-user", email="target-user@example.com")
+            target.set_password("secret")
+            db.session.add(target)
+            db.session.commit()
+            target_id = target.id
+
+        self.client.post("/login", data={"username": "identity-admin", "password": "secret"})
+        response = self.client.post(
+            f"/admin/users/{target_id}/edit",
+            data={
+                "username": RESERVED_SUPPORT_USERNAME,
+                "email": "someone-else@example.com",
+                "is_active": "y",
+                "receive_group_test_notifications": "y",
+                "notification_channel": "email",
+                "digest_frequency": "off",
+                "digest_hourly_minute_utc": "0",
+                "digest_daily_hour_utc": "9",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("reserved", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertEqual(db.session.get(User, target_id).username, "target-user")

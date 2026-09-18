@@ -6,7 +6,7 @@
 <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
         <h3 class="mb-1">Tags</h3>
-        <p class="text-muted mb-0">Tags are created automatically the moment anyone types one on a group test or public result, so you never have to add one in advance. Use this page to repair the ones that go wrong: rename a misspelling, merge two tags that mean the same thing, or remove one that is attached to nothing.</p>
+        <p class="text-muted mb-0">Tags are created automatically the moment anyone types one on a group test or public result, so you never have to add one in advance. Use this page to repair the ones that go wrong: rename a misspelling, merge two tags that mean the same thing, retire a spelling you want out of the picker, or remove one that is attached to nothing.</p>
     </div>
     <a href="{{ url_for('main.admin_settings') }}" class="btn btn-outline-secondary btn-sm">Back to Settings</a>
 </div>
@@ -91,7 +91,12 @@
                 <tbody>
                     {% for row in tag_rows %}
                         <tr>
-                            <td>{{ row.tag.name }}</td>
+                            <td>
+                                {{ row.tag.name }}
+                                {% if row.tag.hidden_from_bots %}
+                                    <span class="badge bg-secondary" title="Kept out of the Telegram and Discord public-results menus. The results themselves are still published.">Hidden from bot menus</span>
+                                {% endif %}
+                            </td>
                             <td class="text-nowrap">
                                 {% if row.total %}
                                     {{ row.tests }} test{{ 's' if row.tests != 1 }} &middot; {{ row.results }} result{{ 's' if row.results != 1 }}
@@ -108,6 +113,20 @@
                             </td>
                             <td class="text-end text-nowrap">
                                 <a href="{{ url_for('main.tags', merge_source=row.tag.id) }}#merge" class="btn btn-sm btn-outline-primary">Merge</a>
+                                {% if row.results %}
+                                    <form method="POST" action="{{ url_for('main.toggle_tag_bots_visibility', tag_id=row.tag.id) }}" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        {% if row.tag.hidden_from_bots %}
+                                            <button type="submit" class="btn btn-sm btn-outline-success" title="Show this tag in the Telegram and Discord public-results menus again.">Show in bots</button>
+                                        {% else %}
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Keep this tag out of the bot menus to control how long that list is. Its published results stay readable by direct link and in the Public Results list.">Hide from bots</button>
+                                        {% endif %}
+                                    </form>
+                                {% endif %}
+                                <form method="POST" action="{{ url_for('main.toggle_tag_active', tag_id=row.tag.id) }}" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="Keep it out of the tag picker without untagging anything. Public tag pages still work.">Retire</button>
+                                </form>
                                 {% if row.total %}
                                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="This tag is in use. Rename it, or merge it into another tag, instead.">Delete</button>
                                 {% else %}
@@ -122,13 +141,76 @@
                 </tbody>
             </table>
         {% else %}
-            <div class="p-3 text-muted">No tags yet. Type one into the Tags field on a group test and it will appear here.</div>
+            <div class="p-3 text-muted">
+                No tags are available for new tagging yet.
+                {% if retired_rows %}Restore one below, or type a tag on a group test to create one.{% else %}Type a tag on a group test to create one.{% endif %}
+            </div>
         {% endif %}
     </div>
 </div>
 
+{% if retired_rows %}
+    <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Retired and merged spellings</span>
+            <small class="text-muted">{{ retired_rows|length }} total</small>
+        </div>
+        <div class="card-body p-0">
+            <p class="text-muted small px-3 pt-3 mb-2">These stay out of the tag picker but are kept in the database on purpose: public-results tag pages and bot buttons address tags by id, so removing them would break old links. Anything still attached to a record keeps showing under its tag as usual.</p>
+            <table class="table table-sm mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Spelling</th>
+                        <th>Status</th>
+                        <th>Used in</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in retired_rows %}
+                        <tr>
+                            <td>{{ row.tag.name }}</td>
+                            <td>
+                                {% if row.merged_into %}
+                                    <span class="badge bg-info text-dark">merged into {{ row.merged_into.name }}</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">retired</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-nowrap">
+                                {% if row.total %}
+                                    {{ row.tests }} test{{ 's' if row.tests != 1 }} &middot; {{ row.results }} result{{ 's' if row.results != 1 }}
+                                {% else %}
+                                    <span class="text-muted">nothing</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end text-nowrap">
+                                {% if row.merged_into %}
+                                    <a href="{{ url_for('main.tags', merge_source=row.merged_into.id) }}#merge" class="btn btn-sm btn-outline-primary">Merge {{ row.merged_into.name }}</a>
+                                {% else %}
+                                    <form method="POST" action="{{ url_for('main.toggle_tag_active', tag_id=row.tag.id) }}" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-success">Restore</button>
+                                    </form>
+                                {% endif %}
+                                {% if not row.total %}
+                                    <form method="POST" action="{{ url_for('main.delete_tag', tag_id=row.tag.id) }}" class="d-inline" onsubmit="return confirm('Delete this spelling permanently? Only do this once nothing is attached to it.');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endif %}
+
 <p class="text-muted small mt-3">
     Unused tags are listed first because removing them affects nothing. Renaming a tag changes how the dashboard groups and sorts tests, so sections may move.
-    A tag that is in use cannot be deleted &mdash; rename it, or merge it into the spelling you want to keep.
+    A tag that is in use cannot be deleted &mdash; rename it, merge it into the spelling you want to keep, or retire it to take it out of the picker.
+    <strong>Retire</strong> and <strong>Hide from bots</strong> are separate on purpose: retiring stops a spelling being offered to admins while leaving public menus untouched, and hiding trims the bot menu while leaving the results published. The bot list only ever shows tags that have at least one published result, so retiring junk does not shorten it.
 </p>
 {% endblock %}

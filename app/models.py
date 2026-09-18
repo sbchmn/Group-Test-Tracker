@@ -140,7 +140,20 @@ class Tag(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True, index=True)
     normalized_name = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    # Retired vocabulary stays addressable: public-results tag pages and bot
+    # callbacks reference tags by id, so a retired tag must never disappear.
+    is_active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.text('1'))
+    # Set when a tag was merged away; resolves to the spelling that survived, so an
+    # old button or a repeated typo lands on the right tag instead of recreating it.
+    merged_into_id = db.Column(db.Integer, db.ForeignKey('tags.id'), nullable=True, index=True)
+    # Menu suppression, not content suppression: a hidden tag's published results stay
+    # readable at their direct URLs and in the admin's Public Results list.
+    hidden_from_bots = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def is_alias(self):
+        return self.merged_into_id is not None
 
     def __repr__(self):
         return f'<Tag {self.name}>'

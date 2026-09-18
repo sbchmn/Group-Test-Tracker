@@ -1199,6 +1199,32 @@ def parse_tag_names(tag_text):
     return tags
 
 
+def _resolve_tag(tag):
+    """Follow merge pointers to the tag that actually survived."""
+    seen = set()
+    current = tag
+    while current is not None and current.merged_into_id is not None:
+        if current.id in seen:
+            break
+        seen.add(current.id)
+        parent = db.session.get(Tag, current.merged_into_id)
+        if parent is None:
+            break
+        current = parent
+    return current
+
+
+def _dedupe_tags(tags):
+    unique = []
+    seen = set()
+    for tag in tags:
+        if tag is None or tag.id in seen:
+            continue
+        seen.add(tag.id)
+        unique.append(tag)
+    return unique
+
+
 def get_or_create_tags(tag_text):
     tags = []
     for name in parse_tag_names(tag_text):
@@ -1208,8 +1234,19 @@ def get_or_create_tags(tag_text):
             tag = Tag(name=name, normalized_name=normalized)
             db.session.add(tag)
             db.session.flush()
+        elif tag.merged_into_id is not None:
+            # Someone re-typed a spelling that was merged away, so land on the tag
+            # that survived instead of resurrecting the duplicate. If that survivor
+            # was retired in the meantime, using it again is the signal to bring it
+            # back — otherwise a record ends up tagged with an unpickable spelling.
+            tag = _resolve_tag(tag)
+            if not tag.is_active:
+                tag.is_active = True
+        elif not tag.is_active:
+            # Deliberately reusing retired vocabulary brings it back into the picker.
+            tag.is_active = True
         tags.append(tag)
-    return tags
+    return _dedupe_tags(tags)
 
 
 def apply_tags_to_record(record, tag_text):
@@ -1217,7 +1254,15 @@ def apply_tags_to_record(record, tag_text):
 
 
 def get_all_tag_names():
-    return [tag.name for tag in Tag.query.order_by(Tag.name).all()]
+    """Retired and merged-away spellings stay out of the picker, but public pages and
+    bot callbacks address tags by id, so retiring never hides already-tagged content."""
+    return [
+        tag.name
+        for tag in Tag.query.filter(
+            Tag.is_active.is_(True),
+            Tag.merged_into_id.is_(None),
+        ).order_by(Tag.name).all()
+    ]
 
 
 # (association table, owning column, usage counter name)
@@ -4260,14 +4305,18 @@ def add_participant_to_test(test_id):
 def admin_settings():
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     analysis_settings = get_analysis_settings()
-    all_tags = Tag.query.all()
-    tag_usage = _tag_usage([tag.id for tag in all_tags])
+    active_tags = Tag.query.filter(
+        Tag.is_active.is_(True),
+        Tag.merged_into_id.is_(None),
+    ).all()
+    tag_usage = _tag_usage([tag.id for tag in active_tags])
+    unused_tag_count = sum(
+        1 for counts in tag_usage.values() if not (counts['tests'] or counts['results'])
+    )
     return render_template(
         'admin/settings.html',
-        tag_count=len(all_tags),
-        unused_tag_count=sum(
-            1 for counts in tag_usage.values() if not (counts['tests'] or counts['results'])
-        ),
+        tag_count=len(active_tags),
+        unused_tag_count=unused_tag_count,
         settings_status={
             'email': bool(configs.get('mailjet_sender_email')),
             'telegram': bool(configs.get('telegram_bot_token')),
@@ -5166,18 +5215,26 @@ def toggle_payment_option(option_id):
 def tags():
     all_tags = Tag.query.order_by(Tag.name.asc()).all()
     usage = _tag_usage([tag.id for tag in all_tags])
-    rows = [
-        {
+
+    def as_row(tag):
+        return {
             'tag': tag,
             'tests': usage[tag.id]['tests'],
             'results': usage[tag.id]['results'],
             'total': usage[tag.id]['tests'] + usage[tag.id]['results'],
+            'merged_into': _resolve_tag(tag) if tag.merged_into_id else None,
         }
-        for tag in all_tags
-    ]
+
+    live = [tag for tag in all_tags if tag.is_active and tag.merged_into_id is None]
+    retired = [tag for tag in all_tags if not tag.is_active or tag.merged_into_id is not None]
+    rows = [as_row(tag) for tag in live]
     # Unused tags first: that set is safe to act on without any consequences, so it
     # is where a cleanup pass on an existing deployment starts.
     rows.sort(key=lambda row: (1 if row['total'] else 0, -row['total'], row['tag'].name.lower()))
+    retired_rows = sorted(
+        (as_row(tag) for tag in retired),
+        key=lambda row: (not row['tag'].is_alias, row['tag'].name.lower()),
+    )
 
     # The merge picker is driven by query params so a row's "Merge" link, a rename
     # clash, and a duplicate suggestion can all pre-fill it without any scripting.
@@ -5186,14 +5243,14 @@ def tags():
     merge_source = next((tag for tag in all_tags if tag.id == merge_source_id), None)
     merge_options = [
         {'id': tag.id, 'name': tag.name}
-        for tag in all_tags
+        for tag in live
         if merge_source is None or tag.id != merge_source.id
     ]
 
     # Suggest which way round each merge goes: keep the better-used spelling and
     # absorb the weaker one into it, alphabetical only when usage ties.
     duplicate_pairs = []
-    for pair in _duplicate_tag_pairs(all_tags):
+    for pair in _duplicate_tag_pairs(live):
         left, right = pair['left'], pair['right']
         left_total = usage[left.id]['tests'] + usage[left.id]['results']
         right_total = usage[right.id]['tests'] + usage[right.id]['results']
@@ -5206,6 +5263,7 @@ def tags():
     return render_template(
         'admin/tags.html',
         tag_rows=rows,
+        retired_rows=retired_rows,
         duplicate_pairs=duplicate_pairs,
         unused_count=sum(1 for row in rows if not row['total']),
         merge_source=merge_source,
@@ -5235,6 +5293,16 @@ def rename_tag(tag_id):
         Tag.id != tag.id,
     ).first()
     if clash is not None:
+        clash = _resolve_tag(clash)
+        if clash.id == tag.id:
+            # The other spelling already forwards here, so renaming onto it would
+            # reclaim a spelling that was deliberately merged away.
+            flash(
+                f'"{new_name}" was merged into this tag. Re-tag those records with '
+                f'"{tag.name}" instead of reusing the old spelling.',
+                'danger',
+            )
+            return redirect(url_for('main.tags'))
         # normalized_name is unique, so this rename would become a merge. Offer the
         # merge preselected rather than making the admin find both tags again.
         flash(
@@ -5265,7 +5333,8 @@ def rename_tag(tag_id):
 def merge_tag(tag_id):
     source = Tag.query.get_or_404(tag_id)
     target_id = request.form.get('into_tag_id', type=int)
-    target = Tag.query.get_or_404(target_id) if target_id else None
+    # Resolve first so a merge can never be aimed at a tag that was itself merged away.
+    target = _resolve_tag(Tag.query.get(target_id)) if target_id else None
 
     if target is None:
         flash('Choose the tag to merge into.', 'danger')
@@ -5278,7 +5347,11 @@ def merge_tag(tag_id):
     target_name = target.name
     try:
         moved = _merge_tag_links(source.id, target.id)
-        db.session.delete(source)
+        # The row survives as a forward pointer: public-results tag pages and bot
+        # callbacks address tags by id, and someone re-typing this spelling should
+        # land on the surviving tag rather than recreating the duplicate.
+        source.is_active = False
+        source.merged_into_id = target.id
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
@@ -5313,11 +5386,77 @@ def delete_tag(tag_id):
         )
         return redirect(url_for('main.tags'))
 
+    alias_count = Tag.query.filter_by(merged_into_id=tag.id).count()
+    if alias_count:
+        # Old spellings still forward here, so removing the row would orphan them.
+        flash(
+            f'{alias_count} merged spelling{"" if alias_count == 1 else "s"} still point at '
+            f'"{tag.name}". Merge this tag into another one first.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
     name = tag.name
     db.session.delete(tag)
     db.session.commit()
     db.session.expire_all()
     flash(f'Deleted unused tag "{name}".', 'success')
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/toggle-active', methods=['POST'])
+@login_required
+@admin_required
+def toggle_tag_active(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+
+    if tag.merged_into_id is not None:
+        flash(
+            f'"{tag.name}" was merged into "{_resolve_tag(tag).name}", so it cannot be '
+            'reactivated. Edit the tag it merged into instead.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    tag.is_active = not tag.is_active
+    db.session.commit()
+    if tag.is_active:
+        flash(f'Tag "{tag.name}" is back in the tag picker and available for new tagging.', 'success')
+    else:
+        flash(
+            f'Tag "{tag.name}" is retired from the tag picker. Existing tagged records '
+            'and public tag pages are unchanged.',
+            'success',
+        )
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/toggle-bots', methods=['POST'])
+@login_required
+@admin_required
+def toggle_tag_bots_visibility(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+
+    if tag.merged_into_id is not None:
+        survivor = _resolve_tag(tag)
+        flash(
+            f'"{tag.name}" was merged into "{survivor.name}" and is not shown in the bot '
+            'menus on its own. Change the menu setting on that tag instead.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    tag.hidden_from_bots = not tag.hidden_from_bots
+    db.session.commit()
+    if tag.hidden_from_bots:
+        flash(
+            f'Tag "{tag.name}" is hidden from the Telegram and Discord public-results '
+            'menus. Its published results are still live at their direct links and in '
+            'the Public Results list.',
+            'success',
+        )
+    else:
+        flash(f'Tag "{tag.name}" is back in the bot menus.', 'success')
     return redirect(url_for('main.tags'))
 
 

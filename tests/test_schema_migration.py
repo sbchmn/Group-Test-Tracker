@@ -52,6 +52,11 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("payment_verified_by_id", participation_columns)
             template_columns = [column["name"] for column in inspector.get_columns("notification_templates")]
             self.assertIn("is_default_payment_review", template_columns)
+            tag_columns = [column["name"] for column in inspector.get_columns("tags")]
+            self.assertIn("is_active", tag_columns)
+            self.assertIn("merged_into_id", tag_columns)
+            self.assertIn("hidden_from_bots", tag_columns)
+            self.assertIn("tags", table_names)
             self.assertIn("payment_options", table_names)
             self.assertIn("group_test_payment_options", table_names)
             self.assertIn("telegram_link_tokens", table_names)
@@ -113,6 +118,20 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("payment_verified_at", migration_text)
         self.assertIn("payment_verified_by_id", migration_text)
         self.assertIn("is_default_payment_review", migration_text)
+        self.assertIn("merged_into_id", migration_text)
+        self.assertIn("hidden_from_bots", migration_text)
+
+    def test_alembic_upgrade_adds_tag_retirement_fields(self):
+        migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
+        with self.app.app_context():
+            upgrade(directory=str(migration_dir))
+            inspector = inspect(db.engine)
+            tag_columns = {item['name'] for item in inspector.get_columns('tags')}
+            self.assertIn('is_active', tag_columns)
+            self.assertIn('merged_into_id', tag_columns)
+            self.assertIn('hidden_from_bots', tag_columns)
+            tag_indexes = {item['name'] for item in inspector.get_indexes('tags')}
+            self.assertIn('ix_tags_merged_into_id', tag_indexes)
 
     def test_alembic_upgrade_creates_result_analysis_schema(self):
         migration_dir = Path(__file__).resolve().parent.parent / 'migrations'

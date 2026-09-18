@@ -51,6 +51,7 @@ class User(UserMixin, db.Model):
     telegram_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
     telegram_chat_id = db.Column(db.String(80), nullable=True, index=True)
     discord_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
+    root_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     receive_group_test_notifications = db.Column(db.Boolean, default=True, nullable=False)
@@ -83,14 +84,8 @@ class User(UserMixin, db.Model):
         lazy='dynamic',
         cascade='all, delete-orphan'
     )
-    telegram_link_tokens = db.relationship(
-        'TelegramLinkToken',
-        backref='user',
-        lazy='dynamic',
-        cascade='all, delete-orphan'
-    )
-    discord_link_tokens = db.relationship(
-        'DiscordLinkToken',
+    link_tokens = db.relationship(
+        'BotLinkToken',
         backref='user',
         lazy='dynamic',
         cascade='all, delete-orphan'
@@ -140,7 +135,20 @@ class Tag(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True, index=True)
     normalized_name = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    # Retired vocabulary stays addressable: public-results tag pages and bot
+    # callbacks reference tags by id, so a retired tag must never disappear.
+    is_active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.text('1'))
+    # Set when a tag was merged away; resolves to the spelling that survived, so an
+    # old button or a repeated typo lands on the right tag instead of recreating it.
+    merged_into_id = db.Column(db.Integer, db.ForeignKey('tags.id'), nullable=True, index=True)
+    # Menu suppression, not content suppression: a hidden tag's published results stay
+    # readable at their direct URLs and in the admin's Public Results list.
+    hidden_from_bots = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def is_alias(self):
+        return self.merged_into_id is not None
 
     def __repr__(self):
         return f'<Tag {self.name}>'
@@ -303,6 +311,8 @@ class NotificationTemplate(db.Model):
     email_subject = db.Column(db.String(200), nullable=True)
     email_body = db.Column(db.Text, nullable=True)
     telegram_body = db.Column(db.Text, nullable=True)
+    discord_body = db.Column(db.Text, nullable=True)
+    root_body = db.Column(db.Text, nullable=True)
     hide_from_participant_notifications = db.Column(db.Boolean, default=False, nullable=False)
     is_default_password_reset = db.Column(db.Boolean, default=False, nullable=False)
     is_default_registration_welcome = db.Column(db.Boolean, default=False, nullable=False)
@@ -384,30 +394,28 @@ class NotificationConfig(db.Model):
     value = db.Column(db.Text, nullable=True)
 
 
-class TelegramLinkToken(db.Model):
-    __tablename__ = 'telegram_link_tokens'
+class BotLinkToken(db.Model):
+    """Single-use token that links a chat-platform account to a User.
+
+    One row per provider is kept in a single table so that issuing, listing and
+    claiming a token is written once instead of once per integration.
+    """
+    __tablename__ = 'bot_link_tokens'
 
     id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.String(20), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
-    token = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    # Uniqueness is per-provider, not global: the claim lookup filters on provider
+    # and token, and a global UNIQUE(token) can abort a merge across the two legacy
+    # tables, which were each independently unique but never jointly so.
+    token = db.Column(db.String(120), nullable=False, index=True)
     expires_at = db.Column(db.DateTime, nullable=False)
     used_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
-    @property
-    def is_active(self):
-        return self.used_at is None and self.expires_at >= datetime.utcnow()
-
-
-class DiscordLinkToken(db.Model):
-    __tablename__ = 'discord_link_tokens'
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
-    token = db.Column(db.String(120), nullable=False, unique=True, index=True)
-    expires_at = db.Column(db.DateTime, nullable=False)
-    used_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint('provider', 'token', name='_bot_link_token_provider_token_uc'),
+    )
 
     @property
     def is_active(self):
@@ -431,6 +439,58 @@ class ControlPlaneNonce(db.Model):
     nonce_digest = db.Column(db.String(64), nullable=False, unique=True, index=True)
     expires_at = db.Column(db.DateTime, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RootBridgeNonce(db.Model):
+    """Replay defense for signed Root bridge requests."""
+    __tablename__ = 'root_bridge_nonces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nonce_digest = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RootInboundEvent(db.Model):
+    """Dedupe ledger for Root events, keyed by the platform message id."""
+    __tablename__ = 'root_inbound_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    event_type = db.Column(db.String(60), nullable=False)
+    channel_id = db.Column(db.String(120), nullable=True)
+    source_root_user_id = db.Column(db.String(40), nullable=True)
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RootOutbox(db.Model):
+    """Messages waiting to be carried into Root.
+
+    Root accepts no pushes, so outbound delivery is pull-based: the bridge polls
+    ``claim``, posts the body to Root, then reports back with ``ack``. The lease
+    columns follow result_analysis_runs so a bridge that dies mid-flight lets the
+    row lapse back into the claimable set instead of stranding it.
+    """
+    __tablename__ = 'root_outbox'
+
+    PENDING = 'pending'
+    CLAIMED = 'claimed'
+    SENT = 'sent'
+    FAILED = 'failed'
+
+    id = db.Column(db.Integer, primary_key=True)
+    channel_id = db.Column(db.String(120), nullable=False, index=True)
+    body = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default=PENDING, index=True)
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    max_attempts = db.Column(db.Integer, nullable=False, default=5)
+    next_attempt_at = db.Column(db.DateTime, nullable=True)
+    lease_token = db.Column(db.String(64), nullable=True)
+    lease_expires_at = db.Column(db.DateTime, nullable=True)
+    event_key = db.Column(db.String(120), nullable=True, unique=True)
+    last_error = db.Column(db.String(300), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=True)
 
 
 class ControlPlaneOperationReceipt(db.Model):

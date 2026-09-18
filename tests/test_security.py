@@ -8,7 +8,7 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import BotCommandMessage, GroupTest, NotificationConfig, NotificationTemplate, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramLinkToken, TelegramWebhookUpdate, User
+from app.models import BotCommandMessage, BotLinkToken, GroupTest, NotificationConfig, NotificationTemplate, Participation, PaymentOption, PublicResult, Tag, TelegramCommandInvocation, TelegramCommandTemplate, TelegramWebhookUpdate, User
 from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
 from app.routes import _process_public_results_telegram
 
@@ -154,7 +154,7 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Google Analytics and cookies", privacy)
         self.assertIn("Telegram bot processing", privacy)
         self.assertIn("Discord bot processing", privacy)
-        self.assertIn("Root and other webhook notifications", privacy)
+        self.assertIn("Discord and Root notifications", privacy)
         self.assertIn("OpenAI", privacy)
         self.assertIn("xAI (Grok)", privacy)
         self.assertIn("Anthropic (Claude)", privacy)
@@ -219,7 +219,10 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("Discord Bot Token", bot_page)
         self.assertIn("Synchronize Commands", bot_page)
         self.assertIn("/admin/settings/bots/discord/sync-commands", bot_page)
-        self.assertIn("Root Webhook URL", bot_page)
+        self.assertIn("Root Community ID", bot_page)
+        self.assertIn("Root Status Channel ID", bot_page)
+        self.assertIn("/admin/settings/bots/root/bridge-credentials", bot_page)
+        self.assertIn("/admin/settings/bots/root/test-message", bot_page)
 
         save_response = self.client.post(
             "/admin/settings/bots",
@@ -230,8 +233,10 @@ class SecurityTests(unittest.TestCase):
                 "discord_status_channel_id": "channel-123",
                 "discord_webhook_url": "https://discord.example/webhook",
                 "discord_webhook_username": "Tracker Bot",
-                "root_webhook_url": "https://root.example/webhook",
-                "root_webhook_name": "Root Bot",
+                "root_community_id": "community-123",
+                "root_status_channel_id": "root-channel-123",
+                "root_bridge_key_id": "root-key-123",
+                "root_bridge_secret": "root-secret-value",
                 "submit": "Save Bot Integrations",
             },
             follow_redirects=False,
@@ -241,7 +246,8 @@ class SecurityTests(unittest.TestCase):
             values = {item.key: item.value for item in NotificationConfig.query.all()}
         self.assertEqual(values["discord_bot_token"], "discord-token")
         self.assertEqual(values["discord_status_channel_id"], "channel-123")
-        self.assertEqual(values["root_webhook_url"], "https://root.example/webhook")
+        self.assertEqual(values["root_community_id"], "community-123")
+        self.assertEqual(values["root_bridge_secret"], "root-secret-value")
 
         sync_response = self.client.post(
             "/admin/settings/bots/discord/sync-commands",
@@ -391,6 +397,8 @@ class SecurityTests(unittest.TestCase):
             admin = User(username="discord-admin", email="discord-admin@example.com", is_admin=True)
             admin.set_password("secret")
             db.session.add(admin)
+            # Discord must be configured for it to appear as a selectable channel.
+            db.session.add(NotificationConfig(key="discord_bot_token", value="123456:ABC"))
             db.session.commit()
 
         self.client.post("/login", data={"username": "discord-admin", "password": "secret"}, follow_redirects=True)
@@ -721,7 +729,7 @@ class SecurityTests(unittest.TestCase):
             user.set_password("secret")
             db.session.add(user)
             db.session.flush()
-            token = TelegramLinkToken(
+            token = BotLinkToken(provider="telegram",
                 user_id=user.id,
                 token="token-abc",
                 expires_at=datetime.utcnow() + timedelta(hours=1),
@@ -1788,7 +1796,7 @@ class SecurityTests(unittest.TestCase):
             db.session.add_all([owner, target])
             db.session.flush()
 
-            token = TelegramLinkToken(
+            token = BotLinkToken(provider="telegram",
                 user_id=target.id,
                 token="token-owner-clash",
                 expires_at=datetime.utcnow() + timedelta(hours=1),
@@ -1812,7 +1820,7 @@ class SecurityTests(unittest.TestCase):
 
         with self.app.app_context():
             refreshed_target = User.query.get(target_id)
-            refreshed_token = TelegramLinkToken.query.get(token_id)
+            refreshed_token = BotLinkToken.query.get(token_id)
             self.assertIsNone(refreshed_target.telegram_chat_id)
             self.assertIsNone(refreshed_target.telegram_user_id)
             self.assertIsNone(refreshed_token.used_at)
@@ -2786,7 +2794,7 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("/login", dashboard.headers["Location"])
         self.client.post("/profile/telegram-link-token", follow_redirects=False)
         with self.app.app_context():
-            self.assertEqual(TelegramLinkToken.query.count(), 0)
+            self.assertEqual(BotLinkToken.query.count(), 0)
 
     def test_admin_cannot_deactivate_own_account(self):
         with self.app.app_context():
@@ -2867,7 +2875,7 @@ class SecurityTests(unittest.TestCase):
             user.set_password("secret")
             db.session.add(user)
             db.session.flush()
-            token = TelegramLinkToken(
+            token = BotLinkToken(provider="telegram",
                 user_id=user.id, token="dead-token", expires_at=datetime.utcnow() + timedelta(hours=1),
             )
             db.session.add(token)
@@ -2888,7 +2896,7 @@ class SecurityTests(unittest.TestCase):
             refreshed = db.session.get(User, user_id)
             self.assertIsNone(refreshed.telegram_chat_id)
             self.assertIsNone(refreshed.telegram_user_id)
-            self.assertIsNone(db.session.get(TelegramLinkToken, token_id).used_at)
+            self.assertIsNone(db.session.get(BotLinkToken, token_id).used_at)
 
     def test_telegram_deactivated_admin_cannot_update_command_response(self):
         with self.app.app_context():
@@ -3348,7 +3356,7 @@ class TagManagementTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(db.session.get(Tag, tag_id).name, "Tirz")
 
-    def test_merge_retags_group_tests_and_public_results_and_removes_the_source(self):
+    def test_merge_retags_records_and_leaves_the_old_spelling_forwarding(self):
         self._login()
         misspelt_test = self._tagged_test("Keep me", ["Tirzephide"])
         misspelt_result = self._tagged_result("Keep me too", ["Tirzephide"])
@@ -3367,7 +3375,90 @@ class TagManagementTests(unittest.TestCase):
         self.assertEqual(self._result_tag_names(misspelt_result), ["Tirzepatide"])
         self.assertEqual(self._test_tag_names(correct_test), ["Tirzepatide"])
         with self.app.app_context():
-            self.assertEqual([tag.name for tag in Tag.query.all()], ["Tirzepatide"])
+            source = db.session.get(Tag, ids["Tirzephide"])
+            # The row is deliberately kept as a pointer: bot callbacks and saved links
+            # address tags by id, and re-typing the spelling should not recreate it.
+            self.assertIsNotNone(source)
+            self.assertFalse(source.is_active)
+            self.assertEqual(source.merged_into_id, ids["Tirzepatide"])
+            self.assertTrue(db.session.get(Tag, ids["Tirzepatide"]).is_active)
+            self.assertEqual(
+                {tag.name for tag in Tag.query.all()},
+                {"Tirzephide", "Tirzepatide"},
+            )
+
+    def _merge(self, source_name, target_name):
+        ids = self._tag_ids()
+        return self.client.post(
+            f"/admin/tags/{ids[source_name]}/merge",
+            data={"into_tag_id": ids[target_name]},
+            follow_redirects=True,
+        )
+
+    def _add_published_result(self, title, tag_text):
+        from app.routes import apply_tags_to_record
+
+        with self.app.app_context():
+            author = User.query.filter_by(is_admin=True).first()
+            result = PublicResult(
+                title=title, results_link="https://coa.example/1",
+                created_by=author.id, publication_status="published",
+            )
+            db.session.add(result)
+            db.session.flush()
+            apply_tags_to_record(result, tag_text)
+            db.session.commit()
+            return result.id
+
+    def test_a_merged_spelling_still_resolves_for_public_result_tag_pages(self):
+        from app.public_results_bot import public_results_for_tag_page
+
+        self._login()
+        self._add_published_result("Published COA", "Tirzephide")
+        self._tagged_test("Correct spelling exists too", ["Tirzepatide"])
+        old_tag_id = self._tag_ids()["Tirzephide"]
+
+        response = self._merge("Tirzephide", "Tirzepatide")
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            tag, results, _page, _total = public_results_for_tag_page(old_tag_id)
+            self.assertIsNotNone(tag)
+            self.assertEqual(tag.name, "Tirzepatide")
+            self.assertEqual([result.title for result in results], ["Published COA"])
+
+    def test_typing_a_merged_spelling_reuses_the_surviving_tag(self):
+        self._login()
+        self._tagged_test("First", ["Tirzephide", "Tirzepatide"])
+        self._merge("Tirzephide", "Tirzepatide")
+
+        # An admin types the merged-away spelling again on a brand new test.
+        retyped_id = self._tagged_test("Retyped", ["Tirzephide"])
+
+        self.assertEqual(self._test_tag_names(retyped_id), ["Tirzepatide"])
+        with self.app.app_context():
+            alias = Tag.query.filter_by(normalized_name="tirzephide").one()
+            self.assertEqual(Tag.query.count(), 2)
+            self.assertTrue(alias.merged_into_id)
+
+    def test_typing_a_retired_spelling_brings_it_back(self):
+        self._login()
+        self._tagged_test("Seed", ["Old Name"])
+        tag_id = self._tag_ids()["Old Name"]
+
+        self.client.post(f"/admin/tags/{tag_id}/toggle-active", follow_redirects=True)
+        with self.app.app_context():
+            from app.routes import get_all_tag_names
+            self.assertNotIn("Old Name", get_all_tag_names())
+            self.assertFalse(db.session.get(Tag, tag_id).is_active)
+
+        retyped_id = self._tagged_test("Reused", ["Old Name"])
+
+        self.assertEqual(self._test_tag_names(retyped_id), ["Old Name"])
+        with self.app.app_context():
+            from app.routes import get_all_tag_names
+            self.assertTrue(db.session.get(Tag, tag_id).is_active)
+            self.assertIn("Old Name", get_all_tag_names())
 
     def test_merge_when_a_record_carries_both_tags_leaves_exactly_one_link(self):
         self._login()
@@ -3388,9 +3479,9 @@ class TagManagementTests(unittest.TestCase):
             from app.models import group_test_tags
             link_rows = db.session.execute(select(func.count()).select_from(group_test_tags)).scalar()
             self.assertEqual(link_rows, 1)
-            self.assertIsNone(db.session.get(Tag, ids["Tirzephide"]))
+            self.assertEqual(db.session.get(Tag, ids["Tirzephide"]).merged_into_id, ids["Tirzepatide"])
 
-    def test_merge_leaves_no_links_pointing_at_the_removed_tag(self):
+    def test_merge_leaves_no_links_pointing_at_the_merged_tag(self):
         self._login()
         self._tagged_test("One", ["Tirzephide"])
         self._tagged_test("Two", ["Tirzephide", "Shed GB#3"])
@@ -3467,9 +3558,155 @@ class TagManagementTests(unittest.TestCase):
         # The flash names the tag it removed, so assert on the list state instead.
         self.assertIn("Deleted unused tag", page)
         self.assertIn("0 total", page)
-        self.assertIn("No tags yet", page)
+        self.assertNotIn("<td>Mistake</td>", page)
         with self.app.app_context():
             self.assertIsNone(db.session.get(Tag, orphan_id))
+
+    def test_delete_is_refused_while_merged_spellings_still_forward_here(self):
+        self._login()
+        with self.app.app_context():
+            target = Tag(name="Tirzepatide", normalized_name="tirzepatide")
+            db.session.add(target)
+            db.session.flush()
+            alias = Tag(
+                name="Tirzephide", normalized_name="tirzephide",
+                is_active=False, merged_into_id=target.id,
+            )
+            db.session.add(alias)
+            db.session.commit()
+            target_id, alias_id = target.id, alias.id
+
+        # The target has no attached records at all, so this exercises the pointer
+        # guard specifically: removing it would orphan the forwarded spelling.
+        response = self.client.post(f"/admin/tags/{target_id}/delete", follow_redirects=True)
+
+        self.assertIn("still point at", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertIsNotNone(db.session.get(Tag, target_id))
+            self.assertIsNotNone(db.session.get(Tag, alias_id))
+
+        # Once nothing forwards here, the row is removable.
+        self.client.post(f"/admin/tags/{alias_id}/delete", follow_redirects=True)
+        response = self.client.post(f"/admin/tags/{target_id}/delete", follow_redirects=True)
+
+        self.assertIn("Deleted unused tag", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertIsNone(db.session.get(Tag, target_id))
+
+    def test_retiring_a_tag_leaves_records_and_public_tag_pages_alone(self):
+        from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
+        from app.routes import get_all_tag_names
+
+        self._login()
+        test_id = self._tagged_test("Tagged work", ["Tirzepatide"])
+        self._add_published_result("Published COA", "Tirzepatide")
+        tag_id = self._tag_ids()["Tirzepatide"]
+
+        response = self.client.post(f"/admin/tags/{tag_id}/toggle-active", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("retired from the tag picker", response.get_data(as_text=True))
+        # Out of the picker...
+        with self.app.app_context():
+            self.assertNotIn("Tirzepatide", get_all_tag_names())
+        # ...but nothing about existing data or public browsing changes.
+        self.assertEqual(self._test_tag_names(test_id), ["Tirzepatide"])
+        with self.app.app_context():
+            tags, _page, _total = public_result_tag_page()
+            self.assertIn("Tirzepatide", [tag.name for tag in tags])
+            resolved, results, _p, _t = public_results_for_tag_page(tag_id)
+            self.assertIsNotNone(resolved)
+            self.assertEqual(len(results), 1)
+        # Retired tags are listed for restoring, not mixed into the main table.
+        page = self.client.get("/admin/tags").get_data(as_text=True)
+        self.assertIn("Retired and merged spellings", page)
+        self.assertIn("Restore", page)
+
+    def test_hiding_a_tag_trims_the_bot_menu_without_unpublishing_anything(self):
+        from app.public_results_bot import public_result_tag_page, public_results_for_tag_page
+        from app.routes import get_all_tag_names
+
+        self._login()
+        test_id = self._tagged_test("Tagged work", ["Tirzepatide"])
+        self._add_published_result("Published COA", "Tirzepatide")
+        tag_id = self._tag_ids()["Tirzepatide"]
+
+        with self.app.app_context():
+            self.assertIn("Tirzepatide", [tag.name for tag in public_result_tag_page()[0]])
+
+        response = self.client.post(f"/admin/tags/{tag_id}/toggle-bots", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("hidden from the Telegram and Discord", response.get_data(as_text=True))
+        with self.app.app_context():
+            # Gone from the menu and unreadable by its own id...
+            self.assertNotIn("Tirzepatide", [tag.name for tag in public_result_tag_page()[0]])
+            resolved, results, _p, _t = public_results_for_tag_page(tag_id)
+            self.assertIsNone(resolved)
+            self.assertEqual(results, [])
+            # ...but it is still vocabulary, and the record is still tagged.
+            tag = db.session.get(Tag, tag_id)
+            self.assertTrue(tag.hidden_from_bots)
+            self.assertTrue(tag.is_active)
+            self.assertIn("Tirzepatide", get_all_tag_names())
+        self.assertEqual(self._test_tag_names(test_id), ["Tirzepatide"])
+
+        # The listing makes the state visible so an admin cannot lose track of it.
+        self.assertIn("Hidden from bot menus", self.client.get("/admin/tags").get_data(as_text=True))
+
+        # And it is reversible.
+        self.client.post(f"/admin/tags/{tag_id}/toggle-bots", follow_redirects=True)
+        with self.app.app_context():
+            self.assertIn("Tirzepatide", [tag.name for tag in public_result_tag_page()[0]])
+
+    def test_a_hidden_tag_cannot_be_read_back_through_a_merged_alias(self):
+        from app.public_results_bot import public_results_for_tag_page
+
+        self._login()
+        self._tagged_test("Seed", ["Tirzephide", "Tirzepatide"])
+        self._add_published_result("Published COA", "Tirzepatide")
+        self._merge("Tirzephide", "Tirzepatide")
+        ids = self._tag_ids()
+
+        # Hiding is applied to the survivor, so the gate must be judged after the
+        # alias chain resolves rather than on the id that was requested.
+        response = self.client.post(f"/admin/tags/{ids['Tirzepatide']}/toggle-bots", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            for asked_for in (ids["Tirzephide"], ids["Tirzepatide"]):
+                tag, results, _page, _total = public_results_for_tag_page(asked_for)
+                self.assertIsNone(tag, f"hidden tag leaked through tag id {asked_for}")
+                self.assertEqual(results, [])
+
+    def test_bot_visibility_cannot_be_toggled_on_a_merged_away_spelling(self):
+        self._login()
+        self._tagged_test("Seed", ["Tirzephide", "Tirzepatide"])
+        self._merge("Tirzephide", "Tirzepatide")
+        alias_id = self._tag_ids()["Tirzephide"]
+
+        response = self.client.post(f"/admin/tags/{alias_id}/toggle-bots", follow_redirects=True)
+
+        self.assertIn("not shown in the bot menus on its own", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertFalse(db.session.get(Tag, alias_id).hidden_from_bots)
+
+    def test_reusing_a_merged_spelling_revives_a_retired_survivor(self):
+        self._login()
+        self._tagged_test("First", ["Tirzephide", "Tirzepatide"])
+        self._merge("Tirzephide", "Tirzepatide")
+        survivor_id = self._tag_ids()["Tirzepatide"]
+        self.client.post(f"/admin/tags/{survivor_id}/toggle-active", follow_redirects=True)
+
+        retyped_id = self._tagged_test("Retyped", ["Tirzephide"])
+
+        # Landing on a retired survivor would otherwise leave a record tagged with a
+        # spelling no picker offers, so reusing it revives the survivor instead.
+        self.assertEqual(self._test_tag_names(retyped_id), ["Tirzepatide"])
+        with self.app.app_context():
+            from app.routes import get_all_tag_names
+            self.assertTrue(db.session.get(Tag, survivor_id).is_active)
+            self.assertIn("Tirzepatide", get_all_tag_names())
 
     def test_near_duplicate_names_are_surfaced_for_merging(self):
         self._login()
@@ -3502,6 +3739,8 @@ class TagManagementTests(unittest.TestCase):
             ("post", "/admin/tags/1/rename", {"name": "Anything"}),
             ("post", "/admin/tags/1/merge", {"into_tag_id": 2}),
             ("post", "/admin/tags/1/delete", None),
+            ("post", "/admin/tags/1/toggle-active", None),
+            ("post", "/admin/tags/1/toggle-bots", None),
         ):
             response = getattr(self.client, method)(path, data=data)
             self.assertIn(response.status_code, (302, 403), f"{method.upper()} {path} was not blocked")

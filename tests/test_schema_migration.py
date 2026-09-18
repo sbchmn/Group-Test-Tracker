@@ -6,6 +6,7 @@ from sqlalchemy import inspect, text
 from flask_migrate import upgrade
 
 from app import create_app, db
+from app.models import User
 
 
 class SchemaMigrationTests(unittest.TestCase):
@@ -52,10 +53,16 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("payment_verified_by_id", participation_columns)
             template_columns = [column["name"] for column in inspector.get_columns("notification_templates")]
             self.assertIn("is_default_payment_review", template_columns)
+            self.assertIn("discord_body", template_columns)
+            self.assertIn("root_body", template_columns)
+            tag_columns = [column["name"] for column in inspector.get_columns("tags")]
+            self.assertIn("is_active", tag_columns)
+            self.assertIn("merged_into_id", tag_columns)
+            self.assertIn("hidden_from_bots", tag_columns)
+            self.assertIn("tags", table_names)
             self.assertIn("payment_options", table_names)
             self.assertIn("group_test_payment_options", table_names)
-            self.assertIn("telegram_link_tokens", table_names)
-            self.assertIn("discord_link_tokens", table_names)
+            self.assertIn("bot_link_tokens", table_names)
             self.assertIn("telegram_webhook_updates", table_names)
             self.assertIn("telegram_status_digest_events", table_names)
             self.assertIn("user_digest_events", table_names)
@@ -113,6 +120,22 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("payment_verified_at", migration_text)
         self.assertIn("payment_verified_by_id", migration_text)
         self.assertIn("is_default_payment_review", migration_text)
+        self.assertIn("discord_body", migration_text)
+        self.assertIn("root_body", migration_text)
+        self.assertIn("merged_into_id", migration_text)
+        self.assertIn("hidden_from_bots", migration_text)
+
+    def test_alembic_upgrade_adds_tag_retirement_fields(self):
+        migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
+        with self.app.app_context():
+            upgrade(directory=str(migration_dir))
+            inspector = inspect(db.engine)
+            tag_columns = {item['name'] for item in inspector.get_columns('tags')}
+            self.assertIn('is_active', tag_columns)
+            self.assertIn('merged_into_id', tag_columns)
+            self.assertIn('hidden_from_bots', tag_columns)
+            tag_indexes = {item['name'] for item in inspector.get_indexes('tags')}
+            self.assertIn('ix_tags_merged_into_id', tag_indexes)
 
     def test_alembic_upgrade_creates_result_analysis_schema(self):
         migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
@@ -141,6 +164,102 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn('payment_verified_by_id', participation_columns)
             template_columns = {item['name'] for item in inspector.get_columns('notification_templates')}
             self.assertIn('is_default_payment_review', template_columns)
+
+    def test_alembic_upgrade_merges_link_tokens_without_losing_rows(self):
+        """Rows in both per-provider tables must survive the merge with their provider tagged."""
+        migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
+        with self.app.app_context():
+            upgrade(directory=str(migration_dir), revision='e2f5a8c3b7d1')
+            tables = set(inspect(db.engine).get_table_names())
+            self.assertIn('telegram_link_tokens', tables)
+            self.assertIn('discord_link_tokens', tables)
+
+            # The ORM model knows about users.root_user_id, which does not exist at
+            # this revision, so the fixture row is written in raw SQL.
+            db.session.execute(text(
+                "INSERT INTO users (username, email, password_hash, is_admin, is_active,"
+                " receive_group_test_notifications, notification_channel, digest_frequency,"
+                " digest_hourly_minute_utc, digest_daily_hour_utc, session_epoch, created_at)"
+                " VALUES ('linker', 'linker@example.test', 'hash', 1, 1, 1, 'email',"
+                " 'off', 0, 9, 0, '2026-01-01 00:00:00')"
+            ))
+            db.session.commit()
+            user_id = db.session.execute(text(
+                "SELECT id FROM users WHERE username = 'linker'"
+            )).scalar_one()
+
+            db.session.execute(text(
+                "INSERT INTO telegram_link_tokens (user_id, token, expires_at, used_at, created_at)"
+                " VALUES (:uid, 'tg-token', '2099-01-01 00:00:00', NULL, '2026-01-01 00:00:00')"
+            ), {'uid': user_id})
+            db.session.execute(text(
+                "INSERT INTO discord_link_tokens (user_id, token, expires_at, used_at, created_at)"
+                " VALUES (:uid, 'dc-token', '2099-01-01 00:00:00', '2026-01-02 00:00:00', '2026-01-01 00:00:00')"
+            ), {'uid': user_id})
+            db.session.commit()
+
+            upgrade(directory=str(migration_dir))
+
+            tables = set(inspect(db.engine).get_table_names())
+            self.assertNotIn('telegram_link_tokens', tables)
+            self.assertNotIn('discord_link_tokens', tables)
+
+            rows = db.session.execute(text(
+                "SELECT provider, token, used_at FROM bot_link_tokens ORDER BY provider"
+            )).fetchall()
+            self.assertEqual([(row[0], row[1]) for row in rows], [('discord', 'dc-token'), ('telegram', 'tg-token')])
+            used_at = {row[0]: row[2] for row in rows}
+            self.assertIsNone(used_at['telegram'], 'unconsumed token must stay usable')
+            self.assertIsNotNone(used_at['discord'], 'consumed token must stay consumed')
+            db.session.rollback()
+
+    def test_alembic_upgrade_survives_the_same_token_in_both_legacy_tables(self):
+        """The legacy tables were each UNIQUE(token) but never jointly so.
+
+        A global UNIQUE(token) on the merge target made the second INSERT abort the
+        upgrade, and because SQLite/MySQL do not roll back DDL the orphan table then
+        made every retry die on "table already exists".
+        """
+        migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
+        with self.app.app_context():
+            upgrade(directory=str(migration_dir), revision='e2f5a8c3b7d1')
+            db.session.execute(text(
+                "INSERT INTO users (username, email, password_hash, is_admin, is_active,"
+                " receive_group_test_notifications, notification_channel, digest_frequency,"
+                " digest_hourly_minute_utc, digest_daily_hour_utc, session_epoch, created_at)"
+                " VALUES ('shared', 'shared@example.test', 'hash', 1, 1, 1, 'email',"
+                " 'off', 0, 9, 0, '2026-01-01 00:00:00')"
+            ))
+            db.session.commit()
+            user_id = db.session.execute(text(
+                "SELECT id FROM users WHERE username = 'shared'"
+            )).scalar_one()
+            for table in ('telegram_link_tokens', 'discord_link_tokens'):
+                db.session.execute(text(
+                    f"INSERT INTO {table} (user_id, token, expires_at, used_at, created_at)"
+                    " VALUES (:uid, 'SAME-TOKEN', '2099-01-01 00:00:00', NULL, '2026-01-01 00:00:00')"
+                ), {'uid': user_id})
+            db.session.commit()
+
+            upgrade(directory=str(migration_dir))
+
+            rows = db.session.execute(text(
+                "SELECT provider, token FROM bot_link_tokens ORDER BY provider"
+            )).fetchall()
+            self.assertEqual(
+                [(row[0], row[1]) for row in rows],
+                [('discord', 'SAME-TOKEN'), ('telegram', 'SAME-TOKEN')],
+            )
+            db.session.rollback()
+
+    def test_alembic_upgrade_adds_provider_notification_bodies(self):
+        migration_dir = Path(__file__).resolve().parent.parent / 'migrations'
+        with self.app.app_context():
+            upgrade(directory=str(migration_dir))
+            inspector = inspect(db.engine)
+            template_columns = {item['name'] for item in inspector.get_columns('notification_templates')}
+            self.assertIn('discord_body', template_columns)
+            self.assertIn('root_body', template_columns)
 
 
 if __name__ == "__main__":

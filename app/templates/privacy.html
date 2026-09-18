@@ -110,12 +110,17 @@
         independently processes platform data; review <a href="https://discord.com/privacy">Discord's Privacy Policy</a>.
     </p>
 
-    <h2>6. Root and other webhook notifications</h2>
+    <h2>6. Discord and Root notifications</h2>
     <p>
-        Administrators may configure Discord webhooks and a generic outbound "Root" webhook. The Service sends the
-        rendered notification body and configured sender name to the destination URL. The recipient controls the
-        destination system and may log, display, or redistribute the message. Do not configure a webhook destination
-        unless its operator is authorized to receive the intended notification content.
+        Administrators may configure Discord delivery and a Root integration. For Discord, the Service may post a
+        rendered notification body to a configured webhook destination. Root is different: the Service sends nothing to
+        Root, because Root accepts no inbound connections. A Root-hosted bridge polls the Service for queued messages
+        and posts them to a configured Root channel, and posts member chat commands back to the Service over signed
+        HTTPS requests. The operator of the receiving Discord channel or Root community controls that destination and
+        may log, display, or redistribute the message. Root has no direct messages, so a notification or an account
+        link command addressed to one member is delivered in a channel other members can read; link tokens are
+        single-use and expire within 24 hours. Do not enable a destination unless its operator is authorized to receive
+        the intended notification content.
     </p>
 
     <h2>7. Automated analysis providers</h2>

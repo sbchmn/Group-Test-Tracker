@@ -12,8 +12,9 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
-from app.models import GroupTest, DiscordLinkToken, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message
+from app.models import GroupTest, BotLinkToken, NotificationConfig, NotificationTemplate, Participation, PublicResult, RootOutbox, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
+from app.notifications import append_notification_log, read_notification_log, render_notification_template, select_template_body, send_discord_status_channel_message, send_group_test_notification, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message, template_bodies
+from app.notifications import _send_discord_webhook_message, send_root_message
 
 
 class NotificationTests(unittest.TestCase):
@@ -408,28 +409,55 @@ class NotificationTests(unittest.TestCase):
         self.assertIn(b'"chat_id": "-1003638912415"', request.data)
         self.assertNotIn(b'"message_thread_id"', request.data)
 
-    def test_send_notification_message_delivers_discord_webhook(self):
+    def test_send_notification_message_dms_a_linked_discord_account(self):
         with self.app.app_context():
             db.create_all()
             db.session.add_all([
                 NotificationConfig(key="discord_webhook_url", value="https://discord.example/webhook"),
-                NotificationConfig(key="discord_webhook_username", value="Tracker Bot"),
+                NotificationConfig(key="discord_bot_token", value="bot-token"),
             ])
             db.session.commit()
 
-            with patch("app.notifications.post_json", return_value=(True, "ok")) as mock_post:
+            with patch("app.notifications._send_discord_dm_message", return_value=True) as mock_dm, \
+                 patch("app.notifications.post_json") as mock_post:
                 result = send_notification_message(
-                    User(username="discorder", email="discorder@example.com"),
+                    User(username="discorder", email="discorder@example.com", discord_user_id="555"),
                     "discord",
                     "Subject",
                     "Discord body",
                 )
 
         self.assertTrue(result)
-        mock_post.assert_called_once()
-        self.assertEqual(mock_post.call_args.args[0], "https://discord.example/webhook")
-        self.assertEqual(mock_post.call_args.args[1]["content"], "Discord body")
-        self.assertEqual(mock_post.call_args.args[1]["username"], "Tracker Bot")
+        mock_dm.assert_called_once_with("555", "Discord body")
+        mock_post.assert_not_called()
+
+    def test_unlinked_discord_user_never_reaches_the_shared_org_webhook(self):
+        """A member with no linked Discord account must fall back to email.
+
+        The shared webhook posts to one org-wide channel, so routing a personal
+        notification there leaks that member's private body to everyone.
+        """
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="discord_webhook_url", value="https://discord.example/ORG-SHARED"),
+                NotificationConfig(key="discord_bot_token", value="bot-token"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.post_json") as mock_post, \
+                 patch("app.notifications.send_mailjet_message", return_value=True) as mock_mailjet:
+                result = send_notification_message(
+                    User(username="alice", email="alice@example.com"),
+                    "discord",
+                    "Subject",
+                    "alice you owe $42.50",
+                )
+
+        mock_post.assert_not_called()
+        self.assertTrue(result, "should report the email fallback as the delivery")
+        mock_mailjet.assert_called_once()
+        self.assertIn("alice you owe $42.50", mock_mailjet.call_args.args[2])
 
     def test_discord_webhook_splits_bodies_past_the_two_thousand_character_limit(self):
         with self.app.app_context():
@@ -443,12 +471,7 @@ class NotificationTests(unittest.TestCase):
             body = "\n".join(f"line {index}" for index in range(400))
 
             with patch("app.notifications.post_json", return_value=(True, "ok")) as mock_post:
-                result = send_notification_message(
-                    User(username="longbody", email="longbody@example.com"),
-                    "discord",
-                    "Subject",
-                    body,
-                )
+                result = _send_discord_webhook_message(body)
 
         self.assertTrue(result)
         self.assertGreater(len(body), 2000)
@@ -469,38 +492,204 @@ class NotificationTests(unittest.TestCase):
             body = "\n".join(f"line {index}" for index in range(400))
 
             with patch("app.notifications.post_json", return_value=(False, "429 rate limited")) as mock_post:
-                result = send_notification_message(
-                    User(username="chunkfail", email="chunkfail@example.com"),
-                    "discord",
-                    "Subject",
-                    body,
-                )
+                result = _send_discord_webhook_message(body)
 
         self.assertFalse(result)
         self.assertEqual(mock_post.call_count, 1)
 
-    def test_send_notification_message_delivers_root_webhook(self):
+    def test_send_root_message_queues_a_broadcast_in_the_outbox(self):
         with self.app.app_context():
             db.create_all()
             db.session.add_all([
-                NotificationConfig(key="root_webhook_url", value="https://root.example/webhook"),
-                NotificationConfig(key="root_webhook_name", value="Tracker Bot"),
+                NotificationConfig(key="root_bridge_key_id", value="root-abc123"),
+                NotificationConfig(key="root_bridge_secret", value="s" * 64),
+                NotificationConfig(key="root_status_channel_id", value="0198ac00-0000-7000-8000-000000000000"),
             ])
             db.session.commit()
 
-            with patch("app.notifications.post_json", return_value=(True, "ok")) as mock_post:
+            # Root accepts no pushes, so "delivered" here means accepted for pickup.
+            with patch("app.notifications.post_json") as mock_post:
+                result = send_root_message("Root body")
+
+            queued = RootOutbox.query.one()
+
+        self.assertTrue(result)
+        mock_post.assert_not_called()
+        self.assertEqual(queued.channel_id, "0198ac00-0000-7000-8000-000000000000")
+        self.assertEqual(queued.body, "Root body")
+        self.assertEqual(queued.status, RootOutbox.PENDING)
+
+    def test_root_broadcast_is_refused_without_a_bound_status_channel(self):
+        with self.app.app_context():
+            db.create_all()
+            with patch("app.notifications.post_json") as mock_post:
+                result = send_root_message("Root body")
+            self.assertFalse(result)
+            self.assertEqual(RootOutbox.query.count(), 0)
+        mock_post.assert_not_called()
+
+    def test_root_body_has_markup_stripped_before_queueing(self):
+        """Root renders no markup, and the email body can reach it via the fallback chain."""
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="root_status_channel_id", value="chan-1"),
+            ])
+            db.session.commit()
+
+            send_root_message('<p>You owe $42.50</p><a href="tg://user?id=7">Jane</a>')
+            body = RootOutbox.query.one().body
+
+        self.assertEqual(body, "You owe $42.50Jane")
+
+    def test_personal_root_channel_never_broadcasts_to_the_community(self):
+        """A member's private text must not reach the shared channel, even if stored as root.
+
+        Root has no bot-to-user DM, so the adapter refuses personal delivery and the
+        caller falls back to email; queueing it would publish a new password or an
+        amount owed to everyone who can read the status channel.
+        """
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="root_bridge_key_id", value="root-abc123"),
+                NotificationConfig(key="root_bridge_secret", value="s" * 64),
+                NotificationConfig(key="root_status_channel_id", value="0198ac00-0000-7000-8000-000000000000"),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.send_mailjet_message", return_value=True) as mock_mail:
                 result = send_notification_message(
                     User(username="rooter", email="rooter@example.com"),
                     "root",
                     "Subject",
-                    "Root body",
+                    "Your new password is: hunter2",
                 )
 
+            self.assertEqual(RootOutbox.query.count(), 0)
+
         self.assertTrue(result)
-        mock_post.assert_called_once()
-        self.assertEqual(mock_post.call_args.args[0], "https://root.example/webhook")
-        self.assertEqual(mock_post.call_args.args[1]["text"], "Root body")
-        self.assertEqual(mock_post.call_args.args[1]["sender"], "Tracker Bot")
+        mock_mail.assert_called_once()
+        self.assertEqual(mock_mail.call_args.args[1], "Subject")
+        self.assertEqual(mock_mail.call_args.args[2], "Your new password is: hunter2")
+
+    def test_select_template_body_prefers_channel_body_then_telegram_then_email(self):
+        bodies = {
+            "email": "<p>email</p>",
+            "telegram": "tg",
+            "discord": "",
+            "root": "root",
+        }
+        self.assertEqual(select_template_body(bodies, "email"), "<p>email</p>")
+        self.assertEqual(select_template_body(bodies, "telegram"), "tg")
+        self.assertEqual(select_template_body(bodies, "discord"), "tg")
+        self.assertEqual(select_template_body(bodies, "root"), "root")
+        self.assertEqual(select_template_body(bodies, "unknown"), "tg")
+
+    def test_select_template_body_does_not_leak_telegram_body_into_email(self):
+        bodies = {"email": "", "telegram": "tg", "discord": "", "root": ""}
+        self.assertEqual(select_template_body(bodies, "email"), "")
+
+    def test_template_bodies_renders_every_provider_variant(self):
+        with self.app.app_context():
+            db.create_all()
+            template = NotificationTemplate(
+                name="All Bodies",
+                email_subject="Subject {{ test_title }}",
+                email_body="<p>{{ test_title }}</p>",
+                telegram_body="tg {{ test_title }}",
+                discord_body="dc {{ test_title }}",
+                root_body="root {{ test_title }}",
+                is_active=True,
+            )
+            db.session.add(template)
+            db.session.commit()
+
+            bodies = template_bodies(template, {"test_title": "Demo"})
+
+        self.assertEqual(bodies, {
+            "email": "<p>Demo</p>",
+            "telegram": "tg Demo",
+            "discord": "dc Demo",
+            "root": "root Demo",
+        })
+
+    def _group_test_recipient(self, channel, **template_fields):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="member", email="member@example.com", notification_channel=channel)
+            user.set_password("secret")
+            db.session.add(user)
+            db.session.commit()
+            db.session.add_all([
+                GroupTest(title="Demo Test", created_by=user.id),
+                NotificationTemplate(
+                    name="Group Test Bodies",
+                    email_subject="Status",
+                    email_body=template_fields.get("email_body", "<p>closed</p>"),
+                    telegram_body=template_fields.get("telegram_body", ""),
+                    discord_body=template_fields.get("discord_body", ""),
+                    root_body=template_fields.get("root_body", ""),
+                    is_active=True,
+                ),
+            ])
+            db.session.commit()
+
+            test = GroupTest.query.first()
+            template = NotificationTemplate.query.filter_by(name="Group Test Bodies").first()
+            with patch("app.notifications.send_notification_message", return_value=True) as mock_send:
+                send_group_test_notification(test, user, template)
+
+        return mock_send.call_args
+
+    def test_group_test_notification_delivers_over_discord_channel(self):
+        call_args = self._group_test_recipient("discord", discord_body="discord closed")
+
+        self.assertEqual(call_args.args[1], "discord")
+        self.assertEqual(call_args.args[3], "discord closed")
+
+    def test_group_test_notification_discord_falls_back_to_plain_text_not_email_html(self):
+        call_args = self._group_test_recipient("discord", telegram_body="plain closed")
+
+        self.assertEqual(call_args.args[1], "discord")
+        self.assertEqual(call_args.args[3], "plain closed")
+
+    def test_group_test_notification_discord_still_uses_email_html_when_no_text_body_exists(self):
+        call_args = self._group_test_recipient("discord")
+
+        self.assertEqual(call_args.args[1], "discord")
+        self.assertEqual(call_args.args[3], "<p>closed</p>")
+
+    def test_group_test_notification_keeps_email_channel_on_email_body(self):
+        call_args = self._group_test_recipient("email", telegram_body="plain closed")
+
+        self.assertEqual(call_args.args[1], "email")
+        self.assertEqual(call_args.args[3], "<p>closed</p>")
+
+    def test_password_reset_uses_discord_body_when_configured(self):
+        with self.app.app_context():
+            db.create_all()
+            user = User(username="discorder", email="d@example.com", notification_channel="discord")
+            user.set_password("old-password")
+            db.session.add_all([
+                user,
+                NotificationTemplate(
+                    name="Discord Reset",
+                    email_subject="Reset",
+                    email_body="Email password: {{ new_password }}",
+                    telegram_body="Telegram password: {{ new_password }}",
+                    discord_body="Discord password: {{ new_password }}",
+                    is_default_password_reset=True,
+                    is_active=True,
+                ),
+            ])
+            db.session.commit()
+
+            with patch("app.notifications.send_notification_message", return_value=True) as mock_send:
+                self.assertTrue(send_password_reset(user, "new-password"))
+
+        self.assertEqual(mock_send.call_args.args[1], "discord")
+        self.assertEqual(mock_send.call_args.args[3], "Discord password: new-password")
 
     def test_password_reset_uses_email_template_for_email_channel(self):
         with self.app.app_context():
@@ -1578,7 +1767,8 @@ class NotificationTests(unittest.TestCase):
             user.set_password("secret")
             db.session.add(user)
             db.session.flush()
-            token = DiscordLinkToken(
+            token = BotLinkToken(
+                provider="discord",
                 user_id=user.id, token="dead-dtoken", expires_at=datetime.utcnow() + timedelta(hours=1),
             )
             db.session.add(token)
@@ -1592,7 +1782,7 @@ class NotificationTests(unittest.TestCase):
             message = discord_bot._link_discord_account("dead-dtoken", "555", "ddead")
             self.assertIn("deactivated", message)
             self.assertIsNone(db.session.get(User, user_id).discord_user_id)
-            self.assertIsNone(db.session.get(DiscordLinkToken, token_id).used_at)
+            self.assertIsNone(db.session.get(BotLinkToken, token_id).used_at)
 
     def test_discord_linked_and_dynamic_commands_block_deactivated_accounts(self):
         with patch.dict(os.environ, {'SECRET_KEY': 'test-secret-key'}):

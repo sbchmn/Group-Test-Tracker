@@ -80,7 +80,7 @@
                         <h5 class="card-title"><i class="bi bi-tags"></i> Tags</h5>
                         <p class="card-text text-muted">Rename a misspelling, merge duplicate tags, and remove tags nothing uses. Tags are still created automatically from any test or result.</p>
                     </div>
-                    <span class="badge text-bg-{{ 'warning' if unused_tag_count else 'secondary' }}">{{ unused_tag_count }} unused</span>
+                    <span class="badge text-bg-{{ 'warning' if unused_tag_count else 'secondary' }}">{{ unused_tag_count }} unused{% if unused_tag_count %} &middot; review{% endif %}</span>
                 </div>
                 <a class="btn btn-outline-primary" href="{{ url_for('main.tags') }}">Manage Tags</a>
             </div>

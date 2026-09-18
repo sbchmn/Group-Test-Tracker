@@ -33,6 +33,18 @@
                 {{ form.email_body(class="form-control", rows=8) }}
             </div>
             <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.discord_body.label(class="form-label") }}
+                    {{ form.discord_body(class="form-control", rows=4) }}
+                    <div class="form-text">Plain text. Falls back to the Telegram message when left blank.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.root_body.label(class="form-label") }}
+                    {{ form.root_body(class="form-control", rows=4) }}
+                    <div class="form-text">Plain text. Falls back to the Telegram message when left blank.</div>
+                </div>
+            </div>
+            <div class="row">
                 <div class="col-md-4 form-check mt-2">
                     {{ form.hide_from_participant_notifications(class="form-check-input") }}
                     {{ form.hide_from_participant_notifications.label(class="form-check-label") }}

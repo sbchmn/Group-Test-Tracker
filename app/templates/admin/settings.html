@@ -77,6 +77,21 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start gap-3">
                     <div>
+                        <h5 class="card-title"><i class="bi bi-tags"></i> Tags</h5>
+                        <p class="card-text text-muted">Rename a misspelling, merge duplicate tags, and remove tags nothing uses. Tags are still created automatically from any test or result.</p>
+                    </div>
+                    <span class="badge text-bg-{{ 'warning' if unused_tag_count else 'secondary' }}">{{ unused_tag_count }} unused</span>
+                </div>
+                <a class="btn btn-outline-primary" href="{{ url_for('main.tags') }}">Manage Tags</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                    <div>
                         <h5 class="card-title"><i class="bi bi-cloud-arrow-up"></i> Storage</h5>
                         <p class="card-text text-muted">Configure private object storage, upload limits, signed URLs, and result-image delivery.</p>
                     </div>

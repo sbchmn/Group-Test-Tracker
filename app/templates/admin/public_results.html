@@ -177,8 +177,8 @@ window.addEventListener('DOMContentLoaded', function() {
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="addResultItemRow('', '')">Add Result Item</button>
                     </div>
                     <div class="mb-3">
-                        {{ form.tag_names.label(class="form-label") }}
-                        {{ form.tag_names(class="form-control mb-2", placeholder="tirz, Shed GB#3", **{'data-tag-input': 'true'}) }}
+                        {{ form.tag_text.label(class="form-label") }}
+                        {{ form.tag_text(class="form-control mb-2", placeholder="tirz, Shed GB#3", **{'data-tag-input': 'true'}) }}
                         <div class="input-group">
                             <select class="form-select" data-tag-menu="true">
                                 <option value="">Choose an existing tag</option>
@@ -188,6 +188,7 @@ window.addEventListener('DOMContentLoaded', function() {
                             </select>
                             <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
                         </div>
+                        <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas. <a href="{{ url_for('main.tags') }}">Rename or merge tags</a>.</small>
                     </div>
                     <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
                     {% if editing_result %}

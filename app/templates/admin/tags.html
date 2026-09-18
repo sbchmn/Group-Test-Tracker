@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Tags{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h3 class="mb-1">Tags</h3>
+        <p class="text-muted mb-0">Tags are created automatically the moment anyone types one on a group test or public result, so you never have to add one in advance. Use this page to repair the ones that go wrong: rename a misspelling, merge two tags that mean the same thing, or remove one that is attached to nothing.</p>
+    </div>
+    <a href="{{ url_for('main.admin_settings') }}" class="btn btn-outline-secondary btn-sm">Back to Settings</a>
+</div>
+
+{% if duplicate_pairs %}
+    <div class="card mb-4 border-warning">
+        <div class="card-header">Possible duplicates</div>
+        <div class="card-body p-0">
+            <p class="text-muted small px-3 pt-3 mb-2">These names are very similar. The suggestions below keep the more widely used spelling and absorb the other; they are only suggestions, so merge anything that really is the same thing.</p>
+            <table class="table table-sm mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Keep</th>
+                        <th>Absorb</th>
+                        <th class="text-end">Merge</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pair in duplicate_pairs %}
+                        <tr>
+                            <td>{{ pair.target.name }}</td>
+                            <td class="text-muted"><s>{{ pair.source.name }}</s></td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.tags', merge_source=pair.source.id, merge_target=pair.target.id) }}#merge">Merge these</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endif %}
+
+{% if merge_source %}
+    <div class="card mb-4 border-danger" id="merge">
+        <div class="card-header">Merge {{ merge_source.name }}</div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('main.merge_tag', tag_id=merge_source.id) }}" onsubmit="return confirm('Merge this tag into the selected tag? Every group test and public result using it will be re-tagged. This cannot be undone.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <p class="mb-3">
+                    Every use of <strong>{{ merge_source.name }}</strong> moves to the tag you choose below, and <strong>{{ merge_source.name }}</strong> is then removed.
+                    {% if merge_source.id in merge_counts %}
+                        <span class="text-muted">({{ merge_counts[merge_source.id].tests }} group tests and {{ merge_counts[merge_source.id].results }} public results are affected.)</span>
+                    {% endif %}
+                </p>
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label" for="into_tag_id">Merge into</label>
+                        <select class="form-select" id="into_tag_id" name="into_tag_id" required>
+                            <option value="">Choose a tag&hellip;</option>
+                            {% for option in merge_options %}
+                                <option value="{{ option.id }}"{% if merge_target_id == option.id %} selected{% endif %}>{{ option.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-danger">Merge tags</button>
+                        <a href="{{ url_for('main.tags') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>All tags</span>
+        <small class="text-muted">{{ tag_rows|length }} total{% if unused_count %} &middot; {{ unused_count }} unused{% endif %}</small>
+    </div>
+    <div class="card-body p-0">
+        {% if tag_rows %}
+            <table class="table mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Tag</th>
+                        <th>Used in</th>
+                        <th style="width: 34%">Rename</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in tag_rows %}
+                        <tr>
+                            <td>{{ row.tag.name }}</td>
+                            <td class="text-nowrap">
+                                {% if row.total %}
+                                    {{ row.tests }} test{{ 's' if row.tests != 1 }} &middot; {{ row.results }} result{{ 's' if row.results != 1 }}
+                                {% else %}
+                                    <span class="badge bg-secondary">Unused</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('main.rename_tag', tag_id=row.tag.id) }}" class="d-flex gap-1">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="text" name="name" class="form-control form-control-sm" value="{{ row.tag.name }}" maxlength="120" aria-label="New name for the tag {{ row.tag.name }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
+                                </form>
+                            </td>
+                            <td class="text-end text-nowrap">
+                                <a href="{{ url_for('main.tags', merge_source=row.tag.id) }}#merge" class="btn btn-sm btn-outline-primary">Merge</a>
+                                {% if row.total %}
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="This tag is in use. Rename it, or merge it into another tag, instead.">Delete</button>
+                                {% else %}
+                                    <form method="POST" action="{{ url_for('main.delete_tag', tag_id=row.tag.id) }}" class="d-inline" onsubmit="return confirm('Delete this unused tag? It is not attached to anything, so nothing else changes.');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="p-3 text-muted">No tags yet. Type one into the Tags field on a group test and it will appear here.</div>
+        {% endif %}
+    </div>
+</div>
+
+<p class="text-muted small mt-3">
+    Unused tags are listed first because removing them affects nothing. Renaming a tag changes how the dashboard groups and sorts tests, so sections may move.
+    A tag that is in use cannot be deleted &mdash; rename it, or merge it into the spelling you want to keep.
+</p>
+{% endblock %}

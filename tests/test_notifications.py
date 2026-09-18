@@ -1519,7 +1519,7 @@ class NotificationTests(unittest.TestCase):
                 "title": "Updated Title",
                 "summary": "Updated summary",
                 "results_link": "https://example.test/updated",
-                "tag_names": "tirz, Shed GB#3",
+                "tag_text": "tirz, Shed GB#3",
             },
             follow_redirects=True,
         )
@@ -1552,7 +1552,7 @@ class NotificationTests(unittest.TestCase):
                 "title": "Public Result With Items",
                 "summary": "Summary",
                 "results_link": "https://example.test/public-result",
-                "tag_names": "tirz",
+                "tag_text": "tirz",
                 "result_item_name": ["MASS", "STERILITY"],
                 "result_item_value": ["98.7% purity", "Pass"],
             },

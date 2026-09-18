@@ -16,6 +16,7 @@ from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from dotenv import load_dotenv
 from .version import APP_NAME, APP_VERSION
+from .links import http_link_for_template
 from .saas import (
     managed_admin_docs_url,
     managed_mode_enabled,
@@ -49,6 +50,7 @@ def create_app(config_overrides=None):
     app.config['LEGAL_MAILING_ADDRESS'] = os.environ.get('LEGAL_MAILING_ADDRESS', '').strip()
     app.config['LEGAL_GOVERNING_LAW'] = os.environ.get('LEGAL_GOVERNING_LAW', '').strip()
     app.config['LEGAL_EFFECTIVE_DATE'] = os.environ.get('LEGAL_EFFECTIVE_DATE', 'September 12, 2026').strip()
+    app.jinja_env.filters['http_link'] = http_link_for_template
 
     @app.context_processor
     def inject_app_version():
@@ -171,6 +173,8 @@ def create_app(config_overrides=None):
             return None
         if raw_epoch and str(user.session_epoch) != raw_epoch:
             return None
+        if not user.is_active:
+            return None
         if user.is_reserved_support_account and not user.support_access_active:
             return None
         return user
@@ -196,6 +200,26 @@ def create_app(config_overrides=None):
                     is_active=True,
                 )
                 db.session.add(default_template)
+                db.session.commit()
+            if not NotificationTemplate.query.filter_by(is_default_payment_review=True).first():
+                payment_review_template = NotificationTemplate(
+                    name='Default Payment Review Request',
+                    description='Sent to administrators when a participant reports a lab-fee payment for verification',
+                    email_subject='Payment confirmation needed: {{ test_title }}',
+                    email_body=(
+                        '<p>{{ username }} reported paying ${{ amount_paid }} toward "{{ test_title }}" '
+                        '({{ amount_owed }} owed). Review and confirm or reject the claim in the Admin Action Queue.</p>'
+                        '<p>{{ test_link }}</p>'
+                    ),
+                    telegram_body=(
+                        '{{ username }} reported paying ${{ amount_paid }} toward {{ test_title }} '
+                        '({{ amount_owed }} owed). Confirm or reject in the Admin Action Queue: {{ test_link }}'
+                    ),
+                    hide_from_participant_notifications=True,
+                    is_default_payment_review=True,
+                    is_active=True,
+                )
+                db.session.add(payment_review_template)
                 db.session.commit()
         except Exception:
             # The table may not exist yet when the app boots in a fresh test/database context.

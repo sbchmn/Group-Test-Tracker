@@ -16,6 +16,10 @@ from .models import NotificationConfig, NotificationTemplate, User, UserDigestEv
 from .bot_dispatch import post_json
 from .saas import managed_public_url
 
+# gthread workers do not preempt hung request threads, so every synchronous
+# provider call must carry its own socket timeout.
+OUTBOUND_HTTP_TIMEOUT_SECONDS = 10
+
 
 def _get_config(key, default=None):
     item = NotificationConfig.query.filter_by(key=key).first()
@@ -217,7 +221,7 @@ def send_mailjet_message(user, subject, body):
     )
 
     try:
-        with urlopen(request, context=None) as response:
+        with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
             response_body = response.read().decode("utf-8", errors="replace")
 
         try:
@@ -285,7 +289,7 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id
     )
 
     try:
-        with urlopen(request, context=None) as response:
+        with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
             response_body = response.read().decode("utf-8", errors="replace")
 
         try:
@@ -366,7 +370,7 @@ def download_telegram_photo(file_id, max_bytes=None):
         return None
     url = f'https://api.telegram.org/file/bot{quote(bot_token, safe="")}/{file_path}'
     try:
-        with urlopen(url, timeout=10) as remote_file:
+        with urlopen(url, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as remote_file:
             payload = remote_file.read((max_bytes + 1) if max_bytes else -1)
     except (HTTPError, URLError, TimeoutError, ValueError):
         return None
@@ -401,7 +405,7 @@ def _discord_api_post(method_name, payload):
         )
 
         try:
-            with urlopen(request, context=None) as response:
+            with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
                 response_body = response.read().decode("utf-8", errors="replace")
             try:
                 parsed_response = json.loads(response_body) if response_body else {}
@@ -716,11 +720,16 @@ def _queue_bot_webhook_message(provider_name, webhook_url, payload):
 def _send_discord_webhook_message(body):
     webhook_url = _get_config("discord_webhook_url")
     username = str(_get_config("discord_webhook_username") or "Group Test Manager").strip() or "Group Test Manager"
-    payload = {
-        "content": str(body or ""),
-        "username": username,
-    }
-    return _queue_bot_webhook_message("discord", webhook_url, payload)
+    payloads = [
+        {**payload, "username": username}
+        for payload in _build_discord_message_payloads(body)
+    ]
+
+    for payload in payloads:
+        if not _queue_bot_webhook_message("discord", webhook_url, payload):
+            return False
+
+    return bool(payloads)
 
 
 def send_root_message(body):
@@ -750,7 +759,7 @@ def _telegram_api_post(method_name, payload):
     )
 
     try:
-        with urlopen(request, context=None) as response:
+        with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
             response_body = response.read().decode("utf-8", errors="replace")
         parsed_response = json.loads(response_body) if response_body else {}
         ok = isinstance(parsed_response, dict) and parsed_response.get("ok") is True
@@ -889,36 +898,43 @@ def send_due_user_digests(now=None):
     sent_count = 0
     user_count = 0
     for user in users:
-        if not _is_user_digest_due(user, now):
-            continue
+        try:
+            if not _is_user_digest_due(user, now):
+                continue
 
-        due_events = (
-            UserDigestEvent.query
-            .filter_by(user_id=user.id, sent_at=None)
-            .order_by(UserDigestEvent.created_at.asc(), UserDigestEvent.id.asc())
-            .all()
-        )
-        if not due_events:
+            due_events = (
+                UserDigestEvent.query
+                .filter_by(user_id=user.id, sent_at=None)
+                .order_by(UserDigestEvent.created_at.asc(), UserDigestEvent.id.asc())
+                .all()
+            )
+            if not due_events:
+                user.digest_last_sent_at = now
+                db.session.add(user)
+                db.session.commit()
+                continue
+
+            subject = f"Group Test Digest ({len(due_events)} update{'s' if len(due_events) != 1 else ''})"
+            body = _render_user_digest_email(user, due_events)
+            sent = send_mailjet_message(user, subject, body)
+            if not sent:
+                append_notification_log(f"digest: failed for {getattr(user, 'username', 'unknown')}")
+                continue
+
+            sent_at = datetime.utcnow()
+            for event in due_events:
+                event.sent_at = sent_at
             user.digest_last_sent_at = now
             db.session.add(user)
-            continue
+            db.session.add_all(due_events)
+            # Commit per user: one delivery receipt per user must survive a later
+            # user's failure, otherwise the whole run rewinds and re-notifies everyone.
+            db.session.commit()
+            sent_count += len(due_events)
+            user_count += 1
+        except Exception:
+            db.session.rollback()
+            append_notification_log(f"digest: error for {getattr(user, 'username', 'unknown')}")
 
-        subject = f"Group Test Digest ({len(due_events)} update{'s' if len(due_events) != 1 else ''})"
-        body = _render_user_digest_email(user, due_events)
-        sent = send_mailjet_message(user, subject, body)
-        if not sent:
-            append_notification_log(f"digest: failed for {user.username}")
-            continue
-
-        sent_at = datetime.utcnow()
-        for event in due_events:
-            event.sent_at = sent_at
-        user.digest_last_sent_at = now
-        db.session.add(user)
-        db.session.add_all(due_events)
-        sent_count += len(due_events)
-        user_count += 1
-
-    db.session.commit()
     append_notification_log(f"digest: completed users={user_count} events={sent_count}")
     return {"users": user_count, "events": sent_count}

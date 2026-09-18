@@ -126,7 +126,8 @@ window.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="mb-3">
                         {{ form.results_link.label(class="form-label") }}
-                        {{ form.results_link(class="form-control", placeholder="https://...") }}
+                        {{ form.results_link(class="form-control" + (" is-invalid" if form.results_link.errors else ""), placeholder="https://...") }}
+                        {% for error in form.results_link.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Result File (optional: image or PDF)</label>
@@ -243,7 +244,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                                 </button>
                                             </div>
                                         {% endif %}
-                                        <a href="{{ result.results_link }}" target="_blank" class="small">Open result</a>
+                                        <a href="{{ result.results_link | http_link }}" target="_blank" class="small">Open result</a>
                                     </div>
                                     <div class="d-flex flex-column gap-2">
                                         <a href="{{ url_for('main.edit_public_result', result_id=result.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>

@@ -7,8 +7,6 @@ import io
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
-
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -25,6 +23,7 @@ from .models import (
     TelegramCommandTemplate,
     User,
 )
+from .links import safe_http_url
 from .notifications import append_notification_log, render_notification_template, send_discord_status_channel_message
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
 from .storage import StorageConfigurationError, StorageReadError, read_result_file
@@ -124,6 +123,8 @@ def _claim_discord_link(token_value, discord_user_id, discord_username):
     user = db.session.get(User, token.user_id)
     if user is None:
         return None, "missing-user"
+    if not user.is_active:
+        return None, "inactive-user"
     if user.discord_user_id and str(user.discord_user_id) != discord_user_id:
         return None, "user-owned"
 
@@ -171,6 +172,8 @@ def _linked_user_response(discord_user_id, builder, *args):
     user = _get_user_by_discord_id(discord_user_id)
     if user is None:
         return "Your Discord account is not linked yet. Run /start <token> from your profile."
+    if not user.is_active:
+        return "This Group Test Manager account is deactivated. Contact an administrator."
     return builder(user, *args)
 
 
@@ -182,6 +185,8 @@ def _link_discord_account(token_value, discord_user_id, discord_username):
         return "This Discord account is already linked to a different user."
     if link_error == "user-owned":
         return "This Group Test Manager account is already linked to a different Discord account."
+    if link_error == "inactive-user":
+        return "This Group Test Manager account is deactivated. Contact an administrator."
     if link_error in {"missing-user", "conflict"} or user is None:
         return "The linked user no longer exists or the link was claimed concurrently."
     return "Discord account linked successfully."
@@ -220,25 +225,12 @@ def _public_results_discord_page(tag_id=None, page=1):
     ]
 
 
-def _valid_discord_button_url(value):
-    candidate = str(value or '').strip()
-    if candidate.lower() in {'', '#', 'none', 'null', 'about:blank'}:
-        return None
-    try:
-        parsed = urlsplit(candidate)
-    except ValueError:
-        return None
-    if parsed.scheme.lower() not in {'http', 'https'} or not parsed.hostname:
-        return None
-    return candidate
-
-
 def _discord_public_result_url(result, service_base_url=''):
-    direct_url = _valid_discord_button_url(result.results_link)
+    direct_url = safe_http_url(result.results_link)
     if direct_url:
         return direct_url
 
-    base_url = _valid_discord_button_url(managed_public_url() or service_base_url)
+    base_url = safe_http_url(managed_public_url() or service_base_url)
     if not base_url:
         return None
     return f"{base_url.rstrip('/')}/public-results/{result.id}"
@@ -265,8 +257,12 @@ def _discord_public_results_access(user_id, channel_id, guild_id):
     allowed_threads = {entry.strip() for entry in str((NotificationConfig.query.filter_by(key='builtin_publicresults_allowed_thread_ids').first() or type('Config', (), {'value': ''})()).value or '').split(',') if entry.strip()}
     if allowed_threads:
         return False, 'This command is not enabled in this Discord thread.'
-    if guild_id is None and _get_user_by_discord_id(user_id) is None:
-        return False, 'Your Discord account is not linked yet. Run /start <token> from your profile.'
+    if guild_id is None:
+        dm_user = _get_user_by_discord_id(user_id)
+        if dm_user is None:
+            return False, 'Your Discord account is not linked yet. Run /start <token> from your profile.'
+        if not dm_user.is_active:
+            return False, 'This Group Test Manager account is deactivated. Contact an administrator.'
     return True, None
 
 
@@ -626,6 +622,8 @@ def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id,
     user = _get_user_by_discord_id(discord_user_id)
     if user is None:
         return "Your Discord account is not linked yet. Run /start <token> from your profile."
+    if not user.is_active:
+        return "This Group Test Manager account is deactivated. Contact an administrator."
 
     class CommandInteraction:
         def __init__(self):

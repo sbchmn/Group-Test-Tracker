@@ -54,6 +54,7 @@ from .models import (
     ResultAnalysisRun,
 )
 from .system_accounts import is_reserved_identity
+from .links import safe_http_url, validate_http_link
 from .saas import (
     entitlement_revision,
     entitlement_enabled,
@@ -227,8 +228,8 @@ class GroupTestForm(FlaskForm):
     quote_number = StringField('Quote Number', validators=[Optional()])
     
     # results_link only relevant when closed; shown in template conditionally
-    results_link = StringField('Results Link (URL - shown only to approved members when Closed)', 
-                               validators=[Optional(), Length(max=500)])
+    results_link = StringField('Results Link (URL - shown only to approved members when Closed)',
+                               validators=[Optional(), Length(max=500), validate_http_link])
     tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     payment_option_ids = SelectMultipleField('Available Payment Options', coerce=int, choices=[], validators=[Optional()])
     
@@ -238,7 +239,7 @@ class GroupTestForm(FlaskForm):
 class PublicResultForm(FlaskForm):
     title = StringField('Result Title', validators=[DataRequired(), Length(max=200)])
     summary = TextAreaField('Summary / Notes', validators=[Optional()])
-    results_link = StringField('Results Link (optional when a file is uploaded)', validators=[Optional(), Length(max=500)])
+    results_link = StringField('Results Link (optional when a file is uploaded)', validators=[Optional(), Length(max=500), validate_http_link])
     tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     submit = SubmitField('Save Public Result')
 
@@ -310,7 +311,7 @@ class ParticipantStatusForm(FlaskForm):
         ('received_from_vendor', 'Received from Vendor'),
         ('ready_to_ship', 'Ready to Ship to Lab')
     ])
-    paid_lab = BooleanField('I have paid my lab fees')
+    payment_claim = BooleanField('I have paid my lab fees (submits for administrator verification)')
     amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
     preferred_payment_option_id = SelectField('Preferred Payment Method', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes / Comments', validators=[Optional()])
@@ -346,6 +347,7 @@ class ProfileForm(FlaskForm):
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
     password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
+    current_password = PasswordField('Confirm with your current password', validators=[Optional(), Length(max=200)])
     submit = SubmitField('Save Profile')
 
 
@@ -358,6 +360,7 @@ class NotificationTemplateForm(FlaskForm):
     hide_from_participant_notifications = BooleanField('Hide from "Notify Test Participants"')
     is_default_password_reset = BooleanField('Default Password Reset Template')
     is_default_registration_welcome = BooleanField('Default Registration Welcome Template')
+    is_default_payment_review = BooleanField('Default Payment Review Request Template')
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Template')
 
@@ -741,7 +744,7 @@ def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
     document = message.get('document') or {}
     photos = message.get('photo') or []
     attachment = document or (photos[-1] if photos else {})
-    link = argument if argument.startswith(('https://', 'http://')) else None
+    link = safe_http_url(argument)
     if not attachment and not link:
         send_telegram_chat_message(
             chat_id, 'Attach a PDF/image or provide a public HTTP/HTTPS COA link after /submitcoa.',
@@ -1043,6 +1046,24 @@ def _send_status_update_to_telegram(test, previous_status):
         for item in pending_events:
             item.sent_at = sent_at
         db.session.add_all(pending_events)
+
+
+def _notify_status_change_after_commit(test, previous_status):
+    """Dispatch status-change notifications after the domain edit is committed.
+
+    Digest/dedup rows created during dispatch persist via a follow-up commit;
+    a transport failure must never roll back the already-saved edit.
+    """
+    if previous_status == test.status:
+        return
+    try:
+        _send_status_update_to_telegram(test, previous_status)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        append_notification_log(
+            f'telegram: exception sending status update for test {test.id}: {exc}'
+        )
 
 
 def _send_new_test_created_to_telegram(test, test_url=None):
@@ -1350,7 +1371,7 @@ def password_reset():
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
         reset_sent = False
-        if user and not user.is_reserved_support_account:
+        if user and not user.is_reserved_support_account and user.is_active:
             selected_channel = form.notification_channel.data or user.notification_channel or 'email'
             channel_available = not (
                 selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip()
@@ -1399,6 +1420,19 @@ def profile():
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
     if form.validate_on_submit():
+        changing_email = form.email.data != current_user.email
+        changing_password = bool(form.password.data)
+
+        if (changing_email or changing_password) and not current_user.check_password(
+            form.current_password.data or ''
+        ):
+            flash('Your current password is required to change your email or password.', 'danger')
+            return render_template('profile.html', form=form)
+
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'danger')
+            return render_template('profile.html', form=form)
+
         existing_username = User.query.filter(User.username == form.username.data, User.id != current_user.id).first()
         existing_email = User.query.filter(User.email == form.email.data, User.id != current_user.id).first()
 
@@ -1419,11 +1453,20 @@ def profile():
         current_user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
         current_user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
 
-        if form.password.data:
+        if changing_password:
             current_user.set_password(form.password.data)
+            # get_id() embeds session_epoch, so rotating it drops every other live
+            # session — including the one that may have been used to change the password.
+            current_user.session_epoch += 1
             flash('Password updated.', 'success')
 
         db.session.commit()
+        if changing_password:
+            # The epoch rotation already killed other sessions; end this one cleanly
+            # rather than depending on the stale cookie being rejected downstream.
+            logout_user()
+            flash('Profile updated. Please sign in again.', 'success')
+            return redirect(url_for('main.login'))
         flash('Profile updated.', 'success')
         return redirect(url_for('main.profile'))
 
@@ -2145,6 +2188,7 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, m
     admin_user = User.query.filter_by(
         telegram_user_id=str(telegram_user_id),
         is_admin=True,
+        is_active=True,
     ).first()
     if admin_user is None:
         return False
@@ -2607,6 +2651,11 @@ def telegram_webhook():
             db.session.commit()
             return jsonify({'ok': True})
 
+        if not token.user.is_active:
+            send_telegram_chat_message(chat_id, 'This account is deactivated. Contact an administrator for account support.')
+            db.session.commit()
+            return jsonify({'ok': True})
+
         if telegram_user_id:
             existing_owner = User.query.filter_by(telegram_user_id=telegram_user_id).first()
             if existing_owner is not None and existing_owner.id != token.user_id:
@@ -2631,6 +2680,11 @@ def telegram_webhook():
         linked_user = User.query.filter_by(telegram_chat_id=chat_id).first()
     if linked_user is None:
         send_telegram_chat_message(chat_id, 'Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.')
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    if not linked_user.is_active:
+        send_telegram_chat_message(chat_id, 'This account is deactivated. Contact an administrator for account support.')
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -2998,10 +3052,43 @@ def my_results():
     )
 
 
+def _notify_payment_claim(test, part):
+    """Alert active administrators that a participant reported a lab-fee payment."""
+    template = NotificationTemplate.query.filter_by(is_default_payment_review=True, is_active=True).first()
+    base_url = _resolve_service_base_url(_config_values_map())
+    context = {
+        'username': (part.user.username if part.user else None) or part.name or 'participant',
+        'test_title': test.title or '',
+        'test_id': str(test.id),
+        'test_link': f"{base_url}/test/{test.id}",
+        'amount_paid': f"{(part.amount_paid or 0):.2f}",
+        'amount_owed': f"{(part.amount_owed or 0):.2f}",
+    }
+    if template is not None:
+        subject = render_notification_template(template.email_subject or 'Payment confirmation needed', context)
+        email_body = render_notification_template(template.email_body or '', context)
+        telegram_body = render_notification_template(template.telegram_body or '', context)
+    else:
+        subject = f"Payment confirmation needed: {test.title}"
+        email_body = ''
+        telegram_body = ''
+    fallback = (
+        f"{context['username']} reported paying ${context['amount_paid']} toward \"{test.title}\" "
+        f"(${context['amount_owed']} owed). Confirm or reject the claim in the Admin Action Queue: {context['test_link']}"
+    )
+    for admin_user in User.query.filter_by(is_admin=True, is_active=True).all():
+        channel = admin_user.notification_channel or 'email'
+        if channel == 'telegram':
+            body = telegram_body or fallback
+        else:
+            body = email_body or fallback
+        send_notification_message(admin_user, channel, subject, body)
+
+
 @main_bp.route('/test/<int:test_id>/my-status', methods=['GET', 'POST'])
 @login_required
 def update_my_participant_status(test_id):
-    """Allow approved participants to update their vendor order status and self-report payment."""
+    """Allow approved participants to update their order status and report payments for review."""
     test = GroupTest.query.get_or_404(test_id)
     part = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id, approved=True).first()
 
@@ -3016,13 +3103,21 @@ def update_my_participant_status(test_id):
     ]
     if not form.is_submitted():
         form.preferred_payment_option_id.data = part.preferred_payment_option_id or 0
+        form.payment_claim.data = part.payment_claimed_at is not None
 
+    first_claim = False
     if form.validate_on_submit():
         part.order_status = form.order_status.data
-        part.paid_lab = form.paid_lab.data
         if form.amount_paid.data is not None:
             part.amount_paid = form.amount_paid.data
         part.notes = form.notes.data or part.notes
+        if part.paid_lab:
+            part.payment_claimed_at = None
+        elif form.payment_claim.data:
+            first_claim = part.payment_claimed_at is None
+            part.payment_claimed_at = datetime.utcnow()
+        else:
+            part.payment_claimed_at = None
 
         selected_id = int(form.preferred_payment_option_id.data or 0)
         if test.status in ('testing', 'ready_for_payment') and selected_id > 0:
@@ -3035,6 +3130,9 @@ def update_my_participant_status(test_id):
             part.preferred_payment_snapshot = None
 
         db.session.commit()
+        if first_claim:
+            _notify_payment_claim(test, part)
+            db.session.commit()
         flash("Your status has been updated.", "success")
         return redirect(url_for('main.test_detail', test_id=test_id))
 
@@ -3302,6 +3400,7 @@ def edit_test(test_id):
         test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
         test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
 
+        obsolete_image_keys = []
         clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
         upload_file = request.files.get('results_image')
         has_new_upload = bool(upload_file and upload_file.filename)
@@ -3324,11 +3423,10 @@ def edit_test(test_id):
             old_key = test.results_image_key
             test.results_image_key = new_key
             if old_key and old_key != new_key:
-                delete_result_image(old_key)
+                obsolete_image_keys.append(old_key)
         elif clear_existing_image and test.results_image_key:
-            old_key = test.results_image_key
+            obsolete_image_keys.append(test.results_image_key)
             test.results_image_key = None
-            delete_result_image(old_key)
 
         apply_tags_to_record(test, form.tag_names.data)
         selected_payment_ids = form.payment_option_ids.data or []
@@ -3339,16 +3437,18 @@ def edit_test(test_id):
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
             if test.results_image_key:
-                delete_result_image(test.results_image_key)
+                obsolete_image_keys.append(test.results_image_key)
             test.results_image_key = None
             test.results_posted_at = None
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
 
-        if previous_status != test.status:
-            _send_status_update_to_telegram(test, previous_status)
-
         db.session.commit()
+
+        for obsolete_key in obsolete_image_keys:
+            delete_result_image(obsolete_key)
+        _notify_status_change_after_commit(test, previous_status)
+
         if has_new_upload and test.results_image_key:
             _queue_uploaded_result_analysis(test, current_user.id)
         flash('Group test updated.', 'success')
@@ -3487,6 +3587,7 @@ def _deny_participation_record(part, reason):
     part.denied_reason = reason
     part.approved = False
     part.approved_at = None
+    part.payment_claimed_at = None
 
 
 def _reopen_participation_record(part):
@@ -3496,6 +3597,13 @@ def _reopen_participation_record(part):
     part.approved = False
     part.approved_at = None
     part.requested_at = datetime.utcnow()
+    part.payment_claimed_at = None
+
+
+def _clear_payment_review_state(part):
+    part.payment_claimed_at = None
+    part.payment_verified_at = None
+    part.payment_verified_by_id = None
 
 
 def _parse_participation_ids(raw_ids):
@@ -3511,11 +3619,21 @@ def _parse_participation_ids(raw_ids):
 
 
 def _build_pending_queue_query(status_filter, search):
+    # One queue section for everything except result review: unapproved join
+    # requests plus approved participants whose unpaid lab-fee claim is waiting
+    # for administrator confirmation.
     pending_query = (
         Participation.query
         .join(GroupTest, Participation.group_test_id == GroupTest.id)
         .join(User, Participation.user_id == User.id)
-        .filter(Participation.approved == False, Participation.denied == False)
+        .filter(Participation.denied == False)
+        .filter(or_(
+            Participation.approved == False,
+            and_(
+                Participation.payment_claimed_at.isnot(None),
+                Participation.paid_lab.isnot(True),
+            ),
+        ))
     )
 
     if status_filter != 'all':
@@ -3664,7 +3782,7 @@ def approve_filtered_from_queue():
         flash('Bulk approve canceled. Type APPROVE FILTERED to continue.', 'warning')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
-    pending_parts = _build_pending_queue_query(status_filter, search).all()
+    pending_parts = [part for part in _build_pending_queue_query(status_filter, search).all() if not part.approved]
     if not pending_parts:
         flash('No pending requests matched your current filters.', 'info')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
@@ -3763,7 +3881,16 @@ def update_participant(part_id):
     form = ParticipationEditForm(obj=part)
     
     if form.validate_on_submit():
+        previous_paid = bool(part.paid_lab)
         form.populate_obj(part)
+        if part.paid_lab:
+            part.payment_claimed_at = None
+            if not previous_paid or part.payment_verified_at is None:
+                part.payment_verified_at = datetime.utcnow()
+                part.payment_verified_by_id = current_user.id
+        else:
+            part.payment_verified_at = None
+            part.payment_verified_by_id = None
         if form.approved.data and not part.approved:
             _approve_participation_record(part)
             # Auto-calculate owed on approval
@@ -3772,7 +3899,8 @@ def update_participant(part_id):
         elif not form.approved.data:
             part.approved = False
             part.approved_at = None
-        
+            part.payment_claimed_at = None
+
         db.session.commit()
         flash('Participant updated successfully.', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -3836,7 +3964,86 @@ def reopen_participant_from_manage(test_id, part_id):
     _reopen_participation_record(part)
     db.session.commit()
     flash(f'Reopened request for {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test_id))
+
+
+@main_bp.route('/admin/manage-participants/<int:test_id>/unapprove/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def unapprove_participant_from_manage(test_id, part_id):
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.get_or_404(part_id)
+    if part.group_test_id != test.id:
+        abort(404)
+    if not part.approved or part.denied:
+        flash('This participant is not currently approved.', 'info')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    part.approved = False
+    part.approved_at = None
+    part.payment_claimed_at = None
+    _recalculate_approved_amounts_for_test(test)
+    db.session.commit()
+    flash(f'Removed approval for {part.name or part.user.username}.', 'success')
     return redirect(url_for('main.manage_participants', test_id=test.id))
+
+
+def _payment_action_redirect():
+    manage_test_id = request.form.get('manage_test_id')
+    if manage_test_id:
+        try:
+            return redirect(url_for('main.manage_participants', test_id=int(manage_test_id)))
+        except (TypeError, ValueError):
+            pass
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/payment/confirm/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def confirm_participant_payment(part_id):
+    """Administrator confirmation of lab fees; the only path that sets paid_lab."""
+    part = Participation.query.get_or_404(part_id)
+    if not part.approved or part.denied:
+        flash('Only approved participants can be marked paid.', 'warning')
+    else:
+        part.paid_lab = True
+        part.payment_claimed_at = None
+        part.payment_verified_at = datetime.utcnow()
+        part.payment_verified_by_id = current_user.id
+        db.session.commit()
+        flash(f'Lab fees marked paid for {part.name or part.user.username}.', 'success')
+    return _payment_action_redirect()
+
+
+@main_bp.route('/admin/payment/unmark/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def unmark_participant_payment(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if not part.paid_lab:
+        flash('This participant is not marked paid.', 'info')
+    else:
+        part.paid_lab = False
+        part.payment_verified_at = None
+        part.payment_verified_by_id = None
+        db.session.commit()
+        flash(f'Payment record removed for {part.name or part.user.username}.', 'warning')
+    return _payment_action_redirect()
+
+
+@main_bp.route('/admin/payment/reject-claim/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def reject_participant_payment_claim(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if part.payment_claimed_at is None:
+        flash('There is no pending payment claim for this participant.', 'info')
+    else:
+        part.payment_claimed_at = None
+        db.session.commit()
+        flash(f'Payment claim from {part.name or part.user.username} rejected. They can report payment again.', 'info')
+    return _payment_action_redirect()
 
 
 @main_bp.route('/admin/remove-participant/<int:part_id>', methods=['POST'])
@@ -4294,6 +4501,7 @@ def notification_templates():
             hide_from_participant_notifications=form.hide_from_participant_notifications.data,
             is_default_password_reset=form.is_default_password_reset.data,
             is_default_registration_welcome=form.is_default_registration_welcome.data,
+            is_default_payment_review=form.is_default_payment_review.data,
             is_active=form.is_active.data,
         )
         db.session.add(template)
@@ -4346,6 +4554,7 @@ def edit_notification_template(template_id):
         template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
         template.is_default_password_reset = form.is_default_password_reset.data
         template.is_default_registration_welcome = form.is_default_registration_welcome.data
+        template.is_default_payment_review = form.is_default_payment_review.data
         template.is_active = form.is_active.data
         db.session.commit()
         flash('Notification template updated.', 'success')
@@ -4373,24 +4582,27 @@ def _render_telegram_command_templates_page(form, editing_template=None):
 
 
 def _apply_command_response_media(form, template):
+    """Apply command text/media; returns object keys safe to delete only after the caller commits."""
     uploaded_key = None
     file_storage = form.response_image.data
     if file_storage and getattr(file_storage, 'filename', ''):
         uploaded_key = upload_result_image(file_storage, 'bot-commands')
 
+    obsolete_keys = []
     previous_key = template.response_image_key
     if uploaded_key:
         template.response_image_key = uploaded_key
         if previous_key and previous_key != uploaded_key:
-            delete_result_image(previous_key)
+            obsolete_keys.append(previous_key)
     elif form.remove_response_image.data:
         template.response_image_key = None
         if previous_key:
-            delete_result_image(previous_key)
+            obsolete_keys.append(previous_key)
 
     template.reply_text = (form.reply_text.data or '').strip()
     if not template.reply_text and not template.response_image_key:
         raise StorageUploadError('A command must have text, an image, or both.')
+    return obsolete_keys
 
 
 @main_bp.route('/admin/telegram-command-templates', methods=['GET', 'POST'])
@@ -4438,12 +4650,14 @@ def telegram_command_templates():
             is_active=bool(form.is_active.data),
         )
         try:
-            _apply_command_response_media(form, template)
+            obsolete_media_keys = _apply_command_response_media(form, template)
         except (StorageConfigurationError, StorageUploadError) as exc:
             flash(str(exc), 'danger')
             return _render_telegram_command_templates_page(form)
         db.session.add(template)
         db.session.commit()
+        for obsolete_key in obsolete_media_keys:
+            delete_result_image(obsolete_key)
         flash('Telegram command template created.', 'success')
         return redirect(url_for('main.telegram_command_templates'))
 
@@ -4496,13 +4710,15 @@ def edit_telegram_command_template(template_id):
         template.allowed_chat_ids = ','.join(allowed_chat_ids) if allowed_chat_ids else None
         template.allowed_thread_ids = ','.join(allowed_thread_ids) if allowed_thread_ids else None
         try:
-            _apply_command_response_media(form, template)
+            obsolete_media_keys = _apply_command_response_media(form, template)
         except (StorageConfigurationError, StorageUploadError) as exc:
             flash(str(exc), 'danger')
             return _render_telegram_command_templates_page(form, editing_template=template)
         template.allow_admin_bot_updates = bool(form.allow_admin_bot_updates.data)
         template.is_active = bool(form.is_active.data)
         db.session.commit()
+        for obsolete_key in obsolete_media_keys:
+            delete_result_image(obsolete_key)
         flash('Telegram command template updated.', 'success')
         return redirect(url_for('main.telegram_command_templates'))
 
@@ -5038,6 +5254,10 @@ def edit_user(user_id):
     form.password.validators = [Optional(), Length(min=6)]
 
     if form.validate_on_submit():
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'danger')
+            return render_template('admin/edit_user.html', form=form, user=user)
+
         existing_username = User.query.filter(User.username == form.username.data, User.id != user_id).first()
         existing_email = User.query.filter(User.email == form.email.data, User.id != user_id).first()
 
@@ -5053,7 +5273,14 @@ def edit_user(user_id):
         user.tg_username = form.tg_username.data
         user.discord_username = form.discord_username.data
         user.is_admin = form.is_admin.data
+        deactivating = user.is_active and not form.is_active.data
+        if deactivating and user.id == current_user.id:
+            flash('You cannot deactivate your own account.', 'danger')
+            return render_template('admin/edit_user.html', form=form, user=user)
         user.is_active = form.is_active.data
+        if deactivating:
+            # Revoking access must also terminate every live web session.
+            user.session_epoch += 1
         user.receive_group_test_notifications = form.receive_group_test_notifications.data
         user.notification_channel = form.notification_channel.data or 'email'
         user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
@@ -5080,7 +5307,13 @@ def toggle_user_active(user_id):
     if user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.manage_users'))
+    if user.id == current_user.id and user.is_active:
+        flash('You cannot deactivate your own account.', 'danger')
+        return redirect(url_for('main.manage_users'))
     user.is_active = not user.is_active
+    if not user.is_active:
+        # Revoking access must also terminate every live web session.
+        user.session_epoch += 1
     db.session.commit()
     status = "activated" if user.is_active else "deactivated"
     flash(f'User "{user.username}" {status}.', 'success')
@@ -5095,16 +5328,17 @@ def set_results_link(test_id):
     test = GroupTest.query.get_or_404(test_id)
     previous_status = test.status
     link = request.form.get('results_link', '').strip()
+    if link and safe_http_url(link) is None:
+        flash('Results link must be a full http:// or https:// URL.', 'danger')
+        return redirect(url_for('main.test_detail', test_id=test_id))
     test.results_link = link if link else None
     if test.status != 'closed':
         test.status = 'closed'
     if test.results_link and not test.results_posted_at:
         test.results_posted_at = datetime.utcnow()
 
-    if previous_status != test.status:
-        _send_status_update_to_telegram(test, previous_status)
-
     db.session.commit()
+    _notify_status_change_after_commit(test, previous_status)
     flash('Results link updated and test marked closed (if needed). Visible only to approved members.', 'success')
     return redirect(url_for('main.test_detail', test_id=test_id))
 
@@ -5260,10 +5494,11 @@ def edit_public_result(result_id):
 def delete_public_result(result_id):
     result = PublicResult.query.get_or_404(result_id)
     title = result.title
-    if result.results_image_key:
-        delete_result_image(result.results_image_key)
+    obsolete_key = result.results_image_key
     db.session.delete(result)
     db.session.commit()
+    if obsolete_key:
+        delete_result_image(obsolete_key)
     flash(f'Public result "{title}" was deleted.', 'warning')
     return redirect(url_for('main.manage_public_results'))
 

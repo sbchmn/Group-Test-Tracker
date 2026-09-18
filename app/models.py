@@ -71,10 +71,11 @@ class User(UserMixin, db.Model):
     
     # Relationships
     participations = db.relationship(
-        'Participation', 
-        backref='user', 
+        'Participation',
+        backref='user',
         lazy='dynamic',
-        cascade='all, delete-orphan'
+        cascade='all, delete-orphan',
+        foreign_keys='Participation.user_id',
     )
     hidden_dashboard_tests = db.relationship(
         'DashboardHiddenGroupTest',
@@ -305,6 +306,7 @@ class NotificationTemplate(db.Model):
     hide_from_participant_notifications = db.Column(db.Boolean, default=False, nullable=False)
     is_default_password_reset = db.Column(db.Boolean, default=False, nullable=False)
     is_default_registration_welcome = db.Column(db.Boolean, default=False, nullable=False)
+    is_default_payment_review = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -855,11 +857,16 @@ class Participation(db.Model):
     state = db.Column(db.String(50), nullable=True)
     pay_vial_collector = db.Column(db.Boolean, default=False)
     pay_lab = db.Column(db.Boolean, default=False)
-    paid_lab = db.Column(db.Boolean, default=False)          # Admin verification
-    
+    paid_lab = db.Column(db.Boolean, default=False)          # Admin verification only
+
     # Financial tracking (admin or future auto)
     amount_owed = db.Column(db.Float, default=0.0)
     amount_paid = db.Column(db.Float, default=0.0)           # Self-reported by participant
+    # Participant payment claims raise an Action Queue item; only an
+    # administrator confirmation sets paid_lab.
+    payment_claimed_at = db.Column(db.DateTime, nullable=True)
+    payment_verified_at = db.Column(db.DateTime, nullable=True)
+    payment_verified_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     preferred_payment_option_id = db.Column(db.Integer, db.ForeignKey('payment_options.id'), nullable=True)
     preferred_payment_snapshot = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
@@ -879,6 +886,10 @@ class Participation(db.Model):
             self.amount_owed = costs_dict.get('donor_pays', 0.0)
         else:
             self.amount_owed = costs_dict.get('non_donor_pays', 0.0)
-    
+
+    @property
+    def payment_claim_pending(self):
+        return bool(self.approved and not self.paid_lab and self.payment_claimed_at)
+
     def __repr__(self):
         return f'<Participation user={self.user_id} test={self.group_test_id} approved={self.approved}>'

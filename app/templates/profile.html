@@ -116,9 +116,15 @@
                     </div>
 
                     <div class="mb-3">
+                        {{ form.current_password.label(class="form-label") }}
+                        {{ form.current_password(class="form-control", autocomplete="current-password") }}
+                        <div class="form-text">Required whenever you change your email address or password.</div>
+                    </div>
+
+                    <div class="mb-3">
                         {{ form.password.label(class="form-label") }}
-                        {{ form.password(class="form-control") }}
-                        <div class="form-text">Leave blank to keep your current password.</div>
+                        {{ form.password(class="form-control", autocomplete="new-password") }}
+                        <div class="form-text">Leave blank to keep your current password. Changing it signs out your other sessions.</div>
                     </div>
 
                     <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>

@@ -168,7 +168,8 @@ window.onload = function() {
             <div class="col-md-4">{{ form.quote_number.label(class="form-label") }}{{ form.quote_number(class="form-control") }}</div>
             <div class="col-md-4">{{ form.status.label(class="form-label") }}{{ form.status(class="form-select") }}</div>
         </div>
-        {{ form.results_link.label(class="form-label mt-3") }}{{ form.results_link(class="form-control") }}
+        {{ form.results_link.label(class="form-label mt-3") }}{{ form.results_link(class="form-control" + (" is-invalid" if form.results_link.errors else "")) }}
+        {% for error in form.results_link.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
         <label class="form-label mt-3">Result File (optional: image or PDF)</label>
         <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf">
         {% if existing_results_image_url %}

@@ -83,6 +83,7 @@ from .notifications import (
     edit_telegram_message,
     register_telegram_webhook,
     unregister_telegram_webhook,
+    set_telegram_commands,
     send_telegram_command_response,
     send_telegram_interactive_message,
     download_telegram_photo,
@@ -449,6 +450,10 @@ class BuiltinCommandConfigForm(FlaskForm):
     mytests_enabled = BooleanField('Enable /mytests', default=True)
     status_enabled = BooleanField('Enable /status', default=True)
     join_enabled = BooleanField('Enable /join', default=True)
+    testing_enabled = BooleanField('Enable /testing', default=True)
+    testing_allow_non_private = BooleanField('Allow /testing in groups/channels', default=False)
+    testing_allowed_chat_ids = StringField('Allowed /testing Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    testing_allowed_thread_ids = StringField('Allowed /testing Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     publicresults_enabled = BooleanField('Enable /publicresults', default=True)
     publicresults_allow_non_private = BooleanField('Allow /publicresults in groups/channels', default=False)
     publicresults_allowed_chat_ids = StringField('Allowed Chat/Guild IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
@@ -1979,11 +1984,20 @@ def _process_custom_command_template(template, linked_user, message_text, chat_i
     return True
 
 
-def _telegram_extract_command_head(text):
+def _parse_telegram_command(text, configured_bot_username=''):
+    """Return (command, args, addressed_elsewhere) for a Telegram command."""
     raw_text = str(text or '').strip()
     if not raw_text:
-        return ''
-    return raw_text.split()[0].lower()
+        return '', '', False
+    token, *remainder = raw_text.split(maxsplit=1)
+    match = re.fullmatch(r'/([A-Za-z0-9_]+)(?:@([A-Za-z0-9_]+))?', token)
+    if match is None:
+        return '', '', False
+    command = f'/{match.group(1).lower()}'
+    addressed_username = str(match.group(2) or '').lower()
+    own_username = str(configured_bot_username or '').strip().lstrip('@').lower()
+    addressed_elsewhere = bool(addressed_username and (not own_username or addressed_username != own_username))
+    return command, remainder[0].strip() if remainder else '', addressed_elsewhere
 
 
 def _render_custom_telegram_reply(template, linked_user, message_text, chat_id):
@@ -2426,7 +2440,10 @@ def telegram_webhook():
             db.session.rollback()
             return jsonify({'ok': True})
 
-    message = payload.get('message') or payload.get('edited_message') or payload.get('channel_post') or payload.get('edited_channel_post') or {}
+    # Commands are intentionally not replayed from edited_message or
+    # edited_channel_post updates because edits receive a new update_id and may
+    # otherwise repeat state-changing actions such as COA submissions.
+    message = payload.get('message') or payload.get('channel_post') or {}
     callback_query = payload.get('callback_query')
     if isinstance(callback_query, dict):
         callback_message = callback_query.get('message') or {}
@@ -2518,12 +2535,22 @@ def telegram_webhook():
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     caption = (message.get('caption') or '').strip()
+    command, command_args, addressed_elsewhere = _parse_telegram_command(
+        text or caption,
+        config_map.get('telegram_bot_username'),
+    )
+    if addressed_elsewhere:
+        db.session.commit()
+        return jsonify({'ok': True})
+    normalized_command_text = f'{command} {command_args}'.strip() if command else text
     potential_user = _telegram_linked_user(telegram_user_id, chat_id if chat_type == 'private' else None)
-    if (text or caption).lower().startswith('/submitcoa'):
+    if command == '/submitcoa' and _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id):
         if potential_user is None:
             send_telegram_chat_message(chat_id, 'Your Telegram account must be linked before submitting a COA.', message_thread_id=message_thread_id)
         else:
-            _submit_telegram_coa(message, potential_user, chat_id, chat_type, message_thread_id)
+            normalized_message = dict(message)
+            normalized_message['text' if message.get('text') is not None else 'caption'] = normalized_command_text
+            _submit_telegram_coa(normalized_message, potential_user, chat_id, chat_type, message_thread_id)
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -2544,10 +2571,10 @@ def telegram_webhook():
         db.session.commit()
         return jsonify({'ok': True})
 
-    lower = text.lower()
-    command_head = _telegram_extract_command_head(text)
+    lower = normalized_command_text.lower()
+    command_head = command
     custom_template = TelegramCommandTemplate.query.filter_by(command=command_head, is_active=True).first()
-    if lower == '/testing':
+    if command_head == '/testing' and not command_args and _builtin_testing_scope_allowed(chat_id, chat_type, message_thread_id):
         send_telegram_chat_message(
             chat_id,
             _telegram_testing_message(config_map),
@@ -2572,7 +2599,7 @@ def telegram_webhook():
         if _process_custom_command_template(
             custom_template,
             non_private_user,
-            text,
+            normalized_command_text,
             chat_id,
             chat_type,
             message_thread_id=message_thread_id,
@@ -2588,8 +2615,8 @@ def telegram_webhook():
         db.session.commit()
         return jsonify({'ok': True})
 
-    if text.lower().startswith('/start'):
-        token_value = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ''
+    if command_head == '/start':
+        token_value = command_args
         if not token_value:
             if incoming_username:
                 matched_users = User.query.filter(User.tg_username.ilike(incoming_username)).all()
@@ -2682,11 +2709,11 @@ def telegram_webhook():
             db.session.commit()
             return jsonify({'ok': True})
 
-    if lower.startswith('/status'):
+    if command_head == '/status' or command_head.startswith('/status_'):
         if not _builtin_enabled('status'):
             send_telegram_chat_message(chat_id, 'This command is currently disabled.')
             return jsonify({'ok': True})
-        test_id = _telegram_extract_command_test_id(text, 'status')
+        test_id = _telegram_extract_command_test_id(normalized_command_text, 'status')
         if test_id is None:
             send_telegram_chat_message(chat_id, 'Usage: /status <test_id> or /status_<test_id>')
             return jsonify({'ok': True})
@@ -2700,11 +2727,11 @@ def telegram_webhook():
         send_telegram_chat_message(chat_id, _telegram_status_summary_for_user(linked_user, test))
         return jsonify({'ok': True})
 
-    if lower.startswith('/join'):
+    if command_head == '/join' or command_head.startswith('/join_'):
         if not _builtin_enabled('join'):
             send_telegram_chat_message(chat_id, 'This command is currently disabled.')
             return jsonify({'ok': True})
-        test_id = _telegram_extract_command_test_id(text, 'join')
+        test_id = _telegram_extract_command_test_id(normalized_command_text, 'join')
         if test_id is None:
             send_telegram_chat_message(chat_id, 'Usage: /join <test_id> or /join_<test_id>')
             return jsonify({'ok': True})
@@ -2718,7 +2745,7 @@ def telegram_webhook():
     if _process_custom_command_template(
         custom_template,
         linked_user,
-        text,
+        normalized_command_text,
         chat_id,
         chat_type,
         message_thread_id=message_thread_id,
@@ -4094,11 +4121,73 @@ def _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id=N
     return True
 
 
+def _builtin_testing_scope_allowed(chat_id, chat_type, message_thread_id=None):
+    if not _builtin_enabled('testing'):
+        return False
+    if str(chat_type or '').strip().lower() == 'private':
+        return True
+    if str(_builtin_config_value('builtin_testing_allow_non_private', 'false')).lower() != 'true':
+        return False
+    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_testing_allowed_chat_ids', ''))
+    if allowed_chats and str(chat_id or '').strip() not in allowed_chats:
+        return False
+    allowed_threads = _normalize_allowed_thread_ids(_builtin_config_value('builtin_testing_allowed_thread_ids', ''))
+    return allowed_threads is not None and (not allowed_threads or str(message_thread_id or '').strip() in allowed_threads)
+
+
+def _telegram_command_menu_entries(include_groups=False):
+    descriptions = {
+        'start': 'Link your Group Test Manager account',
+        'help': 'Show available bot commands',
+        'tests': 'List tests you can see',
+        'mytests': 'List your test requests and approvals',
+        'testing': 'Get group-testing signup and login links',
+        'status': 'View your status for a test',
+        'join': 'Request to join a recruiting test',
+        'publicresults': 'Browse published public results',
+        'submitcoa': 'Submit a COA for administrator review',
+    }
+    if include_groups:
+        names = []
+        if str(_builtin_config_value('builtin_testing_allow_non_private', 'false')).lower() == 'true' and _builtin_enabled('testing'):
+            names.append('testing')
+        if str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true' and _builtin_enabled('publicresults'):
+            names.append('publicresults')
+        if str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() == 'true' and _builtin_enabled('submitcoa'):
+            names.append('submitcoa')
+    else:
+        names = ['start', 'help'] + [
+            name for name in ('tests', 'mytests', 'testing', 'status', 'join', 'publicresults', 'submitcoa')
+            if _builtin_enabled(name)
+        ]
+    custom = TelegramCommandTemplate.query.filter_by(is_active=True).order_by(TelegramCommandTemplate.command.asc()).all()
+    entries = [{'command': name, 'description': descriptions[name]} for name in names]
+    for template in custom:
+        if include_groups and not template.allow_non_private:
+            continue
+        entries.append({
+            'command': template.command.lstrip('/'),
+            'description': (template.description or 'Custom command').strip() or 'Custom command',
+        })
+    return entries[:100]
+
+
+def _sync_telegram_command_menus():
+    results = []
+    for scope, group_scope in (('all_private_chats', False), ('all_group_chats', True)):
+        ok, response = set_telegram_commands(_telegram_command_menu_entries(group_scope), scope)
+        results.append((scope, ok, response))
+    return results
+
+
 def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None):
     if not _builtin_enabled('submitcoa'):
         return False
-    if str(chat_type or '').lower() == 'private':
+    chat_type = str(chat_type or '').strip().lower()
+    if chat_type == 'private':
         return True
+    if chat_type not in {'group', 'supergroup'}:
+        return False
     if str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() != 'true':
         return False
     allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_submitcoa_allowed_chat_ids', ''))
@@ -4236,10 +4325,11 @@ def bot_commands():
 def builtin_command_settings():
     form = BuiltinCommandConfigForm()
     if form.validate_on_submit():
+        testing_threads = _normalize_allowed_thread_ids(form.testing_allowed_thread_ids.data)
         allowed_threads = _normalize_allowed_thread_ids(form.publicresults_allowed_thread_ids.data)
         submit_threads = _normalize_allowed_thread_ids(form.submitcoa_allowed_thread_ids.data)
         review_thread = str(form.submitcoa_review_thread_id.data or '').strip()
-        if allowed_threads is None or submit_threads is None or (review_thread and not review_thread.lstrip('-').isdigit()):
+        if testing_threads is None or allowed_threads is None or submit_threads is None or (review_thread and not review_thread.lstrip('-').isdigit()):
             flash('Allowed thread IDs must be integers separated by commas.', 'danger')
             return render_template('admin/builtin_command_settings.html', form=form)
         _save_notification_config_values({
@@ -4247,6 +4337,10 @@ def builtin_command_settings():
             'builtin_mytests_enabled': 'true' if form.mytests_enabled.data else 'false',
             'builtin_status_enabled': 'true' if form.status_enabled.data else 'false',
             'builtin_join_enabled': 'true' if form.join_enabled.data else 'false',
+            'builtin_testing_enabled': 'true' if form.testing_enabled.data else 'false',
+            'builtin_testing_allow_non_private': 'true' if form.testing_allow_non_private.data else 'false',
+            'builtin_testing_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.testing_allowed_chat_ids.data)),
+            'builtin_testing_allowed_thread_ids': ','.join(testing_threads or []),
             'builtin_publicresults_enabled': 'true' if form.publicresults_enabled.data else 'false',
             'builtin_publicresults_allow_non_private': 'true' if form.publicresults_allow_non_private.data else 'false',
             'builtin_publicresults_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.publicresults_allowed_chat_ids.data)),
@@ -4259,6 +4353,7 @@ def builtin_command_settings():
             'telegram_coa_review_thread_id': review_thread,
         })
         db.session.commit()
+        _sync_telegram_command_menus()
         flash('Built-in command settings saved.', 'success')
         return redirect(url_for('main.builtin_command_settings'))
 
@@ -4267,6 +4362,10 @@ def builtin_command_settings():
         form.mytests_enabled.data = _builtin_enabled('mytests')
         form.status_enabled.data = _builtin_enabled('status')
         form.join_enabled.data = _builtin_enabled('join')
+        form.testing_enabled.data = _builtin_enabled('testing')
+        form.testing_allow_non_private.data = str(_builtin_config_value('builtin_testing_allow_non_private', 'false')).lower() == 'true'
+        form.testing_allowed_chat_ids.data = _builtin_config_value('builtin_testing_allowed_chat_ids', '')
+        form.testing_allowed_thread_ids.data = _builtin_config_value('builtin_testing_allowed_thread_ids', '')
         form.publicresults_enabled.data = _builtin_publicresults_enabled()
         form.publicresults_allow_non_private.data = str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true'
         form.publicresults_allowed_chat_ids.data = _builtin_config_value('builtin_publicresults_allowed_chat_ids', '')
@@ -4444,6 +4543,7 @@ def telegram_command_templates():
             return _render_telegram_command_templates_page(form)
         db.session.add(template)
         db.session.commit()
+        _sync_telegram_command_menus()
         flash('Telegram command template created.', 'success')
         return redirect(url_for('main.telegram_command_templates'))
 
@@ -4503,6 +4603,7 @@ def edit_telegram_command_template(template_id):
         template.allow_admin_bot_updates = bool(form.allow_admin_bot_updates.data)
         template.is_active = bool(form.is_active.data)
         db.session.commit()
+        _sync_telegram_command_menus()
         flash('Telegram command template updated.', 'success')
         return redirect(url_for('main.telegram_command_templates'))
 
@@ -4516,6 +4617,7 @@ def delete_telegram_command_template(template_id):
     template = TelegramCommandTemplate.query.get_or_404(template_id)
     db.session.delete(template)
     db.session.commit()
+    _sync_telegram_command_menus()
     flash('Telegram command template deleted.', 'success')
     return redirect(url_for('main.telegram_command_templates'))
 
@@ -4666,11 +4768,19 @@ def register_telegram_webhook_action():
         return redirect(url_for('main.telegram_config'))
 
     secret = str(configs.get('telegram_webhook_secret') or '').strip() or None
+    if secret and re.fullmatch(r'[A-Za-z0-9_-]{1,256}', secret) is None:
+        flash('Telegram webhook secret may contain only letters, numbers, underscores, and hyphens.', 'danger')
+        return redirect(url_for('main.telegram_config'))
     ok, response = register_telegram_webhook(webhook_url, secret_token=secret, drop_pending_updates=False)
     description = str((response or {}).get('description') or '')
     if ok:
         append_notification_log(f'telegram: webhook registered url={webhook_url}')
-        flash('Telegram webhook registered successfully.', 'success')
+        menu_results = _sync_telegram_command_menus()
+        failed_scopes = [scope for scope, menu_ok, _ in menu_results if not menu_ok]
+        if failed_scopes:
+            flash('Telegram webhook registered, but command menus could not be synchronized. Check the notification log.', 'warning')
+        else:
+            flash('Telegram webhook and command menus registered successfully.', 'success')
     else:
         append_notification_log(f'telegram: webhook registration failed url={webhook_url} detail={description}')
         if '404' in description and 'Not Found' in description:

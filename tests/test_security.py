@@ -815,7 +815,10 @@ class SecurityTests(unittest.TestCase):
     def test_telegram_webhook_testing_command_replies_in_group_with_signup_and_login_urls(self):
         with self.app.app_context():
             db.create_all()
-            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
+            db.session.add_all([
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+                NotificationConfig(key="builtin_testing_allow_non_private", value="true"),
+            ])
             db.session.commit()
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:
@@ -838,7 +841,10 @@ class SecurityTests(unittest.TestCase):
     def test_telegram_webhook_testing_command_replies_in_originating_message_thread(self):
         with self.app.app_context():
             db.create_all()
-            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
+            db.session.add_all([
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+                NotificationConfig(key="builtin_testing_allow_non_private", value="true"),
+            ])
             db.session.commit()
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:
@@ -860,7 +866,10 @@ class SecurityTests(unittest.TestCase):
     def test_telegram_webhook_testing_command_replies_in_channel_post(self):
         with self.app.app_context():
             db.create_all()
-            db.session.add(NotificationConfig(key="service_base_url", value="https://group-tests.example"))
+            db.session.add_all([
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+                NotificationConfig(key="builtin_testing_allow_non_private", value="true"),
+            ])
             db.session.commit()
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:
@@ -879,6 +888,93 @@ class SecurityTests(unittest.TestCase):
         sent_body = mock_send.call_args.args[1]
         self.assertIn("Sign up:", sent_body)
         self.assertIn("Log in:", sent_body)
+
+    def test_telegram_group_command_addressed_to_this_bot_is_processed(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_username", value="Group_Test_Tracker_Bot"),
+                NotificationConfig(key="builtin_testing_allow_non_private", value="true"),
+            ])
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post("/telegram/webhook", json={"message": {
+                "chat": {"id": -100333, "type": "supergroup"},
+                "text": "/testing@group_test_tracker_bot",
+            }})
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+
+    def test_telegram_group_command_addressed_to_another_bot_is_ignored(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_username", value="group_test_tracker_bot"),
+                NotificationConfig(key="builtin_testing_allow_non_private", value="true"),
+            ])
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post("/telegram/webhook", json={"message": {
+                "chat": {"id": -100333, "type": "supergroup"},
+                "text": "/testing@some_other_bot",
+            }})
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
+
+    def test_telegram_submitcoa_addressed_to_another_bot_does_not_prompt_unlinked_user(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_bot_username", value="group_test_tracker_bot"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post("/telegram/webhook", json={"message": {
+                "chat": {"id": -100333, "type": "supergroup"},
+                "from": {"id": 123},
+                "text": "/submitcoa@some_other_bot https://example.test/coa.pdf",
+            }})
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
+
+    def test_telegram_submitcoa_outside_allowed_group_does_not_prompt_unlinked_user(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add_all([
+                NotificationConfig(key="builtin_submitcoa_enabled", value="true"),
+                NotificationConfig(key="builtin_submitcoa_allow_non_private", value="true"),
+                NotificationConfig(key="builtin_submitcoa_allowed_chat_ids", value="-100777"),
+            ])
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post("/telegram/webhook", json={"message": {
+                "chat": {"id": -100333, "type": "supergroup"},
+                "from": {"id": 123},
+                "text": "/submitcoa https://example.test/coa.pdf",
+            }})
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
+
+    def test_telegram_edited_command_is_not_replayed(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="builtin_testing_allow_non_private", value="true"))
+            db.session.commit()
+
+        with patch("app.routes.send_telegram_chat_message") as mock_send:
+            response = self.client.post("/telegram/webhook", json={"edited_message": {
+                "chat": {"id": -100333, "type": "supergroup"},
+                "text": "/testing",
+            }})
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_not_called()
 
     def test_telegram_webhook_ignores_duplicate_update_id(self):
         with self.app.app_context():
@@ -2194,14 +2290,20 @@ class SecurityTests(unittest.TestCase):
             db.session.commit()
 
         self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
-        with patch("app.routes.register_telegram_webhook", return_value=(True, {"description": "Webhook was set"})) as mock_register:
+        with patch("app.routes.register_telegram_webhook", return_value=(True, {"description": "Webhook was set"})) as mock_register, \
+                patch("app.routes.set_telegram_commands", return_value=(True, {"ok": True})) as mock_commands:
             response = self.client.post("/admin/telegram-config/webhook/register", follow_redirects=True)
 
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
-        self.assertIn("Telegram webhook registered successfully.", body)
+        self.assertIn("Telegram webhook and command menus registered successfully.", body)
         self.assertTrue(mock_register.called)
         self.assertEqual(mock_register.call_args.args[0], "https://group-tests.example/telegram/webhook")
+        self.assertEqual(mock_commands.call_count, 2)
+        self.assertEqual(
+            {call.args[1] for call in mock_commands.call_args_list},
+            {"all_private_chats", "all_group_chats"},
+        )
 
     def test_register_telegram_webhook_requires_bot_token(self):
         with self.app.app_context():
@@ -2216,6 +2318,27 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Telegram bot token is required before webhook registration.", response.get_data(as_text=True))
+
+    def test_register_telegram_webhook_rejects_invalid_secret_characters(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.add_all([
+                NotificationConfig(key="telegram_bot_token", value="123456:ABC"),
+                NotificationConfig(key="service_base_url", value="https://group-tests.example"),
+                NotificationConfig(key="telegram_webhook_secret", value="invalid secret!"),
+            ])
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"}, follow_redirects=True)
+        with patch("app.routes.register_telegram_webhook") as mock_register:
+            response = self.client.post("/admin/telegram-config/webhook/register", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("may contain only letters, numbers, underscores, and hyphens", response.get_data(as_text=True))
+        mock_register.assert_not_called()
 
     def test_admin_can_unregister_telegram_webhook_from_config_page(self):
         with self.app.app_context():

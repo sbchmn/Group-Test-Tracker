@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
 from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
-from app.notifications import append_notification_log, read_notification_log, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message
+from app.notifications import append_notification_log, read_notification_log, register_telegram_webhook, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message, set_telegram_commands
 
 
 class NotificationTests(unittest.TestCase):
@@ -291,6 +291,73 @@ class NotificationTests(unittest.TestCase):
         request = mock_urlopen.call_args.args[0]
         self.assertIn("https://api.telegram.org/bot123456%3AABC/sendMessage", request.full_url)
         self.assertEqual(request.data, b'{"chat_id": "@demo", "text": "Body"}')
+
+    def test_set_telegram_commands_publishes_scoped_command_menu(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+
+                ok, _ = set_telegram_commands(
+                    [{"command": "/testing", "description": "Get testing links"}],
+                    "all_group_chats",
+                )
+
+        self.assertTrue(ok)
+        request = mock_urlopen.call_args.args[0]
+        self.assertIn("setMyCommands", request.full_url)
+        payload = json.loads(request.data)
+        self.assertEqual(payload["scope"], {"type": "all_group_chats"})
+        self.assertEqual(payload["commands"], [{"command": "testing", "description": "Get testing links"}])
+
+    def test_set_telegram_commands_normalizes_and_skips_invalid_entries(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+                ok, _ = set_telegram_commands([
+                    {"command": "/VALID_COMMAND", "description": "  Multiple\nspaces  "},
+                    {"command": "/bad-command", "description": "Skipped"},
+                    {"command": "/valid_command", "description": "Duplicate"},
+                ], "all_private_chats")
+
+        self.assertTrue(ok)
+        payload = json.loads(mock_urlopen.call_args.args[0].data)
+        self.assertEqual(payload["commands"], [
+            {"command": "valid_command", "description": "Multiple spaces"},
+        ])
+
+    def test_register_telegram_webhook_limits_update_types(self):
+        with self.app.app_context():
+            db.create_all()
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+            with patch("app.notifications.urlopen") as mock_urlopen:
+                response = Mock()
+                response.read.return_value = b'{"ok":true}'
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                mock_urlopen.return_value = response
+                ok, _ = register_telegram_webhook("https://example.test/telegram/webhook", "secret-123")
+
+        self.assertTrue(ok)
+        payload = json.loads(mock_urlopen.call_args.args[0].data)
+        self.assertEqual(payload["allowed_updates"], ["message", "channel_post", "callback_query"])
 
     def test_send_telegram_message_treats_failed_bot_api_response_as_failure(self):
         with self.app.app_context():

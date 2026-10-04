@@ -2329,6 +2329,45 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Telegram bot token is required before webhook registration.", response.get_data(as_text=True))
 
+    def test_admin_can_synchronize_telegram_menus_without_reregistering_webhook(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="menu-admin", email="menu-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.add(NotificationConfig(key="telegram_bot_token", value="123456:ABC"))
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "menu-admin", "password": "secret"}, follow_redirects=True)
+        with patch("app.routes.set_telegram_commands", return_value=(True, {"ok": True})) as mock_commands, \
+                patch("app.routes.register_telegram_webhook") as mock_register:
+            response = self.client.post("/admin/telegram-config/commands/sync", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Telegram command menus synchronized successfully.", response.get_data(as_text=True))
+        self.assertEqual(mock_commands.call_count, 2)
+        self.assertEqual(
+            {call.args[1] for call in mock_commands.call_args_list},
+            {"all_private_chats", "all_group_chats"},
+        )
+        mock_register.assert_not_called()
+
+    def test_synchronize_telegram_menus_requires_bot_token(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="menu-admin", email="menu-admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.commit()
+
+        self.client.post("/login", data={"username": "menu-admin", "password": "secret"}, follow_redirects=True)
+        with patch("app.routes.set_telegram_commands") as mock_commands:
+            response = self.client.post("/admin/telegram-config/commands/sync", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Telegram bot token is required before command menu synchronization.", response.get_data(as_text=True))
+        mock_commands.assert_not_called()
+
     def test_register_telegram_webhook_rejects_invalid_secret_characters(self):
         with self.app.app_context():
             db.create_all()

@@ -467,7 +467,7 @@ Deactivation behavior:
 - user /status approved reply
 - user /status pending reply
 7. Set service base URL (used for fully qualified links in templates and Telegram message links).
-8. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage bot webhook from the UI.
+8. Use Register Telegram Webhook / Unregister Telegram Webhook actions to manage the bot webhook from the UI. Registration also publishes the command menus. If messages and commands work but Telegram's `/` menu is missing or stale, use **Synchronize Menus**; menu state is stored by Telegram for each bot token and is not republished merely because a new application revision was deployed.
 9. Save.
 
 ### Telegram Command Templates
@@ -659,6 +659,7 @@ Check Admin -> Storage Config:
 3. Enable debug logging and inspect notification log in Admin -> Notification Config.
 4. For Telegram bot delivery, verify webhook registration status and that bot token includes full value (including colon separator).
 5. For Telegram status channel posts, verify status chat target format and optional thread suffix.
+6. If Telegram commands work when typed but the `/` menu is absent, open Telegram Config and use **Synchronize Menus**. A working webhook does not prove that `setMyCommands` has been called for the configured bot token and private/group scopes.
 
 ### Migration Errors
 

@@ -5278,6 +5278,29 @@ def register_telegram_webhook_action():
     return redirect(url_for('main.telegram_config'))
 
 
+@main_bp.route('/admin/telegram-config/commands/sync', methods=['POST'])
+@login_required
+@admin_required
+def synchronize_telegram_commands():
+    """Republish menus without changing an already-working webhook."""
+    configs = _config_values_map()
+    if not str(configs.get('telegram_bot_token') or '').strip():
+        flash('Telegram bot token is required before command menu synchronization.', 'danger')
+        return redirect(url_for('main.telegram_config'))
+
+    menu_results = _sync_telegram_command_menus()
+    failed_scopes = [scope for scope, menu_ok, _ in menu_results if not menu_ok]
+    if failed_scopes:
+        append_notification_log(
+            f"telegram: command menu synchronization failed scopes={','.join(failed_scopes)}"
+        )
+        flash('Telegram command menus could not be synchronized. Check the notification log.', 'warning')
+    else:
+        append_notification_log('telegram: command menus synchronized')
+        flash('Telegram command menus synchronized successfully.', 'success')
+    return redirect(url_for('main.telegram_config'))
+
+
 @main_bp.route('/admin/telegram-config/webhook/unregister', methods=['POST'])
 @login_required
 @admin_required

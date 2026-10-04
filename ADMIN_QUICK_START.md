@@ -38,7 +38,7 @@ DATABASE_URL=sqlite:///group_tests.db
 3. Set status chat target and digest mode/window.
 4. Optionally set webhook URL override, webhook secret, and allowed source IP CIDRs.
 5. Set Service Base URL for links in templates.
-6. Use Register Telegram Webhook to publish webhook settings to Telegram.
+6. Use Register Telegram Webhook to publish webhook settings and scoped command menus to Telegram. If the webhook already works but the `/` menu is absent or stale, use **Synchronize Menus** without replacing the webhook.
 7. Save.
 
 1. Open Admin -> Manage Templates.

@@ -113,7 +113,7 @@
         <hr>
         <div>
             <div class="fw-semibold mb-1">Telegram Webhook Actions</div>
-            <div class="small text-muted mb-1">Save configuration first, then register the webhook. Registration also publishes the private and group slash-command menus shown by Telegram when a user types <code>/</code>.</div>
+            <div class="small text-muted mb-1">Save configuration first, then register the webhook. Registration also publishes the private and group slash-command menus shown by Telegram when a user types <code>/</code>. If the webhook already works but menus are missing or stale after a deployment, synchronize the menus without replacing the webhook.</div>
             <div class="small text-muted mb-2">Effective webhook URL: {{ effective_telegram_webhook_url }}</div>
             <div class="d-flex flex-wrap gap-2 mb-3">
                 <form method="POST" action="{{ url_for('main.register_telegram_webhook_action') }}">
@@ -123,6 +123,10 @@
                 <form method="POST" action="{{ url_for('main.unregister_telegram_webhook_action') }}" onsubmit="return confirm('Unregister Telegram webhook?');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-outline-danger">Unregister Webhook</button>
+                </form>
+                <form method="POST" action="{{ url_for('main.synchronize_telegram_commands') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-secondary">Synchronize Menus</button>
                 </form>
             </div>
 

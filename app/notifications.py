@@ -885,7 +885,7 @@ def _telegram_api_post(method_name, payload):
     )
 
     try:
-        with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
+        with urlopen(request, context=None, timeout=10) as response:
             response_body = response.read().decode("utf-8", errors="replace")
         parsed_response = json.loads(response_body) if response_body else {}
         ok = isinstance(parsed_response, dict) and parsed_response.get("ok") is True
@@ -910,6 +910,9 @@ def register_telegram_webhook(webhook_url, secret_token=None, drop_pending_updat
     payload = {
         "url": str(webhook_url or "").strip(),
         "drop_pending_updates": bool(drop_pending_updates),
+        # Subscribe only to update types handled by the application. In
+        # particular, edited messages must not replay state-changing commands.
+        "allowed_updates": ["message", "channel_post", "callback_query"],
     }
     secret_value = str(secret_token or "").strip()
     if secret_value:
@@ -920,6 +923,37 @@ def register_telegram_webhook(webhook_url, secret_token=None, drop_pending_updat
 def unregister_telegram_webhook(drop_pending_updates=False):
     payload = {"drop_pending_updates": bool(drop_pending_updates)}
     return _telegram_api_post("deleteWebhook", payload)
+
+
+def set_telegram_commands(commands, scope_type):
+    """Publish Telegram's slash-command menu for one BotCommandScope."""
+    allowed_scopes = {"all_private_chats", "all_group_chats"}
+    if scope_type not in allowed_scopes:
+        return False, {"description": "Unsupported Telegram command scope."}
+
+    normalized_commands = []
+    seen = set()
+    for item in commands:
+        command = str(item.get("command") or "").strip().lstrip("/").lower()
+        description = " ".join(str(item.get("description") or "Command").split())
+        if not re.fullmatch(r"[a-z0-9_]{1,32}", command):
+            append_notification_log(f"telegram: setMyCommands skipped invalid command {command!r}")
+            continue
+        if command in seen:
+            continue
+        seen.add(command)
+        normalized_commands.append({
+            "command": command,
+            "description": (description or "Command")[:256],
+        })
+        if len(normalized_commands) == 100:
+            break
+
+    payload = {
+        "commands": normalized_commands,
+        "scope": {"type": str(scope_type)},
+    }
+    return _telegram_api_post("setMyCommands", payload)
 
 
 def send_password_reset(user, new_password):

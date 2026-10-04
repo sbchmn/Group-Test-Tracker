@@ -26,6 +26,7 @@
         Approved: <strong>{{ participations|selectattr('approved')|list|length }}</strong>
         | Pending: <strong>{{ participations|rejectattr('approved')|rejectattr('denied')|list|length }}</strong>
         | Denied: <strong>{{ participations|selectattr('denied')|list|length }}</strong>
+        | Payment reports: <strong>{{ participations|selectattr('payment_claim_pending')|list|length }}</strong>
         | Donors: <strong>{{ test.num_donors }}</strong>
     </span>
 </div>
@@ -74,7 +75,15 @@
                         {% endif %}
                     </td>
                     <td><span class="badge bg-light text-dark">{{ p.order_status }}</span></td>
-                    <td>{% if p.paid_lab %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle text-muted"></i>{% endif %}</td>
+                    <td>
+                        {% if p.paid_lab %}
+                            <i class="bi bi-check-circle-fill text-success"></i> <span class="badge text-bg-success">Paid • verified</span>
+                        {% elif p.payment_claimed_at %}
+                            <span class="badge text-bg-info">Payment reported {{ p.payment_claimed_at.strftime('%m/%d') }} • review</span>
+                        {% else %}
+                            <i class="bi bi-x-circle text-muted"></i>
+                        {% endif %}
+                    </td>
                     <td class="small">
                         ${{ '%.2f'|format(p.amount_owed) }}<br>
                         <small class="text-muted">Paid: ${{ '%.2f'|format(p.amount_paid) }}</small>
@@ -100,6 +109,33 @@
                             <form method="POST" action="{{ url_for('main.reopen_participant_from_manage', test_id=test.id, part_id=p.id) }}" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-sm btn-outline-secondary ms-1">Reopen</button>
+                            </form>
+                        {% endif %}
+
+                        {% if p.approved and not p.denied %}
+                            {% if p.paid_lab %}
+                                <form method="POST" action="{{ url_for('main.unmark_participant_payment', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Unmark this participant as paid? They will lose paid access to the results.')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="manage_test_id" value="{{ test.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary ms-3"><i class="bi bi-cash"></i> Unmark Paid</button>
+                                </form>
+                            {% else %}
+                                <form method="POST" action="{{ url_for('main.confirm_participant_payment', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('{% if p.payment_claimed_at %}Confirm this reported payment and mark lab fees as paid?{% else %}Mark lab fees as paid for this participant?{% endif %}')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="manage_test_id" value="{{ test.id }}">
+                                    <button type="submit" class="btn btn-sm btn-success ms-3"><i class="bi bi-cash-coin"></i> {% if p.payment_claimed_at %}Confirm Payment{% else %}Mark Paid{% endif %}</button>
+                                </form>
+                                {% if p.payment_claimed_at %}
+                                    <form method="POST" action="{{ url_for('main.reject_participant_payment_claim', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Reject this payment report? The participant can report payment again.')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="manage_test_id" value="{{ test.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-info ms-1">Reject Payment Report</button>
+                                    </form>
+                                {% endif %}
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('main.unapprove_participant_from_manage', test_id=test.id, part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Remove approval for this participant? They would need to be approved again to participate.')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-dark ms-1"><i class="bi bi-person-dash"></i> Unapprove</button>
                             </form>
                         {% endif %}
 

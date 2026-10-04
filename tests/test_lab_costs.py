@@ -175,7 +175,7 @@ class LabCostTests(unittest.TestCase):
                 "total_lab_cost": "100",
                 "shipping_cost": "20",
                 "refund_per_donor": "0",
-                "tag_names": "Shed GB#3, tirz",
+                "tag_text": "Shed GB#3, tirz",
                 "lab_item_name": ["MASS"],
                 "lab_item_price": ["100"],
                 "lab_item_vials": ["1"],

@@ -13,7 +13,7 @@
             {% for item in result.item_results %}<dt class="col-sm-4">{{ item.name }}</dt><dd class="col-sm-8">{{ item.result or '' }}</dd>{% endfor %}
         </dl>
         {% endif %}
-        {% if result.results_link %}<a class="btn btn-primary" href="{{ result.results_link }}" rel="noopener noreferrer">Open Source</a>{% endif %}
+        {% if result.results_link | http_link %}<a class="btn btn-primary" href="{{ result.results_link | http_link }}" rel="noopener noreferrer">Open Source</a>{% endif %}
     </div>
 </div>
 {% if result.results_image_key %}

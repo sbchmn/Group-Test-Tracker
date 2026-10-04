@@ -21,7 +21,7 @@ from datetime import datetime, date
 from datetime import timedelta, timezone
 from functools import wraps
 from itertools import zip_longest
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 import secrets
@@ -45,15 +45,16 @@ from .models import (
     Tag,
     PublicResult,
     DashboardHiddenGroupTest,
-    TelegramLinkToken,
-    DiscordLinkToken,
     TelegramWebhookUpdate,
     TelegramStatusDigestEvent,
     UserDigestEvent,
     PaymentOption,
     ResultAnalysisRun,
+    group_test_tags,
+    public_result_tags,
 )
 from .system_accounts import is_reserved_identity
+from .links import safe_http_url, validate_http_link
 from .saas import (
     entitlement_revision,
     entitlement_enabled,
@@ -74,7 +75,11 @@ from .notifications import (
     send_password_reset,
     send_group_test_notification,
     render_notification_template,
+    select_template_body,
+    template_bodies,
     send_notification_message,
+    send_root_message,
+    send_root_status_channel_message,
     send_telegram_status_channel_message,
     send_discord_status_channel_message,
     send_telegram_chat_message,
@@ -89,6 +94,18 @@ from .notifications import (
     download_telegram_photo,
     normalize_telegram_thread_id,
 )
+from .bot_channels import (
+    available_notification_channel_choices,
+    channel_available,
+    channel_link_available,
+    chat_channels,
+    configured_status,
+    entitlement_for,
+    is_configured,
+    notification_channel_choices,
+)
+from .bot_identity import active_link_token, claim_link_token, issue_link_token
+from .root_bridge import generate_bridge_key_id, generate_bridge_secret
 from .public_results_bot import public_result_tag_page, public_results_for_tag_page
 from .storage import (
     StorageConfigurationError,
@@ -228,9 +245,9 @@ class GroupTestForm(FlaskForm):
     quote_number = StringField('Quote Number', validators=[Optional()])
     
     # results_link only relevant when closed; shown in template conditionally
-    results_link = StringField('Results Link (URL - shown only to approved members when Closed)', 
-                               validators=[Optional(), Length(max=500)])
-    tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    results_link = StringField('Results Link (URL - shown only to approved members when Closed)',
+                               validators=[Optional(), Length(max=500), validate_http_link])
+    tag_text = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     payment_option_ids = SelectMultipleField('Available Payment Options', coerce=int, choices=[], validators=[Optional()])
     
     submit = SubmitField('Save Group Test')
@@ -239,8 +256,8 @@ class GroupTestForm(FlaskForm):
 class PublicResultForm(FlaskForm):
     title = StringField('Result Title', validators=[DataRequired(), Length(max=200)])
     summary = TextAreaField('Summary / Notes', validators=[Optional()])
-    results_link = StringField('Results Link (optional when a file is uploaded)', validators=[Optional(), Length(max=500)])
-    tag_names = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    results_link = StringField('Results Link (optional when a file is uploaded)', validators=[Optional(), Length(max=500), validate_http_link])
+    tag_text = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
     submit = SubmitField('Save Public Result')
 
 
@@ -311,7 +328,7 @@ class ParticipantStatusForm(FlaskForm):
         ('received_from_vendor', 'Received from Vendor'),
         ('ready_to_ship', 'Ready to Ship to Lab')
     ])
-    paid_lab = BooleanField('I have paid my lab fees')
+    payment_claim = BooleanField('I have paid my lab fees (submits for administrator verification)')
     amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
     preferred_payment_option_id = SelectField('Preferred Payment Method', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes / Comments', validators=[Optional()])
@@ -327,7 +344,7 @@ class UserForm(FlaskForm):
     is_admin = BooleanField('Administrator')
     is_active = BooleanField('Active', default=True)
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
@@ -342,11 +359,12 @@ class ProfileForm(FlaskForm):
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
     discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
     digest_hourly_minute_utc = FloatField('Digest Minute (UTC, hourly mode)', validators=[Optional(), NumberRange(min=0, max=59)], default=0)
     digest_daily_hour_utc = FloatField('Digest Hour (UTC, daily mode)', validators=[Optional(), NumberRange(min=0, max=23)], default=9)
     password = PasswordField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
+    current_password = PasswordField('Confirm with your current password', validators=[Optional(), Length(max=200)])
     submit = SubmitField('Save Profile')
 
 
@@ -356,9 +374,12 @@ class NotificationTemplateForm(FlaskForm):
     email_subject = StringField('Email Subject', validators=[Optional(), Length(max=200)])
     email_body = TextAreaField('Email Message (HTML)', validators=[Optional()])
     telegram_body = TextAreaField('Telegram Message', validators=[Optional()])
+    discord_body = TextAreaField('Discord Message', validators=[Optional()])
+    root_body = TextAreaField('Root Message', validators=[Optional()])
     hide_from_participant_notifications = BooleanField('Hide from "Notify Test Participants"')
     is_default_password_reset = BooleanField('Default Password Reset Template')
     is_default_registration_welcome = BooleanField('Default Registration Welcome Template')
+    is_default_payment_review = BooleanField('Default Payment Review Request Template')
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Template')
 
@@ -387,8 +408,10 @@ class BotIntegrationsForm(FlaskForm):
     discord_status_channel_id = StringField('Discord Status Channel ID', validators=[Optional(), Length(max=120)])
     discord_webhook_url = StringField('Discord Webhook URL', validators=[Optional(), URL(require_tld=False), Length(max=500)])
     discord_webhook_username = StringField('Discord Display Name', validators=[Optional(), Length(max=80)])
-    root_webhook_url = StringField('Root Webhook URL', validators=[Optional(), URL(require_tld=False), Length(max=500)])
-    root_webhook_name = StringField('Root Display Name', validators=[Optional(), Length(max=80)])
+    root_community_id = StringField('Root Community ID', validators=[Optional(), Length(max=120)])
+    root_status_channel_id = StringField('Root Status Channel ID', validators=[Optional(), Length(max=120)])
+    root_bridge_key_id = StringField('Root Bridge Key ID', validators=[Optional(), Length(max=80)])
+    root_bridge_secret = StringField('Root Bridge Secret', validators=[Optional(), Length(max=128)])
     submit = SubmitField('Save Bot Integrations')
 
 
@@ -523,7 +546,12 @@ class PaymentOptionForm(FlaskForm):
 
 class PasswordResetForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
-    notification_channel = SelectField('Notify via', choices=[('email', 'Email'), ('telegram', 'Telegram'), ('discord', 'Discord')], default='email')
+    # validate_choice is off here on purpose. Narrowed choices are for display only,
+    # and rejecting a submitted channel would turn "that transport is unavailable"
+    # into a visibly different response, breaking the uniform reset reply. The view
+    # decides transport; profile and admin forms keep strict validation because there
+    # the value is persisted.
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email', validate_choice=False)
     submit = SubmitField('Send Reset')
 
 
@@ -746,7 +774,7 @@ def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
     document = message.get('document') or {}
     photos = message.get('photo') or []
     attachment = document or (photos[-1] if photos else {})
-    link = argument if argument.startswith(('https://', 'http://')) else None
+    link = safe_http_url(argument)
     if not attachment and not link:
         send_telegram_chat_message(
             chat_id, 'Attach a PDF/image or provide a public HTTP/HTTPS COA link after /submitcoa.',
@@ -792,34 +820,6 @@ def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
         result.review_state_json = state
         db.session.commit()
     return True
-
-
-def _issue_telegram_link_token(user):
-    if user is None:
-        return None
-
-    token_value = secrets.token_urlsafe(24)
-    token = TelegramLinkToken(
-        user_id=user.id,
-        token=token_value,
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-    db.session.add(token)
-    return token
-
-
-def _issue_discord_link_token(user):
-    if user is None:
-        return None
-
-    token_value = secrets.token_urlsafe(24)
-    token = DiscordLinkToken(
-        user_id=user.id,
-        token=token_value,
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-    db.session.add(token)
-    return token
 
 
 def _is_telegram_webhook_ip_allowed(source_ip, config_map):
@@ -1041,20 +1041,45 @@ def _send_status_update_to_telegram(test, previous_status):
 
     digest_text = "\n".join(lines)
     action_buttons = _status_channel_action_buttons(pending_events, config_map)
+    telegram_expected = bool(str(config_map.get('telegram_status_chat_id') or '').strip())
     sent = send_telegram_status_channel_message(digest_text, parse_mode='HTML', buttons=action_buttons)
-    send_discord_status_channel_message(digest_text, buttons=action_buttons)
-    if sent:
+    # Root renders no markup and no buttons; send_root_message flattens the digest to
+    # text and send_root_status_channel_message appends the button targets as links.
+    discord_sent = send_discord_status_channel_message(digest_text, buttons=action_buttons)
+    root_sent = send_root_status_channel_message(digest_text, buttons=action_buttons)
+    # sent_at is one flag shared by three transports, so it only advances when the
+    # transports that actually apply have delivered. A provider the tenant never
+    # configured returns False and must not hold the queue open forever -- that would
+    # re-broadcast the same events on every digest cycle -- while a configured Telegram
+    # that failed still defers the queue exactly as it always has.
+    if (sent if telegram_expected else (discord_sent or root_sent)):
         sent_at = datetime.utcnow()
         for item in pending_events:
             item.sent_at = sent_at
         db.session.add_all(pending_events)
 
 
+def _notify_status_change_after_commit(test, previous_status):
+    """Dispatch status-change notifications after the domain edit is committed.
+
+    Digest/dedup rows created during dispatch persist via a follow-up commit;
+    a transport failure must never roll back the already-saved edit.
+    """
+    if previous_status == test.status:
+        return
+    try:
+        _send_status_update_to_telegram(test, previous_status)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        append_notification_log(
+            f'telegram: exception sending status update for test {test.id}: {exc}'
+        )
+
+
 def _send_new_test_created_to_telegram(test, test_url=None):
     config_map = _config_values_map()
     target_chat = str(config_map.get('telegram_status_chat_id') or '').strip()
-    if not target_chat:
-        return
 
     message_text = _render_telegram_status_template(
         config_map,
@@ -1070,9 +1095,12 @@ def _send_new_test_created_to_telegram(test, test_url=None):
         },
     )
 
-    sent = send_telegram_status_channel_message(message_text)
+    # Each transport checks its own configuration, so an absent Telegram chat must not
+    # suppress the Discord and Root broadcasts for tenants that use those instead.
+    sent = send_telegram_status_channel_message(message_text) if target_chat else False
     send_discord_status_channel_message(message_text)
-    if not sent:
+    send_root_status_channel_message(message_text)
+    if target_chat and not sent:
         append_notification_log(f'telegram: failed to send new test created message for test {test.id}')
 
 
@@ -1181,6 +1209,32 @@ def parse_tag_names(tag_text):
     return tags
 
 
+def _resolve_tag(tag):
+    """Follow merge pointers to the tag that actually survived."""
+    seen = set()
+    current = tag
+    while current is not None and current.merged_into_id is not None:
+        if current.id in seen:
+            break
+        seen.add(current.id)
+        parent = db.session.get(Tag, current.merged_into_id)
+        if parent is None:
+            break
+        current = parent
+    return current
+
+
+def _dedupe_tags(tags):
+    unique = []
+    seen = set()
+    for tag in tags:
+        if tag is None or tag.id in seen:
+            continue
+        seen.add(tag.id)
+        unique.append(tag)
+    return unique
+
+
 def get_or_create_tags(tag_text):
     tags = []
     for name in parse_tag_names(tag_text):
@@ -1190,8 +1244,19 @@ def get_or_create_tags(tag_text):
             tag = Tag(name=name, normalized_name=normalized)
             db.session.add(tag)
             db.session.flush()
+        elif tag.merged_into_id is not None:
+            # Someone re-typed a spelling that was merged away, so land on the tag
+            # that survived instead of resurrecting the duplicate. If that survivor
+            # was retired in the meantime, using it again is the signal to bring it
+            # back — otherwise a record ends up tagged with an unpickable spelling.
+            tag = _resolve_tag(tag)
+            if not tag.is_active:
+                tag.is_active = True
+        elif not tag.is_active:
+            # Deliberately reusing retired vocabulary brings it back into the picker.
+            tag.is_active = True
         tags.append(tag)
-    return tags
+    return _dedupe_tags(tags)
 
 
 def apply_tags_to_record(record, tag_text):
@@ -1199,7 +1264,123 @@ def apply_tags_to_record(record, tag_text):
 
 
 def get_all_tag_names():
-    return [tag.name for tag in Tag.query.order_by(Tag.name).all()]
+    """Retired and merged-away spellings stay out of the picker, but public pages and
+    bot callbacks address tags by id, so retiring never hides already-tagged content."""
+    return [
+        tag.name
+        for tag in Tag.query.filter(
+            Tag.is_active.is_(True),
+            Tag.merged_into_id.is_(None),
+        ).order_by(Tag.name).all()
+    ]
+
+
+# (association table, owning column, usage counter name)
+_TAG_LINKS = (
+    (group_test_tags, 'group_test_id', 'tests'),
+    (public_result_tags, 'public_result_id', 'results'),
+)
+
+
+def _tag_record_ids(link_table, owner_column, tag_id):
+    return {
+        row[0]
+        for row in db.session.execute(
+            select(link_table.c[owner_column]).where(link_table.c.tag_id == tag_id)
+        )
+    }
+
+
+def _tag_usage(tag_ids):
+    """tag id -> usage counts, in two queries rather than one per tag."""
+    wanted = set(tag_ids)
+    usage = {tag_id: {'tests': 0, 'results': 0} for tag_id in wanted}
+    if not wanted:
+        return usage
+    for link_table, owner_column, counter in _TAG_LINKS:
+        rows = db.session.execute(select(link_table.c.tag_id, link_table.c[owner_column]))
+        for tag_id, _owner_id in rows:
+            if tag_id in wanted:
+                usage[tag_id][counter] += 1
+    return usage
+
+
+def _levenshtein_distance(left, right):
+    if abs(len(left) - len(right)) > 2:
+        return 3
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        for j, right_char in enumerate(right):
+            current.append(min(
+                previous[j + 1] + 1,
+                current[j] + 1,
+                previous[j] + (0 if left_char == right_char else 1),
+            ))
+        previous = current
+    return previous[-1]
+
+
+def _duplicate_tag_pairs(tags):
+    """Candidate merge pairs for an admin: shared stem or a two-character edit apart.
+
+    Buckets on the first three characters so this stays quadratic only inside a
+    bucket. It only *suggests*; deciding whether two tags mean the same thing is
+    the admin's call, so there is no automatic data cleanup here.
+    """
+    buckets = {}
+    for tag in tags:
+        slug = re.sub(r'[^a-z0-9]', '', tag.name.lower())
+        if len(slug) < 3:
+            continue
+        buckets.setdefault(slug[:3], []).append(tag)
+
+    pairs = []
+    for bucket in buckets.values():
+        if len(bucket) < 2 or len(bucket) > 40:
+            continue
+        for index, left in enumerate(bucket):
+            for right in bucket[index + 1:]:
+                left_name = left.name.lower().strip()
+                right_name = right.name.lower().strip()
+                distance = _levenshtein_distance(left_name, right_name)
+                shares_stem = left_name.startswith(right_name) or right_name.startswith(left_name)
+                if distance <= 2 or shares_stem:
+                    pairs.append({'left': left, 'right': right, 'distance': distance})
+    pairs.sort(key=lambda pair: (pair['distance'], pair['left'].name.lower(), pair['right'].name.lower()))
+    return pairs
+
+
+def _merge_tag_links(source_id, target_id):
+    """Re-point links from source to target, dropping the ones target already has.
+
+    The association tables have composite primary keys, so a record tagged with both
+    source and target would collide on a plain update.
+    """
+    moved = {}
+    for link_table, owner_column, counter in _TAG_LINKS:
+        source_rows = _tag_record_ids(link_table, owner_column, source_id)
+        target_rows = _tag_record_ids(link_table, owner_column, target_id)
+        overlap = source_rows & target_rows
+        if overlap:
+            db.session.execute(
+                delete(link_table).where(
+                    link_table.c.tag_id == source_id,
+                    link_table.c[owner_column].in_(overlap),
+                )
+            )
+        remaining = source_rows - overlap
+        if remaining:
+            db.session.execute(
+                update(link_table)
+                .where(
+                    link_table.c.tag_id == source_id,
+                    link_table.c[owner_column].in_(remaining),
+                )
+                .values(tag_id=target_id)
+            )
+        moved[counter] = len(remaining)
+    return moved
 
 
 def parse_item_results(names, results):
@@ -1346,16 +1527,40 @@ def logout():
     return redirect(url_for('main.index'))
 
 
+def _apply_available_channels(form, current=None):
+    """Narrow a form's "Notify via" options to channels that can actually deliver.
+
+    Must run before validation: SelectField checks the submitted value against
+    ``choices``, so an un-gated form would accept a provider the tenant cannot use.
+    """
+    form.notification_channel.choices = available_notification_channel_choices(
+        _config_values_map(), current=current)
+
+
+def _require_link_channel(channel):
+    """Whether a member may mint a link token for this channel here.
+
+    The profile hides the button, but the POST is the actual boundary: minting a token
+    for an integration that is not configured produces a link nobody can redeem and a
+    token sitting in the database until it expires.
+    """
+    if channel_link_available(channel, _config_values_map()):
+        return True
+    flash('That messaging integration is not configured on this instance.', 'danger')
+    return False
+
+
 @main_bp.route('/password-reset', methods=['GET', 'POST'])
 @limiter.limit('3 per hour', methods=['POST'])
 def password_reset():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     form = PasswordResetForm()
+    _apply_available_channels(form)
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
         reset_sent = False
-        if user and not user.is_reserved_support_account:
+        if user and not user.is_reserved_support_account and user.is_active:
             selected_channel = form.notification_channel.data or user.notification_channel or 'email'
             channel_available = not (
                 selected_channel == 'telegram' and not (user.telegram_chat_id or '').strip()
@@ -1400,10 +1605,24 @@ def send_password_reset_admin(user_id):
 def profile():
     """Allow users to update their own profile info and password."""
     form = ProfileForm(obj=current_user)
+    _apply_available_channels(form, current=current_user.notification_channel)
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
     if form.validate_on_submit():
+        changing_email = form.email.data != current_user.email
+        changing_password = bool(form.password.data)
+
+        if (changing_email or changing_password) and not current_user.check_password(
+            form.current_password.data or ''
+        ):
+            flash('Your current password is required to change your email or password.', 'danger')
+            return render_template('profile.html', form=form)
+
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'danger')
+            return render_template('profile.html', form=form)
+
         existing_username = User.query.filter(User.username == form.username.data, User.id != current_user.id).first()
         existing_email = User.query.filter(User.email == form.email.data, User.id != current_user.id).first()
 
@@ -1424,43 +1643,59 @@ def profile():
         current_user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
         current_user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
 
-        if form.password.data:
+        if changing_password:
             current_user.set_password(form.password.data)
+            # get_id() embeds session_epoch, so rotating it drops every other live
+            # session — including the one that may have been used to change the password.
+            current_user.session_epoch += 1
             flash('Password updated.', 'success')
 
         db.session.commit()
+        if changing_password:
+            # The epoch rotation already killed other sessions; end this one cleanly
+            # rather than depending on the stale cookie being rejected downstream.
+            logout_user()
+            flash('Profile updated. Please sign in again.', 'success')
+            return redirect(url_for('main.login'))
         flash('Profile updated.', 'success')
         return redirect(url_for('main.profile'))
 
-    active_token = (
-        current_user.telegram_link_tokens
-        .filter(TelegramLinkToken.used_at.is_(None), TelegramLinkToken.expires_at >= datetime.utcnow())
-        .order_by(TelegramLinkToken.created_at.desc())
-        .first()
-    )
-    telegram_link_token = active_token.token if active_token else None
+    # A bot link section is only offered when the member could actually complete the
+    # link on this instance, so the profile never mints a token nobody can redeem.
+    link_configs = _config_values_map()
+    telegram_enabled = channel_link_available('telegram', link_configs)
+    discord_enabled = channel_link_available('discord', link_configs)
+    root_enabled = channel_link_available('root', link_configs)
+
+    telegram_active_token = active_link_token('telegram', current_user) if telegram_enabled else None
+    telegram_link_token = telegram_active_token.token if telegram_active_token else None
     telegram_link_url = _build_telegram_deep_link(telegram_link_token) if telegram_link_token else None
     telegram_start_command = f"/start {telegram_link_token}" if telegram_link_token else None
 
-    discord_active_token = (
-        current_user.discord_link_tokens
-        .filter(DiscordLinkToken.used_at.is_(None), DiscordLinkToken.expires_at >= datetime.utcnow())
-        .order_by(DiscordLinkToken.created_at.desc())
-        .first()
-    )
+    discord_active_token = active_link_token('discord', current_user) if discord_enabled else None
     discord_link_token = discord_active_token.token if discord_active_token else None
     discord_start_command = f"/start {discord_link_token}" if discord_link_token else None
+
+    root_active_token = active_link_token('root', current_user) if root_enabled else None
+    root_link_token = root_active_token.token if root_active_token else None
+    root_start_command = f"/start {root_link_token}" if root_link_token else None
 
     return render_template(
         'profile.html',
         form=form,
+        telegram_enabled=telegram_enabled,
         telegram_link_url=telegram_link_url,
         telegram_link_token=telegram_link_token,
         telegram_start_command=telegram_start_command,
         telegram_chat_id=current_user.telegram_chat_id,
+        discord_enabled=discord_enabled,
         discord_link_token=discord_link_token,
         discord_start_command=discord_start_command,
         discord_user_id=current_user.discord_user_id,
+        root_enabled=root_enabled,
+        root_link_token=root_link_token,
+        root_start_command=root_start_command,
+        root_user_id=current_user.root_user_id,
     )
 
 
@@ -1470,7 +1705,9 @@ def create_telegram_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
-    token = _issue_telegram_link_token(current_user)
+    if not _require_link_channel('telegram'):
+        return redirect(url_for('main.profile'))
+    token = issue_link_token('telegram', current_user)
     db.session.commit()
 
     deep_link = _build_telegram_deep_link(token.token)
@@ -1488,7 +1725,9 @@ def create_discord_link_token():
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.dashboard'))
-    token = _issue_discord_link_token(current_user)
+    if not _require_link_channel('discord'):
+        return redirect(url_for('main.profile'))
+    token = issue_link_token('discord', current_user)
     db.session.commit()
 
     if token is None:
@@ -1496,6 +1735,26 @@ def create_discord_link_token():
     else:
         flash('Discord link token generated.', 'success')
 
+    return redirect(url_for('main.profile'))
+
+
+@main_bp.route('/profile/root-link-token', methods=['POST'])
+@login_required
+def create_root_link_token():
+    if current_user.is_reserved_support_account:
+        flash('This is a managed support account and cannot be edited here.', 'danger')
+        return redirect(url_for('main.dashboard'))
+    if not _require_link_channel('root'):
+        return redirect(url_for('main.profile'))
+    token = issue_link_token('root', current_user)
+    if token is None:
+        flash('Could not create Root link token.', 'danger')
+        return redirect(url_for('main.profile'))
+    db.session.commit()
+
+    # Root has no bot-to-user DM, so unlike Telegram there is no deep link to press:
+    # the member posts the command themselves into a Root channel the bridge reads.
+    flash('Root link token generated. Post the /start command shown below in your Root channel.', 'success')
     return redirect(url_for('main.profile'))
 
 
@@ -2159,6 +2418,7 @@ def _process_telegram_admin_command_update(message, chat_id, telegram_user_id, m
     admin_user = User.query.filter_by(
         telegram_user_id=str(telegram_user_id),
         is_admin=True,
+        is_active=True,
     ).first()
     if admin_user is None:
         return False
@@ -2628,25 +2888,26 @@ def telegram_webhook():
             db.session.commit()
             return jsonify({'ok': True})
 
-        token = TelegramLinkToken.query.filter_by(token=token_value).first()
-        if token is None or token.used_at is not None or token.expires_at < datetime.utcnow():
-            send_telegram_chat_message(chat_id, 'This link token is invalid or expired. Please generate a new link token from your profile.')
+        linked_account, claim_reason = claim_link_token(
+            'telegram',
+            token_value,
+            external_id=telegram_user_id,
+            chat_id=chat_id,
+            username=incoming_username,
+        )
+        if claim_reason != 'ok':
+            refusal_messages = {
+                'inactive-user': 'This account is deactivated. Contact an administrator for account support.',
+                'external-owned': 'This Telegram account is already linked to a different user. Contact an admin for relink support.',
+                'user-owned': 'This account is already linked to a different Telegram user. Contact an admin for relink support.',
+            }
+            send_telegram_chat_message(
+                chat_id,
+                refusal_messages.get(claim_reason, 'This link token is invalid or expired. Please generate a new link token from your profile.'),
+            )
             db.session.commit()
             return jsonify({'ok': True})
 
-        if telegram_user_id:
-            existing_owner = User.query.filter_by(telegram_user_id=telegram_user_id).first()
-            if existing_owner is not None and existing_owner.id != token.user_id:
-                send_telegram_chat_message(chat_id, 'This Telegram account is already linked to a different user. Contact an admin for relink support.')
-                db.session.commit()
-                return jsonify({'ok': True})
-
-        token.user.telegram_chat_id = chat_id
-        if telegram_user_id:
-            token.user.telegram_user_id = telegram_user_id
-        if incoming_username:
-            token.user.tg_username = incoming_username
-        token.used_at = datetime.utcnow()
         db.session.commit()
         send_telegram_chat_message(chat_id, 'Your Telegram account is now linked. Use /help to see available commands.')
         return jsonify({'ok': True})
@@ -2658,6 +2919,11 @@ def telegram_webhook():
         linked_user = User.query.filter_by(telegram_chat_id=chat_id).first()
     if linked_user is None:
         send_telegram_chat_message(chat_id, 'Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.')
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    if not linked_user.is_active:
+        send_telegram_chat_message(chat_id, 'This account is deactivated. Contact an administrator for account support.')
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -3025,10 +3291,38 @@ def my_results():
     )
 
 
+def _notify_payment_claim(test, part):
+    """Alert active administrators that a participant reported a lab-fee payment."""
+    template = NotificationTemplate.query.filter_by(is_default_payment_review=True, is_active=True).first()
+    base_url = _resolve_service_base_url(_config_values_map())
+    context = {
+        'username': (part.user.username if part.user else None) or part.name or 'participant',
+        'test_title': test.title or '',
+        'test_id': str(test.id),
+        'test_link': f"{base_url}/test/{test.id}",
+        'amount_paid': f"{(part.amount_paid or 0):.2f}",
+        'amount_owed': f"{(part.amount_owed or 0):.2f}",
+    }
+    if template is not None:
+        subject = render_notification_template(template.email_subject or 'Payment confirmation needed', context)
+        bodies = template_bodies(template, context)
+    else:
+        subject = f"Payment confirmation needed: {test.title}"
+        bodies = {}
+    fallback = (
+        f"{context['username']} reported paying ${context['amount_paid']} toward \"{test.title}\" "
+        f"(${context['amount_owed']} owed). Confirm or reject the claim in the Admin Action Queue: {context['test_link']}"
+    )
+    for admin_user in User.query.filter_by(is_admin=True, is_active=True).all():
+        channel = admin_user.notification_channel or 'email'
+        body = select_template_body(bodies, channel) or fallback
+        send_notification_message(admin_user, channel, subject, body)
+
+
 @main_bp.route('/test/<int:test_id>/my-status', methods=['GET', 'POST'])
 @login_required
 def update_my_participant_status(test_id):
-    """Allow approved participants to update their vendor order status and self-report payment."""
+    """Allow approved participants to update their order status and report payments for review."""
     test = GroupTest.query.get_or_404(test_id)
     part = Participation.query.filter_by(group_test_id=test_id, user_id=current_user.id, approved=True).first()
 
@@ -3043,13 +3337,21 @@ def update_my_participant_status(test_id):
     ]
     if not form.is_submitted():
         form.preferred_payment_option_id.data = part.preferred_payment_option_id or 0
+        form.payment_claim.data = part.payment_claimed_at is not None
 
+    first_claim = False
     if form.validate_on_submit():
         part.order_status = form.order_status.data
-        part.paid_lab = form.paid_lab.data
         if form.amount_paid.data is not None:
             part.amount_paid = form.amount_paid.data
         part.notes = form.notes.data or part.notes
+        if part.paid_lab:
+            part.payment_claimed_at = None
+        elif form.payment_claim.data:
+            first_claim = part.payment_claimed_at is None
+            part.payment_claimed_at = datetime.utcnow()
+        else:
+            part.payment_claimed_at = None
 
         selected_id = int(form.preferred_payment_option_id.data or 0)
         if test.status in ('testing', 'ready_for_payment') and selected_id > 0:
@@ -3062,6 +3364,9 @@ def update_my_participant_status(test_id):
             part.preferred_payment_snapshot = None
 
         db.session.commit()
+        if first_claim:
+            _notify_payment_claim(test, part)
+            db.session.commit()
         flash("Your status has been updated.", "success")
         return redirect(url_for('main.test_detail', test_id=test_id))
 
@@ -3195,7 +3500,7 @@ def create_test():
     populate_donor_shipping_choices(form)
     populate_payment_option_choices(form)
     if not form.is_submitted():
-        form.tag_names.data = ''
+        form.tag_text.data = ''
         form.payment_option_ids.data = []
     if form.validate_on_submit():
         lab_items = []
@@ -3263,7 +3568,7 @@ def create_test():
             test.payment_options = PaymentOption.query.filter(PaymentOption.id.in_(selected_payment_ids)).all()
         db.session.add(test)
         db.session.flush()
-        apply_tags_to_record(test, form.tag_names.data)
+        apply_tags_to_record(test, form.tag_text.data)
         db.session.commit()
         if uploaded_image_key:
             _queue_uploaded_result_analysis(test, current_user.id)
@@ -3285,8 +3590,11 @@ def edit_test(test_id):
     form = GroupTestForm(obj=test)  # Pre-populate
     populate_donor_shipping_choices(form)
     populate_payment_option_choices(form, include_ids=[option.id for option in test.payment_options])
+    # tag_text has no matching model attribute, so it never arrives via obj=; and a
+    # re-render that omitted the field must not save an empty list and clear the tags.
+    if 'tag_text' not in request.form:
+        form.tag_text.data = test.tag_names()
     if not form.is_submitted():
-        form.tag_names.data = test.tag_names()
         form.payment_option_ids.data = [option.id for option in test.payment_options if option.is_active]
     if form.donor_shipping_reimbursed_by_id.data in (None, '') and test.donor_shipping_reimbursed_by_id:
         form.donor_shipping_reimbursed_by_id.data = test.donor_shipping_reimbursed_by_id
@@ -3329,6 +3637,7 @@ def edit_test(test_id):
         test.donor_shipping_reimbursement = form.donor_shipping_reimbursement.data or 'credit'
         test.donor_shipping_reimbursed_by_id = form.donor_shipping_reimbursed_by_id.data or None
 
+        obsolete_image_keys = []
         clear_existing_image = (request.form.get('clear_results_image') or '').lower() in {'1', 'true', 'on', 'yes'}
         upload_file = request.files.get('results_image')
         has_new_upload = bool(upload_file and upload_file.filename)
@@ -3351,13 +3660,12 @@ def edit_test(test_id):
             old_key = test.results_image_key
             test.results_image_key = new_key
             if old_key and old_key != new_key:
-                delete_result_image(old_key)
+                obsolete_image_keys.append(old_key)
         elif clear_existing_image and test.results_image_key:
-            old_key = test.results_image_key
+            obsolete_image_keys.append(test.results_image_key)
             test.results_image_key = None
-            delete_result_image(old_key)
 
-        apply_tags_to_record(test, form.tag_names.data)
+        apply_tags_to_record(test, form.tag_text.data)
         selected_payment_ids = form.payment_option_ids.data or []
         if selected_payment_ids:
             test.payment_options = PaymentOption.query.filter(PaymentOption.id.in_(selected_payment_ids)).all()
@@ -3366,16 +3674,18 @@ def edit_test(test_id):
         if test.status != 'closed':
             test.results_link = None  # Clear if not closed
             if test.results_image_key:
-                delete_result_image(test.results_image_key)
+                obsolete_image_keys.append(test.results_image_key)
             test.results_image_key = None
             test.results_posted_at = None
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
 
-        if previous_status != test.status:
-            _send_status_update_to_telegram(test, previous_status)
-
         db.session.commit()
+
+        for obsolete_key in obsolete_image_keys:
+            delete_result_image(obsolete_key)
+        _notify_status_change_after_commit(test, previous_status)
+
         if has_new_upload and test.results_image_key:
             _queue_uploaded_result_analysis(test, current_user.id)
         flash('Group test updated.', 'success')
@@ -3514,6 +3824,7 @@ def _deny_participation_record(part, reason):
     part.denied_reason = reason
     part.approved = False
     part.approved_at = None
+    part.payment_claimed_at = None
 
 
 def _reopen_participation_record(part):
@@ -3523,6 +3834,13 @@ def _reopen_participation_record(part):
     part.approved = False
     part.approved_at = None
     part.requested_at = datetime.utcnow()
+    part.payment_claimed_at = None
+
+
+def _clear_payment_review_state(part):
+    part.payment_claimed_at = None
+    part.payment_verified_at = None
+    part.payment_verified_by_id = None
 
 
 def _parse_participation_ids(raw_ids):
@@ -3538,11 +3856,21 @@ def _parse_participation_ids(raw_ids):
 
 
 def _build_pending_queue_query(status_filter, search):
+    # One queue section for everything except result review: unapproved join
+    # requests plus approved participants whose unpaid lab-fee claim is waiting
+    # for administrator confirmation.
     pending_query = (
         Participation.query
         .join(GroupTest, Participation.group_test_id == GroupTest.id)
         .join(User, Participation.user_id == User.id)
-        .filter(Participation.approved == False, Participation.denied == False)
+        .filter(Participation.denied == False)
+        .filter(or_(
+            Participation.approved == False,
+            and_(
+                Participation.payment_claimed_at.isnot(None),
+                Participation.paid_lab.isnot(True),
+            ),
+        ))
     )
 
     if status_filter != 'all':
@@ -3691,7 +4019,7 @@ def approve_filtered_from_queue():
         flash('Bulk approve canceled. Type APPROVE FILTERED to continue.', 'warning')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
-    pending_parts = _build_pending_queue_query(status_filter, search).all()
+    pending_parts = [part for part in _build_pending_queue_query(status_filter, search).all() if not part.approved]
     if not pending_parts:
         flash('No pending requests matched your current filters.', 'info')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
@@ -3790,7 +4118,16 @@ def update_participant(part_id):
     form = ParticipationEditForm(obj=part)
     
     if form.validate_on_submit():
+        previous_paid = bool(part.paid_lab)
         form.populate_obj(part)
+        if part.paid_lab:
+            part.payment_claimed_at = None
+            if not previous_paid or part.payment_verified_at is None:
+                part.payment_verified_at = datetime.utcnow()
+                part.payment_verified_by_id = current_user.id
+        else:
+            part.payment_verified_at = None
+            part.payment_verified_by_id = None
         if form.approved.data and not part.approved:
             _approve_participation_record(part)
             # Auto-calculate owed on approval
@@ -3799,7 +4136,8 @@ def update_participant(part_id):
         elif not form.approved.data:
             part.approved = False
             part.approved_at = None
-        
+            part.payment_claimed_at = None
+
         db.session.commit()
         flash('Participant updated successfully.', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -3863,7 +4201,86 @@ def reopen_participant_from_manage(test_id, part_id):
     _reopen_participation_record(part)
     db.session.commit()
     flash(f'Reopened request for {part.name or part.user.username}.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test_id))
+
+
+@main_bp.route('/admin/manage-participants/<int:test_id>/unapprove/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def unapprove_participant_from_manage(test_id, part_id):
+    test = GroupTest.query.get_or_404(test_id)
+    part = Participation.query.get_or_404(part_id)
+    if part.group_test_id != test.id:
+        abort(404)
+    if not part.approved or part.denied:
+        flash('This participant is not currently approved.', 'info')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+
+    part.approved = False
+    part.approved_at = None
+    part.payment_claimed_at = None
+    _recalculate_approved_amounts_for_test(test)
+    db.session.commit()
+    flash(f'Removed approval for {part.name or part.user.username}.', 'success')
     return redirect(url_for('main.manage_participants', test_id=test.id))
+
+
+def _payment_action_redirect():
+    manage_test_id = request.form.get('manage_test_id')
+    if manage_test_id:
+        try:
+            return redirect(url_for('main.manage_participants', test_id=int(manage_test_id)))
+        except (TypeError, ValueError):
+            pass
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.route('/admin/payment/confirm/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def confirm_participant_payment(part_id):
+    """Administrator confirmation of lab fees; the only path that sets paid_lab."""
+    part = Participation.query.get_or_404(part_id)
+    if not part.approved or part.denied:
+        flash('Only approved participants can be marked paid.', 'warning')
+    else:
+        part.paid_lab = True
+        part.payment_claimed_at = None
+        part.payment_verified_at = datetime.utcnow()
+        part.payment_verified_by_id = current_user.id
+        db.session.commit()
+        flash(f'Lab fees marked paid for {part.name or part.user.username}.', 'success')
+    return _payment_action_redirect()
+
+
+@main_bp.route('/admin/payment/unmark/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def unmark_participant_payment(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if not part.paid_lab:
+        flash('This participant is not marked paid.', 'info')
+    else:
+        part.paid_lab = False
+        part.payment_verified_at = None
+        part.payment_verified_by_id = None
+        db.session.commit()
+        flash(f'Payment record removed for {part.name or part.user.username}.', 'warning')
+    return _payment_action_redirect()
+
+
+@main_bp.route('/admin/payment/reject-claim/<int:part_id>', methods=['POST'])
+@login_required
+@admin_required
+def reject_participant_payment_claim(part_id):
+    part = Participation.query.get_or_404(part_id)
+    if part.payment_claimed_at is None:
+        flash('There is no pending payment claim for this participant.', 'info')
+    else:
+        part.payment_claimed_at = None
+        db.session.commit()
+        flash(f'Payment claim from {part.name or part.user.username} rejected. They can report payment again.', 'info')
+    return _payment_action_redirect()
 
 
 @main_bp.route('/admin/remove-participant/<int:part_id>', methods=['POST'])
@@ -3967,16 +4384,24 @@ def add_participant_to_test(test_id):
 def admin_settings():
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     analysis_settings = get_analysis_settings()
+    active_tags = Tag.query.filter(
+        Tag.is_active.is_(True),
+        Tag.merged_into_id.is_(None),
+    ).all()
+    tag_usage = _tag_usage([tag.id for tag in active_tags])
+    unused_tag_count = sum(
+        1 for counts in tag_usage.values() if not (counts['tests'] or counts['results'])
+    )
     return render_template(
         'admin/settings.html',
+        tag_count=len(active_tags),
+        unused_tag_count=unused_tag_count,
         settings_status={
-            'email': bool(configs.get('mailjet_sender_email')),
-            'telegram': bool(configs.get('telegram_bot_token')),
-            'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
+            **configured_status(configs, ('email', 'telegram', 'discord')),
             'storage': bool(str(configs.get('storage_enabled') or '').lower() == 'true'),
             'result_analysis': analysis_settings['enabled'] and entitlement_enabled('result_analysis'),
             'result_analysis_in_plan': entitlement_enabled('result_analysis'),
-            'discord_in_plan': entitlement_enabled('discord_bot'),
+            'discord_in_plan': entitlement_enabled(entitlement_for('discord')),
         },
     )
 
@@ -4202,11 +4627,14 @@ def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None)
 @admin_required
 def bot_integrations():
     form = BotIntegrationsForm()
-    discord_in_plan = entitlement_enabled('discord_bot')
+    discord_in_plan = entitlement_enabled(entitlement_for('discord'))
+    root_in_plan = entitlement_enabled(entitlement_for('root'))
     configs = {config.key: config.value for config in NotificationConfig.query.all()}
     existing_discord_bot_token = str(configs.get('discord_bot_token') or '').strip()
     existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
     existing_webhook_secret = str(configs.get('telegram_webhook_secret') or '').strip()
+    existing_root_bridge_secret = str(configs.get('root_bridge_secret') or '').strip()
+    existing_root_bridge_key_id = str(configs.get('root_bridge_key_id') or '').strip()
 
     if form.validate_on_submit():
         submitted_discord_bot_token = (form.discord_bot_token.data or '').strip()
@@ -4216,6 +4644,16 @@ def bot_integrations():
         if submitted_telegram_bot_token == mask_secret(existing_telegram_bot_token):
             submitted_telegram_bot_token = existing_telegram_bot_token
         webhook_secret = (form.telegram_webhook_secret.data or '').strip()
+        # The bridge pair is minted out-of-band by the generate action, so a form
+        # rendered before a generation posts these back blank. Blank and the masked
+        # echo both mean "unchanged" -- same convention as telegram_webhook_secret --
+        # and the two keys move together or the bridge stops authenticating.
+        submitted_root_bridge_secret = (form.root_bridge_secret.data or '').strip()
+        if not submitted_root_bridge_secret or submitted_root_bridge_secret == mask_secret(existing_root_bridge_secret):
+            submitted_root_bridge_secret = existing_root_bridge_secret
+        submitted_root_bridge_key_id = (form.root_bridge_key_id.data or '').strip()
+        if not submitted_root_bridge_key_id:
+            submitted_root_bridge_key_id = existing_root_bridge_key_id
 
         _save_notification_config_values({
             'telegram_bot_token': submitted_telegram_bot_token,
@@ -4232,8 +4670,10 @@ def bot_integrations():
             'discord_status_channel_id': form.discord_status_channel_id.data if discord_in_plan else configs.get('discord_status_channel_id'),
             'discord_webhook_url': form.discord_webhook_url.data if discord_in_plan else configs.get('discord_webhook_url'),
             'discord_webhook_username': form.discord_webhook_username.data if discord_in_plan else configs.get('discord_webhook_username'),
-            'root_webhook_url': form.root_webhook_url.data,
-            'root_webhook_name': form.root_webhook_name.data,
+            'root_community_id': form.root_community_id.data if root_in_plan else configs.get('root_community_id'),
+            'root_status_channel_id': form.root_status_channel_id.data if root_in_plan else configs.get('root_status_channel_id'),
+            'root_bridge_key_id': submitted_root_bridge_key_id if root_in_plan else existing_root_bridge_key_id,
+            'root_bridge_secret': submitted_root_bridge_secret if root_in_plan else existing_root_bridge_secret,
         })
         if webhook_secret:
             _save_notification_config_values({'telegram_webhook_secret': webhook_secret})
@@ -4263,8 +4703,10 @@ def bot_integrations():
         form.discord_status_channel_id.data = configs.get('discord_status_channel_id')
         form.discord_webhook_url.data = configs.get('discord_webhook_url')
         form.discord_webhook_username.data = configs.get('discord_webhook_username')
-        form.root_webhook_url.data = configs.get('root_webhook_url')
-        form.root_webhook_name.data = configs.get('root_webhook_name')
+        form.root_community_id.data = configs.get('root_community_id')
+        form.root_status_channel_id.data = configs.get('root_status_channel_id')
+        form.root_bridge_key_id.data = configs.get('root_bridge_key_id')
+        form.root_bridge_secret.data = mask_secret(existing_root_bridge_secret)
 
     return render_template(
         'admin/bot_integrations.html',
@@ -4277,12 +4719,10 @@ def bot_integrations():
             ),
             'status': configs.get('discord_command_sync_status'),
         },
-        integration_status={
-            'telegram': bool(configs.get('telegram_bot_token')),
-            'discord': bool(configs.get('discord_bot_token') or configs.get('discord_webhook_url')),
-            'root': bool(configs.get('root_webhook_url')),
-        },
+        integration_status=configured_status(configs, chat_channels()),
         discord_in_plan=discord_in_plan,
+        root_in_plan=root_in_plan,
+        root_bridge_enabled=root_in_plan and is_configured('root', configs),
     )
 
 
@@ -4290,7 +4730,7 @@ def bot_integrations():
 @login_required
 @admin_required
 def synchronize_discord_commands():
-    if not entitlement_enabled('discord_bot'):
+    if not entitlement_enabled(entitlement_for('discord')):
         abort(404)
     bot_token = NotificationConfig.query.filter_by(key='discord_bot_token').first()
     if not bot_token or not str(bot_token.value or '').strip():
@@ -4309,6 +4749,45 @@ def synchronize_discord_commands():
     db.session.commit()
     append_notification_log('discord: administrator requested command synchronization')
     flash('Discord command synchronization queued. The worker normally processes it within 5 seconds.', 'success')
+    return redirect(url_for('main.bot_integrations'))
+
+
+@main_bp.route('/admin/settings/bots/root/bridge-credentials', methods=['POST'])
+@login_required
+@admin_required
+def generate_root_bridge_credentials():
+    """Mint a key id + HMAC secret pair for this tenant's Root bridge.
+
+    The secret is rendered exactly once here. Every later view shows it masked, so a
+    lost secret means generating a new pair and updating the bridge, never reading the
+    stored value back out of the UI.
+    """
+    if not entitlement_enabled(entitlement_for('root')):
+        abort(404)
+
+    key_id = generate_bridge_key_id()
+    secret = generate_bridge_secret()
+    _save_notification_config_values({
+        'root_bridge_key_id': key_id,
+        'root_bridge_secret': secret,
+    })
+    db.session.commit()
+    append_notification_log('root: bridge credentials generated')
+    return render_template('admin/root_bridge_credentials.html', key_id=key_id, secret=secret)
+
+
+@main_bp.route('/admin/settings/bots/root/test-message', methods=['POST'])
+@login_required
+@admin_required
+def send_root_test_message():
+    """Queue a message through the Root outbox so an admin can prove the wiring."""
+    if not entitlement_enabled(entitlement_for('root')):
+        abort(404)
+
+    if send_root_message('Test message from Group Test Manager.'):
+        flash('Root test message queued. It appears once the bridge polls for it.', 'success')
+    else:
+        flash('Could not queue the Root test message. Save a Root status channel ID first.', 'danger')
     return redirect(url_for('main.bot_integrations'))
 
 
@@ -4390,9 +4869,12 @@ def notification_templates():
             email_subject=form.email_subject.data,
             email_body=form.email_body.data,
             telegram_body=form.telegram_body.data,
+            discord_body=form.discord_body.data,
+            root_body=form.root_body.data,
             hide_from_participant_notifications=form.hide_from_participant_notifications.data,
             is_default_password_reset=form.is_default_password_reset.data,
             is_default_registration_welcome=form.is_default_registration_welcome.data,
+            is_default_payment_review=form.is_default_payment_review.data,
             is_active=form.is_active.data,
         )
         db.session.add(template)
@@ -4442,9 +4924,12 @@ def edit_notification_template(template_id):
         template.email_subject = form.email_subject.data
         template.email_body = form.email_body.data
         template.telegram_body = form.telegram_body.data
+        template.discord_body = form.discord_body.data
+        template.root_body = form.root_body.data
         template.hide_from_participant_notifications = form.hide_from_participant_notifications.data
         template.is_default_password_reset = form.is_default_password_reset.data
         template.is_default_registration_welcome = form.is_default_registration_welcome.data
+        template.is_default_payment_review = form.is_default_payment_review.data
         template.is_active = form.is_active.data
         db.session.commit()
         flash('Notification template updated.', 'success')
@@ -4472,24 +4957,27 @@ def _render_telegram_command_templates_page(form, editing_template=None):
 
 
 def _apply_command_response_media(form, template):
+    """Apply command text/media; returns object keys safe to delete only after the caller commits."""
     uploaded_key = None
     file_storage = form.response_image.data
     if file_storage and getattr(file_storage, 'filename', ''):
         uploaded_key = upload_result_image(file_storage, 'bot-commands')
 
+    obsolete_keys = []
     previous_key = template.response_image_key
     if uploaded_key:
         template.response_image_key = uploaded_key
         if previous_key and previous_key != uploaded_key:
-            delete_result_image(previous_key)
+            obsolete_keys.append(previous_key)
     elif form.remove_response_image.data:
         template.response_image_key = None
         if previous_key:
-            delete_result_image(previous_key)
+            obsolete_keys.append(previous_key)
 
     template.reply_text = (form.reply_text.data or '').strip()
     if not template.reply_text and not template.response_image_key:
         raise StorageUploadError('A command must have text, an image, or both.')
+    return obsolete_keys
 
 
 @main_bp.route('/admin/telegram-command-templates', methods=['GET', 'POST'])
@@ -4537,7 +5025,7 @@ def telegram_command_templates():
             is_active=bool(form.is_active.data),
         )
         try:
-            _apply_command_response_media(form, template)
+            obsolete_media_keys = _apply_command_response_media(form, template)
         except (StorageConfigurationError, StorageUploadError) as exc:
             flash(str(exc), 'danger')
             return _render_telegram_command_templates_page(form)
@@ -4596,7 +5084,7 @@ def edit_telegram_command_template(template_id):
         template.allowed_chat_ids = ','.join(allowed_chat_ids) if allowed_chat_ids else None
         template.allowed_thread_ids = ','.join(allowed_thread_ids) if allowed_thread_ids else None
         try:
-            _apply_command_response_media(form, template)
+            obsolete_media_keys = _apply_command_response_media(form, template)
         except (StorageConfigurationError, StorageUploadError) as exc:
             flash(str(exc), 'danger')
             return _render_telegram_command_templates_page(form, editing_template=template)
@@ -4935,6 +5423,257 @@ def toggle_payment_option(option_id):
     return redirect(url_for('main.payment_options'))
 
 
+@main_bp.route('/admin/tags')
+@login_required
+@admin_required
+def tags():
+    all_tags = Tag.query.order_by(Tag.name.asc()).all()
+    usage = _tag_usage([tag.id for tag in all_tags])
+
+    def as_row(tag):
+        return {
+            'tag': tag,
+            'tests': usage[tag.id]['tests'],
+            'results': usage[tag.id]['results'],
+            'total': usage[tag.id]['tests'] + usage[tag.id]['results'],
+            'merged_into': _resolve_tag(tag) if tag.merged_into_id else None,
+        }
+
+    live = [tag for tag in all_tags if tag.is_active and tag.merged_into_id is None]
+    retired = [tag for tag in all_tags if not tag.is_active or tag.merged_into_id is not None]
+    rows = [as_row(tag) for tag in live]
+    # Unused tags first: that set is safe to act on without any consequences, so it
+    # is where a cleanup pass on an existing deployment starts.
+    rows.sort(key=lambda row: (1 if row['total'] else 0, -row['total'], row['tag'].name.lower()))
+    retired_rows = sorted(
+        (as_row(tag) for tag in retired),
+        key=lambda row: (not row['tag'].is_alias, row['tag'].name.lower()),
+    )
+
+    # The merge picker is driven by query params so a row's "Merge" link, a rename
+    # clash, and a duplicate suggestion can all pre-fill it without any scripting.
+    merge_source_id = request.args.get('merge_source', type=int)
+    merge_target_id = request.args.get('merge_target', type=int)
+    merge_source = next((tag for tag in all_tags if tag.id == merge_source_id), None)
+    merge_options = [
+        {'id': tag.id, 'name': tag.name}
+        for tag in live
+        if merge_source is None or tag.id != merge_source.id
+    ]
+
+    # Suggest which way round each merge goes: keep the better-used spelling and
+    # absorb the weaker one into it, alphabetical only when usage ties.
+    duplicate_pairs = []
+    for pair in _duplicate_tag_pairs(live):
+        left, right = pair['left'], pair['right']
+        left_total = usage[left.id]['tests'] + usage[left.id]['results']
+        right_total = usage[right.id]['tests'] + usage[right.id]['results']
+        if left_total < right_total or (left_total == right_total and left.name.lower() > right.name.lower()):
+            source, target = left, right
+        else:
+            source, target = right, left
+        duplicate_pairs.append({'source': source, 'target': target, 'distance': pair['distance']})
+
+    return render_template(
+        'admin/tags.html',
+        tag_rows=rows,
+        retired_rows=retired_rows,
+        duplicate_pairs=duplicate_pairs,
+        unused_count=sum(1 for row in rows if not row['total']),
+        merge_source=merge_source,
+        merge_counts=usage,
+        merge_options=merge_options,
+        merge_target_id=merge_target_id,
+    )
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/rename', methods=['POST'])
+@login_required
+@admin_required
+def rename_tag(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+    new_name = (request.form.get('name') or '').strip()
+
+    if not new_name:
+        flash('A tag needs a name.', 'danger')
+        return redirect(url_for('main.tags'))
+    if len(new_name) > 120:
+        flash('Tag names are limited to 120 characters.', 'danger')
+        return redirect(url_for('main.tags'))
+
+    normalized = new_name.lower()
+    clash = Tag.query.filter(
+        Tag.normalized_name == normalized,
+        Tag.id != tag.id,
+    ).first()
+    if clash is not None:
+        clash = _resolve_tag(clash)
+        if clash.id == tag.id:
+            # The other spelling already forwards here, so renaming onto it would
+            # reclaim a spelling that was deliberately merged away.
+            flash(
+                f'"{new_name}" was merged into this tag. Re-tag those records with '
+                f'"{tag.name}" instead of reusing the old spelling.',
+                'danger',
+            )
+            return redirect(url_for('main.tags'))
+        # normalized_name is unique, so this rename would become a merge. Offer the
+        # merge preselected rather than making the admin find both tags again.
+        flash(
+            f'A tag named "{clash.name}" already exists. Use Merge to move these tags instead.',
+            'danger',
+        )
+        return redirect(url_for('main.tags', merge_source=tag.id, merge_target=clash.id))
+    if new_name == tag.name:
+        flash('That tag already has this name.', 'info')
+        return redirect(url_for('main.tags'))
+
+    tag.name = new_name
+    # Both columns are unique and the create path looks up by normalized_name only,
+    # so they have to move together or they desynchronise.
+    tag.normalized_name = normalized
+    db.session.commit()
+    flash(
+        f'Tag renamed to "{new_name}". Tags drive dashboard grouping and sorting, '
+        'so tests may appear in different sections.',
+        'success',
+    )
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/merge', methods=['POST'])
+@login_required
+@admin_required
+def merge_tag(tag_id):
+    source = Tag.query.get_or_404(tag_id)
+    target_id = request.form.get('into_tag_id', type=int)
+    # Resolve first so a merge can never be aimed at a tag that was itself merged away.
+    target = _resolve_tag(Tag.query.get(target_id)) if target_id else None
+
+    if target is None:
+        flash('Choose the tag to merge into.', 'danger')
+        return redirect(url_for('main.tags'))
+    if target.id == source.id:
+        flash('A tag cannot be merged into itself.', 'danger')
+        return redirect(url_for('main.tags'))
+
+    source_name = source.name
+    target_name = target.name
+    try:
+        moved = _merge_tag_links(source.id, target.id)
+        # The row survives as a forward pointer: public-results tag pages and bot
+        # callbacks address tags by id, and someone re-typing this spelling should
+        # land on the surviving tag rather than recreating the duplicate.
+        source.is_active = False
+        source.merged_into_id = target.id
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash('The tags changed while you were merging them. Reload and try again.', 'danger')
+        return redirect(url_for('main.tags'))
+
+    # Tag links are reached through relationships declared on the other side only, so
+    # anything already loaded in this session has to be re-read.
+    db.session.expire_all()
+    flash(
+        f'Merged "{source_name}" into "{target_name}" '
+        f'({moved["tests"]} group tests, {moved["results"]} public results updated).',
+        'success',
+    )
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_tag(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+    counts = _tag_usage([tag.id])[tag.id]
+
+    if counts['tests'] or counts['results']:
+        # Deleting would silently untag live records; renaming or merging keeps them tagged.
+        flash(
+            f'"{tag.name}" is attached to {counts["tests"]} group tests and '
+            f'{counts["results"]} public results. Rename it, or merge it into another '
+            'tag, instead of deleting it.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    alias_count = Tag.query.filter_by(merged_into_id=tag.id).count()
+    if alias_count:
+        # Old spellings still forward here, so removing the row would orphan them.
+        flash(
+            f'{alias_count} merged spelling{"" if alias_count == 1 else "s"} still point at '
+            f'"{tag.name}". Merge this tag into another one first.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    name = tag.name
+    db.session.delete(tag)
+    db.session.commit()
+    db.session.expire_all()
+    flash(f'Deleted unused tag "{name}".', 'success')
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/toggle-active', methods=['POST'])
+@login_required
+@admin_required
+def toggle_tag_active(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+
+    if tag.merged_into_id is not None:
+        flash(
+            f'"{tag.name}" was merged into "{_resolve_tag(tag).name}", so it cannot be '
+            'reactivated. Edit the tag it merged into instead.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    tag.is_active = not tag.is_active
+    db.session.commit()
+    if tag.is_active:
+        flash(f'Tag "{tag.name}" is back in the tag picker and available for new tagging.', 'success')
+    else:
+        flash(
+            f'Tag "{tag.name}" is retired from the tag picker. Existing tagged records '
+            'and public tag pages are unchanged.',
+            'success',
+        )
+    return redirect(url_for('main.tags'))
+
+
+@main_bp.route('/admin/tags/<int:tag_id>/toggle-bots', methods=['POST'])
+@login_required
+@admin_required
+def toggle_tag_bots_visibility(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+
+    if tag.merged_into_id is not None:
+        survivor = _resolve_tag(tag)
+        flash(
+            f'"{tag.name}" was merged into "{survivor.name}" and is not shown in the bot '
+            'menus on its own. Change the menu setting on that tag instead.',
+            'danger',
+        )
+        return redirect(url_for('main.tags'))
+
+    tag.hidden_from_bots = not tag.hidden_from_bots
+    db.session.commit()
+    if tag.hidden_from_bots:
+        flash(
+            f'Tag "{tag.name}" is hidden from the Telegram and Discord public-results '
+            'menus. Its published results are still live at their direct links and in '
+            'the Public Results list.',
+            'success',
+        )
+    else:
+        flash(f'Tag "{tag.name}" is back in the bot menus.', 'success')
+    return redirect(url_for('main.tags'))
+
+
 @main_bp.route('/admin/storage-config', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -5095,6 +5834,7 @@ def emergency_disable_managed_support():
 def create_user():
     """Admin creates a new user."""
     form = UserForm()
+    _apply_available_channels(form)
     if form.validate_on_submit():
         if is_reserved_identity(form.username.data, form.email.data):
             flash('That username or email is reserved.', 'danger')
@@ -5145,9 +5885,14 @@ def edit_user(user_id):
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.manage_users'))
     form = UserForm(obj=user)
+    _apply_available_channels(form, current=user.notification_channel)
     form.password.validators = [Optional(), Length(min=6)]
 
     if form.validate_on_submit():
+        if is_reserved_identity(form.username.data, form.email.data):
+            flash('That username or email is reserved.', 'danger')
+            return render_template('admin/edit_user.html', form=form, user=user)
+
         existing_username = User.query.filter(User.username == form.username.data, User.id != user_id).first()
         existing_email = User.query.filter(User.email == form.email.data, User.id != user_id).first()
 
@@ -5163,7 +5908,14 @@ def edit_user(user_id):
         user.tg_username = form.tg_username.data
         user.discord_username = form.discord_username.data
         user.is_admin = form.is_admin.data
+        deactivating = user.is_active and not form.is_active.data
+        if deactivating and user.id == current_user.id:
+            flash('You cannot deactivate your own account.', 'danger')
+            return render_template('admin/edit_user.html', form=form, user=user)
         user.is_active = form.is_active.data
+        if deactivating:
+            # Revoking access must also terminate every live web session.
+            user.session_epoch += 1
         user.receive_group_test_notifications = form.receive_group_test_notifications.data
         user.notification_channel = form.notification_channel.data or 'email'
         user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
@@ -5190,7 +5942,13 @@ def toggle_user_active(user_id):
     if user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.manage_users'))
+    if user.id == current_user.id and user.is_active:
+        flash('You cannot deactivate your own account.', 'danger')
+        return redirect(url_for('main.manage_users'))
     user.is_active = not user.is_active
+    if not user.is_active:
+        # Revoking access must also terminate every live web session.
+        user.session_epoch += 1
     db.session.commit()
     status = "activated" if user.is_active else "deactivated"
     flash(f'User "{user.username}" {status}.', 'success')
@@ -5205,16 +5963,17 @@ def set_results_link(test_id):
     test = GroupTest.query.get_or_404(test_id)
     previous_status = test.status
     link = request.form.get('results_link', '').strip()
+    if link and safe_http_url(link) is None:
+        flash('Results link must be a full http:// or https:// URL.', 'danger')
+        return redirect(url_for('main.test_detail', test_id=test_id))
     test.results_link = link if link else None
     if test.status != 'closed':
         test.status = 'closed'
     if test.results_link and not test.results_posted_at:
         test.results_posted_at = datetime.utcnow()
 
-    if previous_status != test.status:
-        _send_status_update_to_telegram(test, previous_status)
-
     db.session.commit()
+    _notify_status_change_after_commit(test, previous_status)
     flash('Results link updated and test marked closed (if needed). Visible only to approved members.', 'success')
     return redirect(url_for('main.test_detail', test_id=test_id))
 
@@ -5278,7 +6037,7 @@ def manage_public_results():
         )
         db.session.add(result)
         db.session.flush()
-        apply_tags_to_record(result, form.tag_names.data)
+        apply_tags_to_record(result, form.tag_text.data)
         db.session.commit()
         if uploaded_image_key:
             _queue_uploaded_result_analysis(result, current_user.id)
@@ -5302,8 +6061,8 @@ def edit_public_result(result_id):
     result = PublicResult.query.get_or_404(result_id)
     form = PublicResultForm(obj=result)
     form.submit.label.text = 'Save Changes'
-    if not form.is_submitted():
-        form.tag_names.data = result.tag_names()
+    if 'tag_text' not in request.form:
+        form.tag_text.data = result.tag_names()
 
     if form.validate_on_submit():
         result.item_results = parse_item_results(
@@ -5344,7 +6103,7 @@ def edit_public_result(result_id):
             result.results_image_key = None
             delete_result_image(old_key)
 
-        apply_tags_to_record(result, form.tag_names.data)
+        apply_tags_to_record(result, form.tag_text.data)
         db.session.commit()
         if has_new_upload and result.results_image_key:
             _queue_uploaded_result_analysis(result, current_user.id)
@@ -5370,10 +6129,11 @@ def edit_public_result(result_id):
 def delete_public_result(result_id):
     result = PublicResult.query.get_or_404(result_id)
     title = result.title
-    if result.results_image_key:
-        delete_result_image(result.results_image_key)
+    obsolete_key = result.results_image_key
     db.session.delete(result)
     db.session.commit()
+    if obsolete_key:
+        delete_result_image(obsolete_key)
     flash(f'Public result "{title}" was deleted.', 'warning')
     return redirect(url_for('main.manage_public_results'))
 

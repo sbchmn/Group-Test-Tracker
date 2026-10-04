@@ -25,8 +25,8 @@
                 <div class="col-md-3 mb-3">{{ form.size.label(class="form-label") }}{{ form.size(class="form-control") }}</div>
             </div>
             <div class="mb-3">
-                {{ form.tag_names.label(class="form-label") }}
-                {{ form.tag_names(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
+                {{ form.tag_text.label(class="form-label") }}
+                {{ form.tag_text(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
                 <div class="input-group">
                     <select class="form-select" data-tag-menu="true">
                         <option value="">Choose an existing tag</option>
@@ -36,7 +36,7 @@
                     </select>
                     <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
                 </div>
-                <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas.</small>
+                <small class="text-muted d-block mt-2">Type to search existing tags, or keep typing to create a new one. Tags are comma-separated. <a href="{{ url_for('main.tags') }}">Rename or merge tags</a>.</small>
             </div>
             <div class="mb-3">
                 {{ form.payment_option_ids.label(class="form-label") }}
@@ -102,7 +102,8 @@
             </div>
             <div class="mb-3">
                 {{ form.results_link.label(class="form-label") }}
-                {{ form.results_link(class="form-control", placeholder="https://drive.google.com/... or DO Spaces URL (only shown when Closed + approved members)") }}
+                {{ form.results_link(class="form-control" + (" is-invalid" if form.results_link.errors else ""), placeholder="https://drive.google.com/... or DO Spaces URL (only shown when Closed + approved members)") }}
+                {% for error in form.results_link.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
             </div>
             <div class="mb-3">
                 <label class="form-label">Result File (optional: image or PDF)</label>
@@ -119,6 +120,7 @@
     <button type="submit" class="btn btn-primary btn-lg">{{ form.submit.label.text }}</button>
     <a href="{{ url_for('main.dashboard') }}" class="btn btn-secondary btn-lg">Cancel</a>
 </form>
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -190,31 +192,6 @@ function attachTagPicker(input) {
     });
 }
 
-function attachTagMenu(input, menu, button) {
-    if (!input || !menu || !button) return;
-
-    const addSelectedTag = () => {
-        const selectedTag = (menu.value || '').trim();
-        if (!selectedTag) return;
-
-        const tags = (input.value || '')
-            .split(',')
-            .map(tag => tag.trim())
-            .filter(Boolean);
-
-        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
-            tags.push(selectedTag);
-            input.value = tags.join(', ');
-        }
-
-        menu.value = '';
-        input.focus();
-    };
-
-    button.addEventListener('click', addSelectedTag);
-    menu.addEventListener('change', addSelectedTag);
-}
-
 // Optional: seed one example row on load for convenience (admin can delete)
 window.onload = function() {
     const container = document.getElementById('labTestsContainer');
@@ -223,13 +200,12 @@ window.onload = function() {
         addLabTestRow('STERILITY', '290', '0', '');
         addLabTestRow('ENDOTOXIN ANALYSIS', '180', '0', '');
     }
-
-    attachTagMenu(
-        document.querySelector('[data-tag-input="true"]'),
-        document.querySelector('[data-tag-menu="true"]'),
-        document.querySelector('[data-tag-add="true"]')
-    );
 }
 </script>
+<script>
+    // Tag suggestions for the shared picker in app/static/js/tag-field.js.
+    // Flask's tojson filter is HTML-safe, so a tag name cannot break out here.
+    window.tagFieldSuggestions = {{ tag_suggestions | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/tag-field.js') }}"></script>
 {% endblock scripts %}
-{% endblock content %}

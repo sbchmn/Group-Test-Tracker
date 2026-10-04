@@ -26,6 +26,7 @@ def public_result_tag_page(page=1):
         .join(public_result_tags, public_result_tags.c.tag_id == Tag.id)
         .join(PublicResult, PublicResult.id == public_result_tags.c.public_result_id)
         .filter(PublicResult.publication_status == 'published')
+        .filter(Tag.hidden_from_bots.is_(False))
         .distinct()
         .order_by(func.lower(Tag.name).asc(), Tag.id.asc())
         .all()
@@ -39,6 +40,24 @@ def public_result_tag_page(page=1):
 def public_results_for_tag_page(tag_id, page=1):
     tag = Tag.query.get(tag_id)
     if tag is None:
+        return None, [], 1, 1
+
+    # Bot callback data and any saved links address tags by id, so a tag that was
+    # merged away has to keep resolving to the spelling that survived. The step limit
+    # keeps a bad pointer cycle from hanging this public path.
+    for _ in range(10):
+        if tag.merged_into_id is None:
+            break
+        parent = Tag.query.get(tag.merged_into_id)
+        if parent is None or parent.id == tag.id:
+            break
+        tag = parent
+    else:
+        return None, [], 1, 1
+
+    # Checked on the resolved tag: judging the requested id would let a hidden tag be
+    # read straight back out through one of its merged-away aliases.
+    if tag.hidden_from_bots:
         return None, [], 1, 1
 
     query = (

@@ -26,42 +26,11 @@ function addResultItemRow(name = '', result = '') {
     container.appendChild(row);
 }
 
-function attachTagMenu(input, menu, button) {
-    if (!input || !menu || !button) return;
-
-    const addSelectedTag = () => {
-        const selectedTag = (menu.value || '').trim();
-        if (!selectedTag) return;
-
-        const tags = (input.value || '')
-            .split(',')
-            .map(tag => tag.trim())
-            .filter(Boolean);
-
-        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
-            tags.push(selectedTag);
-            input.value = tags.join(', ');
-        }
-
-        menu.value = '';
-        input.focus();
-    };
-
-    button.addEventListener('click', addSelectedTag);
-    menu.addEventListener('change', addSelectedTag);
-}
-
 window.addEventListener('DOMContentLoaded', function() {
     const container = document.getElementById('resultItemsContainer');
     if (container && container.children.length === 0) {
         addResultItemRow('', '');
     }
-
-    attachTagMenu(
-        document.querySelector('[data-tag-input="true"]'),
-        document.querySelector('[data-tag-menu="true"]'),
-        document.querySelector('[data-tag-add="true"]')
-    );
 
     document.querySelectorAll('[data-result-image-trigger="true"]').forEach(function(button) {
         button.addEventListener('click', function() {
@@ -95,6 +64,12 @@ window.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+<script>
+    // Tag suggestions for the shared picker in app/static/js/tag-field.js.
+    // Flask's tojson filter is HTML-safe, so a tag name cannot break out here.
+    window.tagFieldSuggestions = {{ tag_suggestions | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/tag-field.js') }}"></script>
 {% endblock scripts %}
 
 {% block content %}
@@ -126,7 +101,8 @@ window.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="mb-3">
                         {{ form.results_link.label(class="form-label") }}
-                        {{ form.results_link(class="form-control", placeholder="https://...") }}
+                        {{ form.results_link(class="form-control" + (" is-invalid" if form.results_link.errors else ""), placeholder="https://...") }}
+                        {% for error in form.results_link.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Result File (optional: image or PDF)</label>
@@ -176,8 +152,8 @@ window.addEventListener('DOMContentLoaded', function() {
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="addResultItemRow('', '')">Add Result Item</button>
                     </div>
                     <div class="mb-3">
-                        {{ form.tag_names.label(class="form-label") }}
-                        {{ form.tag_names(class="form-control mb-2", placeholder="tirz, Shed GB#3", **{'data-tag-input': 'true'}) }}
+                        {{ form.tag_text.label(class="form-label") }}
+                        {{ form.tag_text(class="form-control mb-2", placeholder="tirz, Shed GB#3", **{'data-tag-input': 'true'}) }}
                         <div class="input-group">
                             <select class="form-select" data-tag-menu="true">
                                 <option value="">Choose an existing tag</option>
@@ -187,6 +163,7 @@ window.addEventListener('DOMContentLoaded', function() {
                             </select>
                             <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
                         </div>
+                        <small class="text-muted d-block mt-2">Type to search existing tags, or keep typing to create a new one. Tags are comma-separated. <a href="{{ url_for('main.tags') }}">Rename or merge tags</a>.</small>
                     </div>
                     <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
                     {% if editing_result %}
@@ -243,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                                 </button>
                                             </div>
                                         {% endif %}
-                                        <a href="{{ result.results_link }}" target="_blank" class="small">Open result</a>
+                                        <a href="{{ result.results_link | http_link }}" target="_blank" class="small">Open result</a>
                                     </div>
                                     <div class="d-flex flex-column gap-2">
                                         <a href="{{ url_for('main.edit_public_result', result_id=result.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>

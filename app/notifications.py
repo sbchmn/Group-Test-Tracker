@@ -10,11 +10,17 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from flask import current_app
+from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
-from .models import NotificationConfig, NotificationTemplate, User, UserDigestEvent
+from .models import NotificationConfig, NotificationTemplate, RootOutbox, User, UserDigestEvent
 from .bot_dispatch import post_json
+from .root_bridge import bridge_status_channel_id
 from .saas import managed_public_url
+
+# gthread workers do not preempt hung request threads, so every synchronous
+# provider call must carry its own socket timeout.
+OUTBOUND_HTTP_TIMEOUT_SECONDS = 10
 
 
 def _get_config(key, default=None):
@@ -151,28 +157,44 @@ def render_notification_template(template_text, context):
     return pattern.sub(lambda m: str(context.get(m.group(1), "")), template_text)
 
 
+def select_template_body(bodies, channel):
+    """Resolve the body for a channel from a {channel: rendered_body} mapping.
+
+    Chat providers fall back to the plain-text Telegram body before the HTML email
+    body, so a channel never receives markup it cannot render while its own body is
+    still unset.
+    """
+    if channel == "email":
+        return bodies.get("email")
+    return bodies.get(channel) or bodies.get("telegram") or bodies.get("email")
+
+
+def template_bodies(template, context=None):
+    """Render every provider body variant of a notification template."""
+    def render(value):
+        text = value or ""
+        return render_notification_template(text, context) if context else text
+
+    return {
+        "email": render(template.email_body),
+        "telegram": render(template.telegram_body),
+        "discord": render(template.discord_body),
+        "root": render(template.root_body),
+    }
+
+
 def send_notification_message(user, channel, subject, body):
-    if channel == "telegram":
-        sent = send_telegram_message(user, body)
-        if sent:
-            return True
+    deliver = _CHANNEL_SENDERS.get(channel)
+    if deliver is None or deliver is _deliver_email:
+        return _deliver_email(user, subject, body)
 
-        append_notification_log(
-            f"telegram: falling back to email for {getattr(user, 'username', 'unknown')}"
-        )
-        return send_mailjet_message(user, subject, body)
-    if channel == "discord":
-        sent = send_discord_message(user, body)
-        if sent:
-            return True
+    if deliver(user, subject, body):
+        return True
 
-        append_notification_log(
-            f"discord: falling back to email for {getattr(user, 'username', 'unknown')}"
-        )
-        return send_mailjet_message(user, subject, body)
-    if channel == "root":
-        return send_root_message(body)
-    return send_mailjet_message(user, subject, body)
+    append_notification_log(
+        f"{channel}: falling back to email for {getattr(user, 'username', 'unknown')}"
+    )
+    return _deliver_email(user, subject, body)
 
 
 def send_mailjet_message(user, subject, body):
@@ -217,7 +239,7 @@ def send_mailjet_message(user, subject, body):
     )
 
     try:
-        with urlopen(request, context=None) as response:
+        with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
             response_body = response.read().decode("utf-8", errors="replace")
 
         try:
@@ -285,7 +307,7 @@ def _send_telegram_bot_message(chat_id, body, parse_mode=None, message_thread_id
     )
 
     try:
-        with urlopen(request, context=None) as response:
+        with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
             response_body = response.read().decode("utf-8", errors="replace")
 
         try:
@@ -366,7 +388,7 @@ def download_telegram_photo(file_id, max_bytes=None):
         return None
     url = f'https://api.telegram.org/file/bot{quote(bot_token, safe="")}/{file_path}'
     try:
-        with urlopen(url, timeout=10) as remote_file:
+        with urlopen(url, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as remote_file:
             payload = remote_file.read((max_bytes + 1) if max_bytes else -1)
     except (HTTPError, URLError, TimeoutError, ValueError):
         return None
@@ -401,7 +423,7 @@ def _discord_api_post(method_name, payload):
         )
 
         try:
-            with urlopen(request, context=None) as response:
+            with urlopen(request, context=None, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
                 response_body = response.read().decode("utf-8", errors="replace")
             try:
                 parsed_response = json.loads(response_body) if response_body else {}
@@ -548,10 +570,11 @@ def send_telegram_message(user, body):
 def send_discord_message(user, body):
     append_notification_log(f"discord: queued for {getattr(user, 'username', 'unknown')}")
     discord_user_id = str(_get_user_attr(user, "discord_user_id", None) or "").strip()
-    if discord_user_id:
-        return _send_discord_dm_message(discord_user_id, body)
-
-    return _send_discord_webhook_message(body)
+    if not discord_user_id:
+        # The shared webhook posts to one org-wide channel, so using it as a
+        # per-user fallback publishes this member's private body to everyone.
+        return False
+    return _send_discord_dm_message(discord_user_id, body)
 
 
 def _parse_telegram_channel_target(raw_target):
@@ -716,21 +739,133 @@ def _queue_bot_webhook_message(provider_name, webhook_url, payload):
 def _send_discord_webhook_message(body):
     webhook_url = _get_config("discord_webhook_url")
     username = str(_get_config("discord_webhook_username") or "Group Test Manager").strip() or "Group Test Manager"
-    payload = {
-        "content": str(body or ""),
-        "username": username,
-    }
-    return _queue_bot_webhook_message("discord", webhook_url, payload)
+    payloads = [
+        {**payload, "username": username}
+        for payload in _build_discord_message_payloads(body)
+    ]
+
+    for payload in payloads:
+        if not _queue_bot_webhook_message("discord", webhook_url, payload):
+            return False
+
+    return bool(payloads)
+
+
+def root_plain_text(body):
+    """Reduce a rendered notification body to text Root can actually display.
+
+    Root renders no markup, and ``select_template_body`` can hand a chat channel the
+    HTML email body when its own body is unset. Tag stripping keeps the anchor text
+    (so a ``tg://`` mention degrades to the member's name) and drops the target.
+    """
+    from html import unescape
+
+    text = re.sub(r"<[^>]+>", "", str(body or ""))
+    text = unescape(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def send_root_message(body):
-    webhook_url = _get_config("root_webhook_url")
-    sender_name = str(_get_config("root_webhook_name") or "Group Test Manager").strip() or "Group Test Manager"
-    payload = {
-        "text": str(body or ""),
-        "sender": sender_name,
-    }
-    return _queue_bot_webhook_message("root", webhook_url, payload)
+    """Queue a message for delivery into Root.
+
+    Root accepts no pushes at all, so "sending" here means handing the body to the
+    pull-based outbox that the Root-hosted bridge drains. True means the message was
+    accepted for delivery, not that it landed in a channel.
+    """
+    channel_id = bridge_status_channel_id()
+    text = root_plain_text(body)
+    if not channel_id or not text:
+        append_notification_log(
+            "root: message not queued ({})".format("no status channel configured" if not channel_id else "empty body")
+        )
+        return False
+
+    try:
+        db.session.add(RootOutbox(channel_id=channel_id, body=text))
+        db.session.commit()
+    except SQLAlchemyError as exc:
+        # Every other adapter turns transport failure into False so
+        # send_notification_message can fall back to email; a raise here would
+        # 500 the caller mid-loop instead, with the notification unsent.
+        db.session.rollback()
+        append_notification_log(f"root: could not queue outbox message: {exc}")
+        return False
+
+    append_notification_log(f"root: queued outbox message for {channel_id}")
+    return True
+
+
+def send_root_status_channel_message(body, buttons=None):
+    """Queue a status-channel broadcast for delivery into Root.
+
+    Root renders plain text only — no in-message buttons or interactive components —
+    so ``buttons`` degrades to text: every button carrying both a label and a url is
+    appended as a visible absolute link, which the Root client auto-links. A button
+    missing either part cannot be rendered at all, so it is skipped and logged rather
+    than passed on half-formed.
+
+    Delivery is the same pull-based outbox handoff as ``send_root_message``, so True
+    means the message was accepted for delivery, not that it landed in a channel.
+    """
+    text = str(body or "").strip()
+    if not text:
+        append_notification_log("root: status channel message not queued (empty body)")
+        return False
+
+    link_lines = []
+    skipped = 0
+    for button in (buttons or []):
+        label = str(button.get("label") or "").strip() if isinstance(button, dict) else ""
+        url = str(button.get("url") or "").strip() if isinstance(button, dict) else ""
+        if not label or not url:
+            skipped += 1
+            continue
+        link_lines.append(f"{label}: {url}")
+
+    if skipped:
+        append_notification_log(
+            f"root: skipped {skipped} status channel button(s) without a label or url"
+        )
+    if link_lines:
+        text = "\n".join([text, ""] + link_lines)
+
+    return send_root_message(text)
+
+
+# Uniform transport seam: every adapter accepts (user, subject, body) and returns a
+# truthy delivery result. Chat providers have no message subject, so they accept and
+# ignore it rather than forcing callers to special-case by channel.
+def _deliver_email(user, subject, body):
+    return send_mailjet_message(user, subject, body)
+
+
+def _deliver_telegram(user, subject, body):
+    return send_telegram_message(user, body)
+
+
+def _deliver_discord(user, subject, body):
+    return send_discord_message(user, body)
+
+
+def _deliver_root(user, subject, body):
+    # Root cannot address a message to one person: everything lands in a channel the
+    # whole community reads. Personal content (a new password, an amount owed) must
+    # never be broadcast, so this adapter refuses and the caller falls back to email
+    # even for a stored channel value predating that rule.
+    append_notification_log(
+        f"root: {getattr(user, 'username', 'unknown')} asked for a personal channel Root cannot provide; "
+        "using email"
+    )
+    return False
+
+
+_CHANNEL_SENDERS = {
+    "email": _deliver_email,
+    "telegram": _deliver_telegram,
+    "discord": _deliver_discord,
+    "root": _deliver_root,
+}
 
 
 def _telegram_api_post(method_name, payload):
@@ -828,7 +963,8 @@ def send_password_reset(user, new_password):
         body = f"Your new password is: {new_password}"
         subject = "Password Reset"
     else:
-        template_body = template.telegram_body if channel == "telegram" else template.email_body
+        bodies = template_bodies(template)
+        template_body = select_template_body(bodies, channel)
         body = render_notification_template(
             template_body or "",
             {"new_password": new_password, "username": user.username},
@@ -853,13 +989,10 @@ def send_group_test_notification(test, user, template, amount_owed=None):
         "test_id": str(test.id),
     }
     email_subject = render_notification_template(template.email_subject or "", context)
-    email_body = render_notification_template(template.email_body or "", context)
-    telegram_body = render_notification_template(template.telegram_body or "", context)
+    bodies = template_bodies(template, context)
 
     channel = user.notification_channel or "email"
-    if channel == "telegram":
-        return send_notification_message(user, "telegram", email_subject, telegram_body)
-    return send_notification_message(user, "email", email_subject, email_body)
+    return send_notification_message(user, channel, email_subject, select_template_body(bodies, channel))
 
 
 def _digest_slot_for_user(user, now):
@@ -923,36 +1056,43 @@ def send_due_user_digests(now=None):
     sent_count = 0
     user_count = 0
     for user in users:
-        if not _is_user_digest_due(user, now):
-            continue
+        try:
+            if not _is_user_digest_due(user, now):
+                continue
 
-        due_events = (
-            UserDigestEvent.query
-            .filter_by(user_id=user.id, sent_at=None)
-            .order_by(UserDigestEvent.created_at.asc(), UserDigestEvent.id.asc())
-            .all()
-        )
-        if not due_events:
+            due_events = (
+                UserDigestEvent.query
+                .filter_by(user_id=user.id, sent_at=None)
+                .order_by(UserDigestEvent.created_at.asc(), UserDigestEvent.id.asc())
+                .all()
+            )
+            if not due_events:
+                user.digest_last_sent_at = now
+                db.session.add(user)
+                db.session.commit()
+                continue
+
+            subject = f"Group Test Digest ({len(due_events)} update{'s' if len(due_events) != 1 else ''})"
+            body = _render_user_digest_email(user, due_events)
+            sent = send_mailjet_message(user, subject, body)
+            if not sent:
+                append_notification_log(f"digest: failed for {getattr(user, 'username', 'unknown')}")
+                continue
+
+            sent_at = datetime.utcnow()
+            for event in due_events:
+                event.sent_at = sent_at
             user.digest_last_sent_at = now
             db.session.add(user)
-            continue
+            db.session.add_all(due_events)
+            # Commit per user: one delivery receipt per user must survive a later
+            # user's failure, otherwise the whole run rewinds and re-notifies everyone.
+            db.session.commit()
+            sent_count += len(due_events)
+            user_count += 1
+        except Exception:
+            db.session.rollback()
+            append_notification_log(f"digest: error for {getattr(user, 'username', 'unknown')}")
 
-        subject = f"Group Test Digest ({len(due_events)} update{'s' if len(due_events) != 1 else ''})"
-        body = _render_user_digest_email(user, due_events)
-        sent = send_mailjet_message(user, subject, body)
-        if not sent:
-            append_notification_log(f"digest: failed for {user.username}")
-            continue
-
-        sent_at = datetime.utcnow()
-        for event in due_events:
-            event.sent_at = sent_at
-        user.digest_last_sent_at = now
-        db.session.add(user)
-        db.session.add_all(due_events)
-        sent_count += len(due_events)
-        user_count += 1
-
-    db.session.commit()
     append_notification_log(f"digest: completed users={user_count} events={sent_count}")
     return {"users": user_count, "events": sent_count}

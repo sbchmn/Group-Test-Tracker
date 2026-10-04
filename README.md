@@ -6,6 +6,8 @@ This README is a practical how-to guide for every major feature in the app.
 
 Quick admin one-pager: [ADMIN_QUICK_START.md](ADMIN_QUICK_START.md)
 
+Release notes: [CHANGELOG.md](CHANGELOG.md)
+
 ## Table of Contents
 
 - [What This App Includes](#what-this-app-includes)
@@ -258,8 +260,13 @@ If approved:
 
 1. Open a test detail page.
 2. Click Update My Order and Payment Status.
-3. Update order progress, payment flags, amount paid, and notes.
-4. Save.
+3. Update order progress, amount paid, and notes.
+4. To report your lab-fee payment, tick "I have paid my lab fees". This submits the report for administrator verification; it can be amended while pending.
+5. Save.
+
+Payment verification behavior:
+
+- Reporting payment raises an administrator review item in the Action Queue. Only an administrator confirmation marks your lab fees as paid, which is what unlocks paid results.
 
 Payment method behavior:
 
@@ -276,7 +283,7 @@ Payment method behavior:
 Note:
 
 - Group test result images are issued through authenticated signed URLs.
-- You must be an approved participant marked as paid (or admin) to open group test result images.
+- You must be an approved participant whose lab-fee payment an administrator has verified (or admin) to open group test result images.
 
 ## Admin How-To
 
@@ -329,16 +336,23 @@ Important behavior:
 5. Remove participant if needed.
 6. Recalculate costs after major membership changes.
 
+Payment controls on each approved row:
+
+- Confirm Payment appears when a participant has reported payment; it marks lab fees paid, records who verified, and clears the pending report.
+- Mark Paid sets payment for participants who have not reported; Unmark Paid revokes a prior verification.
+- Reject Payment Report dismisses a report (the participant can report again); no reason is required.
+- Unapprove removes approval and any pending payment report; the participant returns to the request flow.
+
 ### Admin Action Queue (Cross-Test)
 
 Use as the central inbox for anything requiring administrator approval or attention.
 
 1. Open Admin -> Action Queue.
 2. Review completed result-analysis findings and inspect failed analysis runs.
-3. Filter participation requests by status and keyword.
-4. Approve or deny single requests.
-5. Select multiple rows for bulk approve/deny.
-6. Use Approve All Filtered for large backlogs.
+3. Filter participation requests and payment reports by status and keyword.
+4. Approve or deny single requests; Confirm Payment or Reject Report handles participant payment reports. Every non-results item shares the one queue list and shows the buttons for its type.
+5. Select multiple join-request rows for bulk approve/deny.
+6. Use Approve All Filtered for large backlogs (it applies only to join requests; pending payment reports are never bulk-approved).
 7. Enter confirmation text when prompted for filtered bulk approval.
 
 Items remain in this queue until their attention state is resolved. New features that require administrator approval or intervention must also surface here.
@@ -408,6 +422,14 @@ Supported sources and limits:
 2. Create users or edit existing users.
 3. Toggle active state.
 4. Trigger password reset delivery for selected user.
+
+Deactivation behavior:
+
+- Deactivating a user immediately signs them out of every active web session (existing cookies stop working) and blocks all linked Telegram/Discord commands, payment/COA submissions, and link-token binding for that account.
+- Password reset silently skips deactivated accounts (the public response stays uniform and no new password is issued or delivered).
+- Re-enabling a user restores all of that access.
+- Administrators cannot deactivate their own account.
+- Account-free bot use is unaffected: unlinked users can still run public group commands such as `/testing` and scope-permitted `/publicresults` browsing.
 
 ### Notification Templates
 
@@ -538,7 +560,7 @@ Result files are optional and uploaded to S3-compatible storage.
 - Upload on Public Result create/edit.
 - Thumbnails and modal previews are fetched through app-controlled authenticated routes.
 - The app generates short-lived signed object URLs on demand (default 60 seconds).
-- Group test result images require admin access or approved plus paid participation in that test.
+- Group test result images require admin access or approved participation whose lab-fee payment an administrator has verified in that test.
 - Public result images require login.
 - PDFs are supported for result uploads and render in embedded modal preview with download option.
 - Replacing image deletes old object best-effort.
@@ -560,7 +582,7 @@ Result files are optional and uploaded to S3-compatible storage.
 - Recruiting: visible to authenticated users.
 - Ready_for_payment/Testing/Closed: visible to admins and approved members.
 - Results links/images for group tests are shown only when closed and user is authorized.
-- Group test result images specifically require admin or approved+paid participant access before signed URL issuance.
+- Group test result images specifically require admin or approved participant access with administrator-verified lab-fee payment before signed URL issuance.
 
 ## Notification Template Variables
 
@@ -571,6 +593,7 @@ Supported variables:
 - `username`
 - `new_password`
 - `amount_owed`
+- `amount_paid`
 - `test_title`
 - `test_link`
 - `test_id`

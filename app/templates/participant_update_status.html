@@ -18,9 +18,22 @@
             </div>
 
             <div class="mb-3 form-check">
-                {{ form.paid_lab(class="form-check-input") }}
-                {{ form.paid_lab.label(class="form-check-label") }}
+                {{ form.payment_claim(class="form-check-input") }}
+                {{ form.payment_claim.label(class="form-check-label") }}
+                <div class="form-text">An administrator must confirm the payment before results unlock after the test closes.</div>
             </div>
+
+            {% if part.paid_lab %}
+                <div class="alert alert-success py-2 small">
+                    <i class="bi bi-check-circle-fill"></i>
+                    Payment verified{% if part.payment_verified_at %} on {{ part.payment_verified_at.strftime('%Y-%m-%d') }}{% endif %}.
+                </div>
+            {% elif part.payment_claimed_at %}
+                <div class="alert alert-info py-2 small">
+                    <i class="bi bi-hourglass-split"></i>
+                    Payment reported {{ part.payment_claimed_at.strftime('%Y-%m-%d %H:%M') }} — waiting for an administrator to confirm.
+                </div>
+            {% endif %}
 
             <div class="mb-3">
                 {{ form.amount_paid.label(class="form-label") }}

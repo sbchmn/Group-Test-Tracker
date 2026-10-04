@@ -66,7 +66,7 @@
     <div class="alert alert-success">No result analyses currently require administrator attention.</div>
 {% endif %}
 
-<h4 class="mb-2">Participation Requests</h4>
+<h4 class="mb-2">Participation Requests &amp; Payment Reports</h4>
 <div class="card mb-3">
     <div class="card-body">
         <form method="GET" class="row g-2 align-items-end">
@@ -92,7 +92,7 @@
 </div>
 
 {% if not pending_parts %}
-    <div class="alert alert-success">No pending participation requests match your filters.</div>
+    <div class="alert alert-success">No pending participation requests or payment reports match your filters.</div>
 {% else %}
     <div class="card border-warning mb-3">
         <div class="card-body">
@@ -153,16 +153,21 @@
                         <th style="width: 40px;"><input type="checkbox" id="select-all"></th>
                         <th>Participant</th>
                         <th>Group Test</th>
-                        <th>Status</th>
-                        <th>Requested</th>
+                        <th>Item / Status</th>
+                        <th>Requested / Reported</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for part in pending_parts %}
+                        {% set is_payment_report = part.approved %}
                         <tr>
                             <td>
-                                <input type="checkbox" value="{{ part.id }}" class="part-checkbox">
+                                {% if not is_payment_report %}
+                                    <input type="checkbox" value="{{ part.id }}" class="part-checkbox">
+                                {% else %}
+                                    <span class="text-muted small">—</span>
+                                {% endif %}
                             </td>
                             <td>
                                 <strong>{{ part.name or part.user.username }}</strong>
@@ -175,28 +180,59 @@
                                 {% endif %}
                             </td>
                             <td>
+                                {% if is_payment_report %}
+                                    <span class="badge text-bg-info">Payment Report</span>
+                                    <div class="small text-muted">Reported ${{ '%.2f'|format(part.amount_paid or 0) }} · owed ${{ '%.2f'|format(part.amount_owed or 0) }}</div>
+                                {% else %}
+                                    <span class="badge text-bg-warning">Join Request</span>
+                                {% endif %}
                                 <span class="badge bg-secondary text-uppercase">{{ part.group_test.status }}</span>
                             </td>
-                            <td>{{ part.requested_at.strftime('%Y-%m-%d %H:%M') if part.requested_at else 'n/a' }}</td>
+                            <td>
+                                {% if is_payment_report %}
+                                    {{ part.payment_claimed_at.strftime('%Y-%m-%d %H:%M') if part.payment_claimed_at else 'n/a' }}
+                                {% else %}
+                                    {{ part.requested_at.strftime('%Y-%m-%d %H:%M') if part.requested_at else 'n/a' }}
+                                {% endif %}
+                            </td>
                             <td class="text-end">
                                 <a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage Test</a>
-                                <form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="status" value="{{ status_filter }}">
-                                    <input type="hidden" name="q" value="{{ search }}">
-                                    <input type="hidden" name="page" value="{{ page }}">
-                                    <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                    <button type="submit" class="btn btn-success btn-sm">Approve</button>
-                                </form>
-                                <form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request?')">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="status" value="{{ status_filter }}">
-                                    <input type="hidden" name="q" value="{{ search }}">
-                                    <input type="hidden" name="page" value="{{ page }}">
-                                    <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                    <input type="hidden" name="deny_reason" class="deny-row-reason" value="">
-                                    <button type="submit" class="btn btn-outline-danger btn-sm">Deny</button>
-                                </form>
+                                {% if is_payment_report %}
+                                    <form method="POST" action="{{ url_for('main.confirm_participant_payment', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Confirm this reported payment and mark lab fees as paid?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="status" value="{{ status_filter }}">
+                                        <input type="hidden" name="q" value="{{ search }}">
+                                        <input type="hidden" name="page" value="{{ page }}">
+                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+                                        <button type="submit" class="btn btn-success btn-sm">Confirm Payment</button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('main.reject_participant_payment_claim', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Reject this payment report? The participant can report payment again.')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="status" value="{{ status_filter }}">
+                                        <input type="hidden" name="q" value="{{ search }}">
+                                        <input type="hidden" name="page" value="{{ page }}">
+                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+                                        <button type="submit" class="btn btn-outline-info btn-sm">Reject Report</button>
+                                    </form>
+                                {% else %}
+                                    <form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="status" value="{{ status_filter }}">
+                                        <input type="hidden" name="q" value="{{ search }}">
+                                        <input type="hidden" name="page" value="{{ page }}">
+                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+                                        <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="status" value="{{ status_filter }}">
+                                        <input type="hidden" name="q" value="{{ search }}">
+                                        <input type="hidden" name="page" value="{{ page }}">
+                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+                                        <input type="hidden" name="deny_reason" class="deny-row-reason" value="">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">Deny</button>
+                                    </form>
+                                {% endif %}
                             </td>
                         </tr>
                     {% endfor %}

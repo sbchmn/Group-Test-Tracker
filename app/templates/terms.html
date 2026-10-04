@@ -103,12 +103,16 @@
         channel, server, or thread may be visible to other members according to that platform's permissions.
     </p>
     <p>
-        The Service may also send administrator-configured outbound messages to Discord webhooks and a generic
-        "Root" webhook. Root is an outbound notification transport, not an account-login provider. Messaging
-        platforms and webhook recipients are independent services with their own terms and privacy practices. The
-        Operator is not responsible for their availability, security, moderation, or onward handling of messages.
-        You may stop bot interactions, unlink an identity through the Service where available, or ask an administrator
-        for help; platform-side copies may remain under the platform's rules.
+        The Service may also deliver notifications through Discord and through Root. Root hosts its own bot and
+        accepts no inbound connections, so the Service never pushes a message into Root: a Root-hosted bridge collects
+        outbound messages by polling the Service and posts them to an administrator-configured Root channel, and sends
+        member commands back to the Service over signed HTTPS requests. Root is both a notification transport and an
+        account-linking provider—a member may attach a Root identity to their profile by sending a single-use token
+        generated on that profile. Because Root has no direct messages, Root notifications and link commands are posted
+        to a channel and may be read by its members. Messaging platforms are independent services with their own terms
+        and privacy practices. The Operator is not responsible for their availability, security, moderation, or onward
+        handling of messages. You may stop bot interactions, unlink an identity through the Service where available, or
+        ask an administrator for help; platform-side copies may remain under the platform's rules.
     </p>
 
     <h2>8. Acceptable use</h2>

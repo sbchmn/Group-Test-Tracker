@@ -451,6 +451,30 @@ Deactivation behavior:
 
 ### Telegram Config
 
+Optional AI retorts support a user when another bot directly replies to a command
+explicitly addressed to GTT, such as `/publicresults@YourGTTBot`:
+
+1. Apply migrations with `python -m flask --app app db upgrade`.
+2. Configure and enable the selected provider under Admin Settings -> Result Analysis
+   (OpenAI, xAI, or Anthropic). Retorts reuse its model and credentials; automatic
+   lab analysis does not need to be enabled. Managed instances require the
+   `result_analysis` entitlement.
+3. Under Telegram Config, enable **AI retorts supporting users**, enter the numeric
+   **Retort Group IDs**, and confirm the Telegram bot username is correct.
+4. Enable **Bot-to-Bot Communication Mode** in BotFather. GTT also needs group admin
+   rights or disabled Group Privacy Mode to receive bot replies to human messages.
+   See [Telegram's bot-to-bot documentation](https://core.telegram.org/bots/features#bot-to-bot-communication).
+
+Retorts are off by default. GTT sends only the command name (without arguments)
+and up to 1,000 characters of the other bot's reply to the selected AI provider.
+The reply supports the user without asserting their permissions. There is at most
+one generation/delivery attempt per original command and a persistent 60-second
+cooldown per group. Bot replies to GTT's retort do not trigger another response.
+Provider or delivery failures are logged without quoted messages or credentials,
+and are not retried. No fallback provider is used. Check the notification log for
+`telegram: bot retort` entries. Generation runs within the webhook with a 12-second
+provider timeout and SDK retries disabled; a failed attempt leaves the group quiet.
+
 1. Open Admin -> Telegram Config.
 2. Configure Telegram bot token and bot username.
 3. Configure Telegram webhook URL override (optional), webhook secret, and allowed source IP CIDRs (optional).

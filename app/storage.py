@@ -34,6 +34,10 @@ _RESULT_FORMAT_META = {
 
 
 def _get_config_value(key, default=None):
+    from .managed_integrations import managed_integration_value
+    configured, value = managed_integration_value(key)
+    if configured:
+        return value
     item = NotificationConfig.query.filter_by(key=key).first()
     if item is None:
         return default

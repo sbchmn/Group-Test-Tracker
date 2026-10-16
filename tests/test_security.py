@@ -3062,6 +3062,7 @@ class SecurityTests(unittest.TestCase):
     def test_telegram_public_group_commands_unaffected_by_deactivation(self):
         with self.app.app_context():
             db.create_all()
+            db.session.add(NotificationConfig(key='builtin_testing_allow_non_private', value='true'))
             db.session.commit()
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:

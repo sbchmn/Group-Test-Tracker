@@ -7,6 +7,18 @@ identified explicitly below.
 
 ## Unreleased
 
+### Telegram user-support retorts
+
+- Added opt-in AI retorts when another bot directly replies to a human command
+  explicitly tagged for GTT, with an admin-managed group allowlist.
+- Reuse the configured AI provider and model; reply to the interrupting bot in
+  the same topic, without adding command arguments or the user's profile to AI input.
+- Added persistent one-attempt-per-command deduplication and atomic per-group
+  cooldowns, and prevent bot messages from executing human command handlers.
+- Added migration `d9f3a6c8e2b4` for retort attempts and cooldowns.
+- Restored command-image cleanup after database commits and repaired notification
+  test imports and the group-command scope fixture lost during prior integration.
+
 ### Security and licensing hardening
 
 - Added Flask-Limiter throttling for login and password-reset POST requests.

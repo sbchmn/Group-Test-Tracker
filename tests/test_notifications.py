@@ -12,8 +12,9 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app, db
-from app.models import GroupTest, NotificationConfig, NotificationTemplate, Participation, PublicResult, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
+from app.models import GroupTest, BotLinkToken, NotificationConfig, NotificationTemplate, Participation, PublicResult, RootOutbox, TelegramCommandTemplate, TelegramStatusDigestEvent, User, UserDigestEvent
 from app.notifications import append_notification_log, read_notification_log, register_telegram_webhook, render_notification_template, send_discord_status_channel_message, send_mailjet_message, send_notification_message, send_password_reset, send_telegram_command_response, send_telegram_message, send_telegram_status_channel_message, set_telegram_commands
+from app.notifications import _send_discord_webhook_message, select_template_body, send_group_test_notification, send_root_message, template_bodies
 
 
 class NotificationTests(unittest.TestCase):

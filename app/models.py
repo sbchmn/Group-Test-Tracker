@@ -422,6 +422,30 @@ class BotLinkToken(db.Model):
         return self.used_at is None and self.expires_at >= datetime.utcnow()
 
 
+class TelegramBotRetort(db.Model):
+    """At-most-once attempt for another bot interrupting a human command."""
+    __tablename__ = 'telegram_bot_retorts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    chat_id = db.Column(db.String(80), nullable=False)
+    original_message_id = db.Column(db.BigInteger, nullable=False)
+    bot_message_id = db.Column(db.BigInteger, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='reserved')
+    response_message_id = db.Column(db.String(120), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('chat_id', 'original_message_id', name='_tg_retort_original_uc'),
+    )
+
+
+class TelegramBotRetortCooldown(db.Model):
+    __tablename__ = 'telegram_bot_retort_cooldowns'
+
+    chat_id = db.Column(db.String(80), primary_key=True)
+    next_allowed_at = db.Column(db.DateTime, nullable=False)
+
+
 class TelegramWebhookUpdate(db.Model):
     __tablename__ = 'telegram_webhook_updates'
 

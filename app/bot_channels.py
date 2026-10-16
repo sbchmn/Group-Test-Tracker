@@ -69,7 +69,9 @@ _BY_NAME = {channel.name: channel for channel in CHANNELS}
 
 
 def _value_is_set(configs, key):
-    return bool(str(configs.get(key) or "").strip())
+    from .managed_integrations import managed_integration_value
+    configured, value = managed_integration_value(key)
+    return bool(str((value if configured else configs.get(key)) or "").strip())
 
 
 def is_configured(name, configs):

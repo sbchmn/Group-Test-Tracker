@@ -16,7 +16,7 @@ from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
     FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField, FileField
 )
-from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL
+from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL, Regexp
 from datetime import datetime, date
 from datetime import timedelta, timezone
 from functools import wraps
@@ -416,6 +416,13 @@ class BotIntegrationsForm(FlaskForm):
 
 
 class TelegramConfigForm(FlaskForm):
+    telegram_bot_retorts_enabled = BooleanField('Enable AI retorts supporting users')
+    telegram_bot_retorts_chat_ids = StringField(
+        'Retort Group IDs (comma-separated)', validators=[
+            Optional(), Length(max=1000),
+            Regexp(r'^\s*(?:-\d+\s*(?:,\s*-\d+\s*)*)?$', message='Enter numeric Telegram group IDs separated by commas.'),
+        ],
+    )
     telegram_bot_token = StringField('Telegram Bot Token', validators=[Optional()])
     telegram_bot_username = StringField('Telegram Bot Username', validators=[Optional(), Length(max=80)])
     telegram_webhook_url = StringField('Telegram Webhook URL (optional override)', validators=[Optional(), URL(require_tld=False), Length(max=500)])
@@ -2795,6 +2802,11 @@ def telegram_webhook():
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     caption = (message.get('caption') or '').strip()
+    if from_user.get('is_bot') is True:
+        from .telegram_bot_retorts import handle_bot_reply
+        handle_bot_reply(message, config_map)
+        db.session.commit()
+        return jsonify({'ok': True})
     command, command_args, addressed_elsewhere = _parse_telegram_command(
         text or caption,
         config_map.get('telegram_bot_username'),
@@ -5031,6 +5043,8 @@ def telegram_command_templates():
             return _render_telegram_command_templates_page(form)
         db.session.add(template)
         db.session.commit()
+        for obsolete_key in obsolete_media_keys:
+            delete_result_image(obsolete_key)
         _sync_telegram_command_menus()
         flash('Telegram command template created.', 'success')
         return redirect(url_for('main.telegram_command_templates'))
@@ -5091,6 +5105,8 @@ def edit_telegram_command_template(template_id):
         template.allow_admin_bot_updates = bool(form.allow_admin_bot_updates.data)
         template.is_active = bool(form.is_active.data)
         db.session.commit()
+        for obsolete_key in obsolete_media_keys:
+            delete_result_image(obsolete_key)
         _sync_telegram_command_menus()
         flash('Telegram command template updated.', 'success')
         return redirect(url_for('main.telegram_command_templates'))
@@ -5165,6 +5181,16 @@ def telegram_config():
     existing_telegram_bot_token = str(configs.get('telegram_bot_token') or '').strip()
 
     if form.validate_on_submit():
+        if form.telegram_bot_retorts_enabled.data and not (
+            str(form.telegram_bot_retorts_chat_ids.data or '').strip()
+            and str(form.telegram_bot_username.data or '').strip().lstrip('@')
+        ):
+            flash('AI retorts require the Telegram bot username and at least one retort group ID.', 'danger')
+            return render_template(
+                'admin/telegram_config.html', form=form,
+                webhook_secret_mask=mask_secret(existing_webhook_secret),
+                effective_telegram_webhook_url=_resolve_telegram_webhook_url(configs),
+            )
         webhook_secret = (form.telegram_webhook_secret.data or '').strip()
         submitted_telegram_bot_token = (form.telegram_bot_token.data or '').strip()
 
@@ -5173,6 +5199,8 @@ def telegram_config():
             submitted_telegram_bot_token = existing_telegram_bot_token
 
         for key, value in {
+            'telegram_bot_retorts_enabled': 'true' if form.telegram_bot_retorts_enabled.data else 'false',
+            'telegram_bot_retorts_chat_ids': form.telegram_bot_retorts_chat_ids.data,
             'telegram_bot_token': submitted_telegram_bot_token,
             'telegram_bot_username': form.telegram_bot_username.data,
             'telegram_webhook_url': form.telegram_webhook_url.data,
@@ -5210,6 +5238,8 @@ def telegram_config():
         return redirect(url_for('main.telegram_config'))
 
     if not form.is_submitted():
+        form.telegram_bot_retorts_enabled.data = str(configs.get('telegram_bot_retorts_enabled', 'false')).lower() == 'true'
+        form.telegram_bot_retorts_chat_ids.data = configs.get('telegram_bot_retorts_chat_ids')
         form.telegram_bot_token.data = mask_secret(configs.get('telegram_bot_token'))
         form.telegram_bot_username.data = configs.get('telegram_bot_username')
         form.telegram_webhook_url.data = configs.get('telegram_webhook_url')

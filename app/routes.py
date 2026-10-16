@@ -1190,7 +1190,13 @@ _STORAGE_CONFIG_KEYS = {
 
 
 def _config_values_map():
-    return {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+    configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+    from .managed_integrations import managed_integration_value
+    for key in _STORAGE_CONFIG_KEYS:
+        configured, value = managed_integration_value(key)
+        if configured:
+            configs[key] = value
+    return configs
 
 
 def _save_config_value(key, value):
@@ -5710,6 +5716,26 @@ def toggle_tag_bots_visibility(tag_id):
 def storage_config():
     form = StorageConfigForm()
     configs = _config_values_map()
+    from .managed_integrations import managed_integration_value
+    managed_storage_keys = set()
+    for key in _STORAGE_CONFIG_KEYS:
+        configured, value = managed_integration_value(key)
+        if configured:
+            managed_storage_keys.add(key)
+            configs[key] = value
+            field = form[key]
+            field_value = value
+            if key in {'storage_enabled', 'storage_make_public', 'storage_force_path_style'}:
+                field_value = value.lower() in {'true', '1', 'yes', 'on'}
+            elif key in {'storage_signed_url_ttl_seconds', 'storage_max_upload_size_mb'}:
+                try:
+                    field_value = float(value)
+                except (ValueError, TypeError):
+                    field_value = 60 if key == 'storage_signed_url_ttl_seconds' else 8
+            elif key == 'storage_secret_access_key':
+                field_value = ''
+            field.process(formdata=None, data=field_value)
+            field.render_kw = {**(field.render_kw or {}), 'disabled': True}
 
     existing_secret = str(configs.get('storage_secret_access_key') or '').strip()
 
@@ -5754,9 +5780,10 @@ def storage_config():
                 'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF,PDF').strip(),
             }
             for key, value in updates.items():
-                _save_config_value(key, value)
+                if key not in managed_storage_keys:
+                    _save_config_value(key, value)
 
-            if secret_access_key:
+            if secret_access_key and 'storage_secret_access_key' not in managed_storage_keys:
                 _save_config_value('storage_secret_access_key', secret_access_key)
 
             db.session.commit()
@@ -5764,7 +5791,7 @@ def storage_config():
             return redirect(url_for('main.storage_config'))
 
     if not form.is_submitted():
-        form.storage_enabled.data = str(configs.get('storage_enabled', 'false')).lower() == 'true'
+        form.storage_enabled.data = str(configs.get('storage_enabled', 'false')).lower() in {'true', '1', 'yes', 'on'}
         form.storage_provider.data = (configs.get('storage_provider') or 'aws').lower()
         form.storage_bucket.data = configs.get('storage_bucket')
         form.storage_region.data = configs.get('storage_region')
@@ -5773,8 +5800,8 @@ def storage_config():
         form.storage_secret_access_key.data = ''
         form.storage_path_prefix.data = configs.get('storage_path_prefix') or 'result-images'
         form.storage_public_base_url.data = configs.get('storage_public_base_url')
-        form.storage_make_public.data = str(configs.get('storage_make_public', 'false')).lower() == 'true'
-        form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() == 'true'
+        form.storage_make_public.data = str(configs.get('storage_make_public', 'false')).lower() in {'true', '1', 'yes', 'on'}
+        form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() in {'true', '1', 'yes', 'on'}
         try:
             form.storage_signed_url_ttl_seconds.data = float(configs.get('storage_signed_url_ttl_seconds') or 60)
         except (TypeError, ValueError):
@@ -5792,6 +5819,7 @@ def storage_config():
         form=form,
         secret_mask=secret_mask,
         storage_enabled=effective_settings.get('enabled', False),
+        managed_storage_keys=sorted(managed_storage_keys),
     )
 
 

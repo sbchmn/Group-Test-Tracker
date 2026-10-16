@@ -2,6 +2,13 @@
 
 This document is the maintained current-state map for Group Test Tracker. Keep it concise and update it whenever implementation changes architecture, behavior, risks, priorities, or validation status. Historical implementation notes belong in [`docs/project-history.md`](docs/project-history.md).
 
+## Managed storage configuration consistency (2026-10-16)
+
+- Runtime storage and Mailjet readers already honor the control plane's secret `GTT_MANAGED_INTEGRATIONS` JSON in managed mode. The Storage Configuration form and general configuration summaries previously read only NotificationConfig rows and could appear empty despite working runtime overrides.
+- Configuration summaries now merge managed storage overrides. The storage form shows effective values, disables managed fields, masks the stored secret, and ignores attempts to change managed keys on POST. Unmanaged fields remain editable; removing overrides restores local values. Standalone behavior is preserved.
+- Storage settings remain runtime secrets delivered through the App spec during provisioning and later reconciliation. Bootstrap-only persistence would not cover subsequent credential rotation or override removal and is not introduced.
+- Validation: managed storage page, tampered POST, secret masking, local editing, override removal, standalone behavior, runtime storage, and integration contract tests are covered. The sibling control plane also checks its generated component environments against this repository's actual storage reader and a simulated upload. No live tenant configuration or bucket access was inspected.
+
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.

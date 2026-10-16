@@ -28,7 +28,13 @@ Map each source test label to exactly one canonical type:
 Examples: "FTIR Identification and Composition Analysis" is Identity; "HPLC Purity of Peptide
 Assay" is Purity; "HPLC Potency Assay" is Net Content; "Bacterial Endotoxins Test (USP <85>)" is
 Endotoxin. Extract unsupported tests too, but classify them as Unknown. One Unknown row must not
-prevent extraction of other rows."""
+prevent extraction of other rows.
+
+Instead of returning two rows of any cannonical test type, combine the data for both entries into
+one line of that canonical type. For example, separate endotoxin entries of "Pass" and "2.2EU/vial" 
+should be combined into one Endotoxin Cannonical Type with the value "Pass - 2.2EU/vial".
+
+"""
 
 
 class ProviderError(RuntimeError):

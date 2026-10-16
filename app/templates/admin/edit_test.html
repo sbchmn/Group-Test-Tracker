@@ -55,31 +55,6 @@ function updateTotalLabCost() {
     if (totalField) totalField.value = total.toFixed(2);
 }
 
-function attachTagMenu(input, menu, button) {
-    if (!input || !menu || !button) return;
-
-    const addSelectedTag = () => {
-        const selectedTag = (menu.value || '').trim();
-        if (!selectedTag) return;
-
-        const tags = (input.value || '')
-            .split(',')
-            .map(tag => tag.trim())
-            .filter(Boolean);
-
-        if (!tags.some(tag => tag.toLowerCase() === selectedTag.toLowerCase())) {
-            tags.push(selectedTag);
-            input.value = tags.join(', ');
-        }
-
-        menu.value = '';
-        input.focus();
-    };
-
-    button.addEventListener('click', addSelectedTag);
-    menu.addEventListener('change', addSelectedTag);
-}
-
 window.onload = function() {
     const container = document.getElementById('labTestsContainer');
     if (container.children.length === 0) {
@@ -92,14 +67,14 @@ window.onload = function() {
             addLabTestRow('STERILITY', '290', '0', '');
         {% endif %}
     }
-
-    attachTagMenu(
-        document.querySelector('[data-tag-input="true"]'),
-        document.querySelector('[data-tag-menu="true"]'),
-        document.querySelector('[data-tag-add="true"]')
-    );
 }
 </script>
+<script>
+    // Tag suggestions for the shared picker in app/static/js/tag-field.js.
+    // Flask's tojson filter is HTML-safe, so a tag name cannot break out here.
+    window.tagFieldSuggestions = {{ tag_suggestions | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/tag-field.js') }}"></script>
 {% endblock scripts %}
 
 {% block content %}
@@ -129,8 +104,8 @@ window.onload = function() {
             <div class="col-md-3">{{ form.size.label(class="form-label") }}{{ form.size(class="form-control") }}</div>
         </div>
         <div class="mb-3 mt-3">
-            {{ form.tag_names.label(class="form-label") }}
-            {{ form.tag_names(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
+            {{ form.tag_text.label(class="form-label") }}
+            {{ form.tag_text(class="form-control mb-2", placeholder="Shed GB#3, tirz", **{'data-tag-input': 'true'}) }}
             <div class="input-group">
                 <select class="form-select" data-tag-menu="true">
                     <option value="">Choose an existing tag</option>
@@ -140,7 +115,7 @@ window.onload = function() {
                 </select>
                 <button type="button" class="btn btn-outline-secondary" data-tag-add="true">Add tag</button>
             </div>
-            <small class="text-muted d-block mt-2">Use the dropdown for existing tags or type a new one. Separate tags with commas.</small>
+            <small class="text-muted d-block mt-2">Type to search existing tags, or keep typing to create a new one. Tags are comma-separated. <a href="{{ url_for('main.tags') }}">Rename or merge tags</a>.</small>
         </div>
         <div class="mb-3">
             {{ form.payment_option_ids.label(class="form-label") }}
@@ -168,7 +143,8 @@ window.onload = function() {
             <div class="col-md-4">{{ form.quote_number.label(class="form-label") }}{{ form.quote_number(class="form-control") }}</div>
             <div class="col-md-4">{{ form.status.label(class="form-label") }}{{ form.status(class="form-select") }}</div>
         </div>
-        {{ form.results_link.label(class="form-label mt-3") }}{{ form.results_link(class="form-control") }}
+        {{ form.results_link.label(class="form-label mt-3") }}{{ form.results_link(class="form-control" + (" is-invalid" if form.results_link.errors else "")) }}
+        {% for error in form.results_link.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
         <label class="form-label mt-3">Result File (optional: image or PDF)</label>
         <input type="file" name="results_image" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf">
         {% if existing_results_image_url %}

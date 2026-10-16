@@ -246,7 +246,7 @@ window.addEventListener('DOMContentLoaded', function() {
                         </button>
                     </div>
                 {% endif %}
-                <a href="{{ test.results_link }}" target="_blank" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
+                <a href="{{ test.results_link | http_link }}" target="_blank" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
                 <small class="d-block mt-1 text-muted">This link is only visible to approved participants.</small>
                 {% if test.results_posted_at %}
                     <small class="d-block text-muted">Posted {{ test.results_posted_at }}</small>

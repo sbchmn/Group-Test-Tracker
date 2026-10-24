@@ -448,6 +448,8 @@ Supported sources and limits:
 
 Conflicting Telegram, Discord and Root links require a choice; otherwise missing links transfer. Recruiting funding shares recalculate quietly after the merge, while frozen shares stay fixed. Related ownership, reviewer references, hidden tests and digest records transfer. Existing sessions and unused bot-link tokens for both accounts are invalidated. The duplicate is removed and an audit record preserves the decisions and original participant values. System accounts cannot be merged; you cannot merge away your signed-in account or the last active administrator.
 
+Transferred and combined participant rows use the primary account's username and retained Telegram handle on participant lists, payment review and exports. The migration also repairs stale participant names from earlier merges using their audit records, while preserving subsequent manual identity edits, assigned charges, paid status and proof histories.
+
 Deploy with `flask --app run.py db upgrade`. The account-merge migration adds audit/history metadata and prevents SQLite from reusing deleted user IDs. No existing username is rewritten.
 
 Deactivation behavior:

@@ -7,6 +7,32 @@ identified explicitly below.
 
 ## Unreleased
 
+### Account merge participant names
+
+- Fixed participant lists showing the removed account's name after a merge, including when only that account had joined the test. Transferred rows now show the primary account's name and retained Telegram handle.
+- Added a repair for earlier merges that preserves payment status, amounts, proof histories and later manual name edits.
+
+### October 24, 2026 — commit summary
+
+#### `17c1da8` — Automatic costs, account merging, and username rules
+
+- Participant costs now update automatically while a group is Recruiting, then stay fixed when payment collection begins. Late buyers have a separate price that admins can adjust.
+- Admins can preview cost changes before applying them. Amounts shown to participants, in notifications, and in exports stay consistent with their assigned charges.
+- Added a preview for merging duplicate accounts, with choices for conflicting records and chat links while preserving payment proof histories.
+- New or changed usernames cannot contain spaces or other whitespace, including before or after the name.
+
+#### `ad2d0c3` — Cleaner layouts across screen sizes
+
+- Improved buttons, menus, forms, and tables across participant and admin pages, including the Action Queue.
+- Fixed cramped buttons and hidden table content on phones and tablets. Lists switch to readable cards where space is limited.
+- Added browser checks and screenshots covering desktop, tablet, and phone layouts.
+
+#### `46dc2b0` — Payment proof submission and review
+
+- Participants can report or update a payment in a popup, attaching an image, a transaction ID, or both. Admins choose which proof each payment method accepts and requires.
+- Admins can review proof from Manage Participants or the Action Queue, then approve or deny the payment. Denials require a reason and notify the participant so they can correct and resubmit.
+- Crypto transaction IDs link to the correct blockchain explorer. Payment images stay private, even when result images are public.
+
 ### Telegram user-support retorts
 
 - Added opt-in AI retorts when another bot directly replies to a human command

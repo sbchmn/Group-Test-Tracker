@@ -1,11 +1,12 @@
 import re
 import tempfile
 import unittest
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from flask_migrate import upgrade, downgrade
+from flask_migrate import upgrade, downgrade, stamp
 from sqlalchemy import text
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -92,8 +93,10 @@ class AccountMergeTests(unittest.TestCase):
         self.assertEqual(len(detail['history']),2)
 
     def test_explicit_overlap_choices_keep_duplicate_payment_and_charge(self):
-        self.merge(**{'payment_'+str(self.test_id):'duplicate','charge_'+str(self.test_id):'duplicate'})
+        self.merge(**{'membership_'+str(self.test_id):'duplicate',
+                     'payment_'+str(self.test_id):'duplicate','charge_'+str(self.test_id):'duplicate'})
         detail=self.client.get('/payments/'+str(self.parts['primary'])).json
+        self.assertEqual(detail['participant'],'primary')
         self.assertEqual(detail['amount_owed'],'120.00');self.assertEqual(detail['amount_paid'],'25.00')
         self.assertFalse(detail['paid']);self.assertTrue(detail['pending'])
         self.assertEqual(detail['latest']['transaction_id'],'duplicate-tx')
@@ -103,6 +106,87 @@ class AccountMergeTests(unittest.TestCase):
             p=db.session.get(Participation,self.parts['primary'])
             self.assertTrue(p.paid_lab)
             self.assertEqual(p.current_payment_submission.status,'approved')
+
+    def test_paid_participation_unique_to_duplicate_displays_primary_on_both_pages(self):
+        with self.app.app_context():
+            db.session.get(User,self.ids['primary']).tg_username='primary_handle'
+            test=GroupTest(title='Paid unique test',created_by=self.ids['admin'],status='closed')
+            db.session.add(test);db.session.flush();ident=test.id
+            part=Participation(group_test_id=ident,user_id=self.ids['duplicate'],name='duplicate',
+                tg_username='old_duplicate_handle',approved=True,amount_owed=75,amount_paid=75,paid_lab=True,
+                payment_verified_by_id=self.ids['admin'],payment_verified_at=datetime.utcnow())
+            db.session.add(part);db.session.flush();part_id=part.id
+            db.session.add(PaymentSubmission(participation=part,amount=75,status='approved',
+                method_snapshot={'title':'Bank transfer'},image_key='original-paid-proof.jpg',transaction_id='paid-tx'))
+            db.session.commit()
+        self.merge()
+        for path in [f'/test/{ident}',f'/admin/manage-participants/{ident}']:
+            response=self.client.get(path)
+            self.assertEqual(response.status_code,200)
+            html=response.get_data(as_text=True)
+            self.assertIn('primary_handle',html)
+            self.assertNotIn('old_duplicate_handle',html)
+            self.assertNotRegex(html,r'>\s*(?:<strong>)?duplicate(?:</strong>)?\s*(?:<br>|</td>)')
+        with self.app.app_context():
+            part=db.session.get(Participation,part_id)
+            self.assertEqual((part.user_id,part.name,part.tg_username),(self.ids['primary'],'primary','primary_handle'))
+            self.assertEqual((part.amount_owed,part.amount_paid,part.paid_lab),(75,75,True))
+            self.assertEqual(part.payment_verified_by_id,self.ids['admin'])
+            self.assertEqual(part.current_payment_submission.image_key,'original-paid-proof.jpg')
+            audit=AccountMergeAudit.query.one()
+            original=next(row for row in audit.details['participations_before'] if row['id']==part_id)
+            self.assertEqual(original['name'],'duplicate')
+        detail=self.client.get('/payments/'+str(part_id)).json
+        self.assertEqual(detail['participant'],'primary')
+        self.assertTrue(detail['paid'])
+
+    def test_data_migration_repairs_completed_merges_and_preserves_later_edits(self):
+        with self.app.app_context():
+            db.session.get(User,self.ids['primary']).tg_username='primary_handle'
+            extra=GroupTest(title='Primary only',created_by=self.ids['admin'],status='closed')
+            db.session.add(extra);db.session.flush();extra_id=extra.id
+            untouched=Participation(group_test_id=extra_id,user_id=self.ids['primary'],name='Custom untouched name',tg_username='untouched_handle')
+            db.session.add(untouched);db.session.commit();untouched_id=untouched.id
+        self.merge()
+        with self.app.app_context():
+            kept=db.session.get(Participation,self.parts['primary'])
+            # Recreate the saved labels produced by the original merge code.
+            kept.name='duplicate';kept.tg_username='duplicate_handle'
+            audit=AccountMergeAudit.query.one();details=deepcopy(audit.details)
+            for row in details['participations_after']:
+                if row['id']==kept.id:
+                    row.update(name='duplicate',tg_username='duplicate_handle')
+            audit.details=details;db.session.commit()
+            # A second affected row was subsequently customized by an admin.
+            later=Participation(group_test_id=extra_id,user_id=self.ids['other'],name='Edited later',tg_username='edited_handle')
+            db.session.add(later);db.session.flush();later_id=later.id
+            second=dict(details)
+            second['participations_before']=[{'id':later_id,'group_test_id':extra_id,'user_id':self.ids['duplicate']}]
+            second['participations_after']=[{'id':later_id,'group_test_id':extra_id,'user_id':self.ids['primary'],
+                                            'name':'duplicate','tg_username':'duplicate_handle'}]
+            db.session.add(AccountMergeAudit(performed_by_id=self.ids['admin'],primary_user_id=self.ids['primary'],
+                duplicate_user_id=self.ids['duplicate'],details=second))
+            db.session.commit()
+            # Reassignment to someone else must prevent the repair entirely.
+            financial_before=(kept.amount_owed,kept.amount_paid,kept.paid_lab,kept.payment_verified_at,kept.payment_verified_by_id)
+            proofs_before=[(p.id,p.participation_id,p.amount,p.status,p.image_key,p.transaction_id,p.archived_by_merge) for p in PaymentSubmission.query.order_by(PaymentSubmission.id)]
+            revision_before=kept.payment_revision
+            stamp(directory='migrations',revision='b4d6f8a0c2e3')
+            upgrade(directory='migrations')
+            db.session.expire_all();kept=db.session.get(Participation,self.parts['primary'])
+            self.assertEqual((kept.name,kept.tg_username),('primary','primary_handle'))
+            self.assertEqual(kept.payment_revision,revision_before+1)
+            self.assertEqual((kept.amount_owed,kept.amount_paid,kept.paid_lab,kept.payment_verified_at,kept.payment_verified_by_id),financial_before)
+            self.assertEqual([(p.id,p.participation_id,p.amount,p.status,p.image_key,p.transaction_id,p.archived_by_merge) for p in PaymentSubmission.query.order_by(PaymentSubmission.id)],proofs_before)
+            self.assertEqual(db.session.get(Participation,untouched_id).name,'Custom untouched name')
+            self.assertEqual(db.session.get(Participation,later_id).name,'Edited later')
+            # Check an edited row still owned by the primary, not just an ownership mismatch.
+            original=db.session.get(Participation,untouched_id);db.session.delete(original);db.session.flush()
+            edited=db.session.get(Participation,later_id);edited.user_id=self.ids['primary'];db.session.commit()
+            downgrade(directory='migrations',revision='b4d6f8a0c2e3')
+            upgrade(directory='migrations');db.session.expire_all()
+            edited=db.session.get(Participation,later_id)
+            self.assertEqual((edited.name,edited.tg_username),('Edited later','edited_handle'))
 
     def test_unique_records_all_user_references_hidden_tests_and_digests_transfer(self):
         with self.app.app_context():

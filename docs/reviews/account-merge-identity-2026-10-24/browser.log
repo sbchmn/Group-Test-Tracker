@@ -1,0 +1,27 @@
+WARNING: DATABASE_URL not found. Using SQLite fallback.
+manage-users 320px passed
+manage-users 390px passed
+manage-users 820px passed
+manage-users 1024px passed
+manage-users 1440px passed
+merge-select 320px passed
+merge-select 390px passed
+merge-select 820px passed
+merge-select 1024px passed
+merge-select 1440px passed
+merge-preview 320px passed
+merge-preview 390px passed
+merge-preview 820px passed
+merge-preview 1024px passed
+merge-preview 1440px passed
+paid-transfer-group 320px passed
+paid-transfer-group 390px passed
+paid-transfer-group 820px passed
+paid-transfer-group 1024px passed
+paid-transfer-group 1440px passed
+paid-transfer-manage 320px passed
+paid-transfer-manage 390px passed
+paid-transfer-manage 820px passed
+paid-transfer-manage 1024px passed
+paid-transfer-manage 1440px passed
+PASS: merge, conflict resolution, archived evidence and username rejection; 25 responsive checks. Screenshots: C:\Users\sbachman\OneDrive - First Dallas Media, Inc\Documents\GitHub\Group-Test-Tracker\docs\reviews\account-merge-identity-2026-10-24

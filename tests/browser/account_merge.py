@@ -47,6 +47,13 @@ with app.app_context():
     d.amount_owed=120;d.amount_paid=25
     for part,amount,status in [(p,100,'approved'),(d,25,'pending')]:
         db.session.add(PaymentSubmission(participation=part,amount=amount,status=status,method_snapshot={'title':'Lab payment','network':'Base','method_type':'crypto'},transaction_id=part.name.replace(' ','')+'-tx'))
+    unique_test=GroupTest(title='Paid transfer identity check',created_by=test.created_by,status='closed')
+    db.session.add(unique_test);db.session.flush();unique_test_id=unique_test.id
+    transferred=Participation(group_test_id=unique_test.id,user_id=duplicate_id,name=d.user.username,
+        tg_username='old_handle',approved=True,amount_owed=75,amount_paid=75,paid_lab=True)
+    db.session.add(transferred);db.session.flush();transferred_id=transferred.id
+    db.session.add(PaymentSubmission(participation=transferred,amount=75,status='approved',
+        method_snapshot={'title':'Original paid transfer'},transaction_id='original-paid-tx'))
     db.session.commit()
 class QuietHandler(WSGIRequestHandler):
     def log(self, *args): pass
@@ -134,6 +141,19 @@ try:
         kept=db.session.get(Participation,part_id)
         assert kept.amount_owed==100 and kept.amount_paid==100 and kept.paid_lab
         assert len(kept.payment_submissions)==2
+        transferred=db.session.get(Participation,transferred_id)
+        assert (transferred.user_id,transferred.name)==(primary_id,'browser-member')
+        assert transferred.paid_lab and transferred.amount_paid==75 and transferred.amount_owed==75
+        assert transferred.current_payment_submission.transaction_id=='original-paid-tx'
+    for label,path in [('paid-transfer-group','/test/'+str(unique_test_id)),
+                       ('paid-transfer-manage','/admin/manage-participants/'+str(unique_test_id))]:
+        audit(label,path)
+        assert js("document.querySelector('td[data-label=\"Name / TG\"]').textContent.trim().startsWith('browser-member')")
+        assert js("!document.querySelector('td[data-label=\"Name / TG\"]').textContent.includes('browser-pending')")
+        for width,height in [(390,1000),(820,1180),(1440,1000)]:
+            viewport(width,height)
+            js("document.querySelector('td[data-label=\"Name / TG\"]').scrollIntoView({block:'center'})")
+            screenshot(label+'-participant-'+str(width)+'.png')
     navigate('/admin/manage-participants/'+str(test_id))
     click('[data-payment-part="'+str(part_id)+'"]')
     wait("document.getElementById('paymentModal').classList.contains('show') && !document.getElementById('paymentContent').classList.contains('d-none')")

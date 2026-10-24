@@ -38,3 +38,7 @@ preview, explicit overlap and messaging-link choices, archived payment history,
 and whitespace rejection. It checks the user list, account selection and merge
 preview at five widths from 320 to 1440 pixels. Evidence is saved under
 `docs/reviews/account-merge-2026-10-24/`.
+
+The same script now also checks both participant lists when a paid record unique
+to the duplicate transfers to the primary. Updated evidence for this regression is
+in `docs/reviews/account-merge-identity-2026-10-24/`.

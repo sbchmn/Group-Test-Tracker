@@ -106,6 +106,7 @@ def merge(primary, duplicate, actor_id, form):
              'decisions': decisions, 'links': {}, 'transferred_references': {}}
     for test in tests:
         costs.ensure_snapshot(test)
+    merged_participations = []
     for overlap in plan['overlaps']:
         test, kept, removed = overlap['test'], overlap['primary'], overlap['duplicate']
         selected = decisions[test.id]
@@ -123,6 +124,7 @@ def merge(primary, duplicate, actor_id, form):
         kept.requested_at = min(kept.requested_at, removed.requested_at)
         kept.notes = notes or None
         kept.payment_revision += 1
+        merged_participations.append(kept)
         for side in ('primary', 'duplicate'):
             for report in list(overlap[side].payment_submissions):
                 if side != selected['payment']:
@@ -144,6 +146,7 @@ def merge(primary, duplicate, actor_id, form):
     for part in duplicate.participations.all():
         part.user_id = primary.id
         part.payment_revision += 1
+        merged_participations.append(part)
     for provider, fields in LINKS.items():
         take_duplicate = form.get('link_' + provider) == 'duplicate' if provider in plan['conflicts'] else not any(getattr(primary, field) for field in fields)
         audit['links'][provider] = 'duplicate' if take_duplicate else 'primary'
@@ -154,6 +157,12 @@ def merge(primary, duplicate, actor_id, form):
             db.session.flush()  # Release unique provider IDs before reassigning.
             for field, value in values.items():
                 setattr(primary, field, value)
+    # Participation names are separate saved fields, preferred over User.username
+    # by lists, payment review and exports. They must follow the retained identity,
+    # including when the duplicate was the only account participating in a test.
+    for part in merged_participations:
+        part.name = primary.username
+        part.tg_username = primary.tg_username
     for hidden in duplicate.hidden_dashboard_tests.all():
         if primary.hidden_dashboard_tests.filter_by(group_test_id=hidden.group_test_id).first():
             db.session.delete(hidden)

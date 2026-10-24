@@ -1,0 +1,27 @@
+{
+  "original_audit_cases": 354,
+  "final_browser_cases": 366,
+  "page_state_views": 61,
+  "widths": [
+    320,
+    390,
+    820,
+    1024,
+    1280,
+    1440
+  ],
+  "page_overflow_cases_before": 19,
+  "page_overflow_cases_after": 0,
+  "table_overflow_cases_before": 73,
+  "table_overflow_cases_after": 0,
+  "visible_control_overlap_cases_after": 0,
+  "unexpected_payment_errors_after": 0,
+  "browser_exceptions_after": 0,
+  "regression_tests_passed": 434,
+  "regression_subtests_passed": 34,
+  "focused_tests_passed": 64,
+  "final_view_tests_passed": 9,
+  "workflow_browser_check": "passed",
+  "storage_and_notifications": "mocked in browser fixtures",
+  "application_diff_sha256": "70efb55daa8744481a52930a0396fb736086abe8b9e042db56aeccbeed1a8a28"
+}

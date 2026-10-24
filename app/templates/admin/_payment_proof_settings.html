@@ -5,6 +5,7 @@
     <div class="form-check mb-3">{{ form.proof_transaction_enabled(class="form-check-input") }} {{ form.proof_transaction_enabled.label(class="form-check-label") }}</div>
     {{ form.proof_requirement.label(class="form-label") }}
     {{ form.proof_requirement(class="form-select") }}
+    <p class="small fw-semibold mt-2 mb-1" data-proof-policy-preview aria-live="polite"></p>
     {% for error in form.proof_requirement.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
     <div class="form-text">“All accepted proofs” requires both when both types are enabled. Existing submitted reports remain reviewable.</div>
     <div class="form-text">Image proof accepts JPEG, PNG, or WebP up to 8 MB and uses your configured storage.</div>

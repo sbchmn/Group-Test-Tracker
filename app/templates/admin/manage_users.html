@@ -1,19 +1,20 @@
 {% extends "base.html" %}
+{% from "admin/_actions.html" import more_menu %}
 
 {% block title %}Manage Users{% endblock %}
 
 {% block content %}
 <h3>Manage Users</h3>
 
-<div class="mb-3">
+<div class="page-actions mb-3">
     <a href="{{ url_for('main.create_user') }}" class="btn btn-success">
         <i class="bi bi-person-plus"></i> Add New User
     </a>
     {% if managed_mode %}
-    <form method="POST" action="{{ url_for('main.request_managed_support') }}" class="mt-3">
+    <form method="POST" action="{{ url_for('main.request_managed_support') }}" class="mt-3 w-100">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label for="support-reason" class="form-label">Reason for temporary support access</label>
-        <div class="d-flex gap-2 align-items-start">
+        <div class="d-flex gap-2 align-items-start support-request">
             <textarea id="support-reason" name="reason" class="form-control" rows="2" maxlength="500" minlength="8" required placeholder="Describe the issue requiring operator access."></textarea>
             <button type="submit" class="btn btn-outline-primary text-nowrap">Request Support Access</button>
         </div>
@@ -32,15 +33,15 @@
     </form>
     <form method="POST" action="{{ url_for('main.emergency_disable_managed_support') }}" class="d-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-outline-danger ms-2">Emergency Disable Support</button>
+        <button type="submit" class="btn btn-outline-danger">Emergency Disable Support</button>
     </form>
     {% endif %}
-    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary ms-2">Back to Dashboard</a>
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">Back to Dashboard</a>
 </div>
 
 <div class="card">
-    <div class="card-body p-0">
-        <table class="table table-hover mb-0">
+    <div class="card-body p-0 record-container">
+        <table class="table table-hover mb-0 record-table ">
             <thead class="table-light">
                 <tr>
                     <th>Username</th>
@@ -51,61 +52,55 @@
                     <th>Status</th>
                     <th>Notify</th>
                     <th>Created</th>
-                    <th class="text-end">Actions</th>
+                    <th class="text-end record-actions-heading">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for user in users %}
                 <tr class="{% if not user.is_active %}table-secondary{% endif %}">
-                    <td><strong>{{ user.username }}</strong></td>
-                    <td>{{ user.email }}</td>
-                    <td>
+                    <td data-label="Username" class="record-title"><strong>{{ user.username }}</strong></td>
+                    <td data-label="Email" class="record-wide">{{ user.email }}</td>
+                    <td data-label="Telegram">
                         {{ user.tg_username or '—' }}
                         {% if user.telegram_chat_id %}<span class="badge bg-success">Linked</span>{% endif %}
                     </td>
-                    <td>
+                    <td data-label="Discord">
                         {{ user.discord_username or '—' }}
                         {% if user.discord_user_id %}<span class="badge bg-success">Linked</span>{% endif %}
                     </td>
-                    <td>
+                    <td data-label="Role">
                         {% if user.is_admin %}
                             <span class="badge bg-danger">Admin</span>
                         {% else %}
                             <span class="badge bg-secondary">User</span>
                         {% endif %}
                     </td>
-                    <td>
+                    <td data-label="Status">
                         {% if user.is_active %}
                             <span class="badge bg-success">Active</span>
                         {% else %}
                             <span class="badge bg-secondary">Inactive</span>
                         {% endif %}
                     </td>
-                    <td>
+                    <td data-label="Notify">
                         {% if user.receive_group_test_notifications %}
                             <span class="badge bg-info">{{ user.notification_channel|title }}</span>
                         {% else %}
                             <span class="badge bg-light text-muted">Off</span>
                         {% endif %}
                     </td>
-                    <td class="small text-muted">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>
-                    <td class="text-end">
-                        {% if user.is_reserved_support_account %}
-                            <span class="badge bg-dark">Managed support account</span>
-                        {% else %}
-                        <a href="{{ url_for('main.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
-                        <form method="POST" action="{{ url_for('main.send_password_reset_admin', user_id=user.id) }}" class="d-inline">
+                    <td class="small text-muted" data-label="Created">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>
+                    <td class="text-end record-actions" data-label="Actions">{% if user.is_reserved_support_account %}<span class="badge bg-dark">Managed support account</span>{% else %}<div class="action-row"><a href="{{ url_for('main.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>{% call more_menu('userMore' ~ user.id) %}
+<li><form method="POST" action="{{ url_for('main.send_password_reset_admin', user_id=user.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-info">Send Password Reset</button>
-                        </form>
-                        <form method="POST" action="{{ url_for('main.toggle_user_active', user_id=user.id) }}" class="d-inline">
+                            <button type="submit" class="dropdown-item">Send Password Reset</button>
+                        </form></li><li><form method="POST" action="{{ url_for('main.toggle_user_active', user_id=user.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-warning">
+                            <button type="submit" class="dropdown-item">
                                 {{ 'Deactivate' if user.is_active else 'Activate' }}
                             </button>
-                        </form>
-                        {% endif %}
-                    </td>
+                        </form></li>
+{% endcall %}</div>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>

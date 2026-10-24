@@ -4,9 +4,11 @@
         const image = panel.querySelector('[name="proof_image_enabled"]');
         const transaction = panel.querySelector('[name="proof_transaction_enabled"]');
         const requirement = panel.querySelector('[name="proof_requirement"]');
+        const preview = panel.querySelector('[data-proof-policy-preview]');
+        if (!image || !transaction || !requirement || !preview) return;
         const update = () => {
             const types = [image.checked ? 'an image' : '', transaction.checked ? 'a transaction ID' : ''].filter(Boolean);
-            panel.querySelector('[data-proof-policy-preview]').textContent = !types.length ? 'No proof fields will be shown.' :
+            preview.textContent = !types.length ? (requirement.value === 'optional' ? 'No proof fields will be shown.' : 'Enable at least one proof type to require proof.') :
                 requirement.value === 'optional' ? `Participants may provide ${types.join(' and/or ')}.` :
                 `Participants must provide ${types.join(requirement.value === 'either' ? ' or ' : ' and ')}.`;
         };
@@ -19,7 +21,7 @@
     const form = byId('paymentReportForm');
     const method = byId('paymentMethod');
     const imageInput = byId('paymentImage');
-    let data, endpoint, mode, removedImage = false, previewUrl, generation = 0, busy = false;
+    let data, endpoint, mode, removedImage = false, previewUrl, generation = 0, busy = false, initialized = false;
     const show = (element, visible) => element.classList.toggle('d-none', !visible);
     const node = (tag, text, className) => {
         const element = document.createElement(tag);
@@ -93,7 +95,7 @@
         show(destination, Boolean(option));
         if (reset) {
             clearErrors(); imageInput.value = ''; removedImage = false;
-            const original = data.latest?.method.id === option?.id;
+            const original = Boolean(data.latest && option && data.latest.method.id === option.id);
             byId('paymentTransaction').value = original ? data.latest.transaction_id : '';
             imagePreview(original ? data.latest.image_url : null);
         }
@@ -114,9 +116,10 @@
         const hint = required ? '(required)' : option?.proof_requirement === 'either' ? '(one proof required)' : '(optional)';
         byId('paymentTransactionHint').textContent = hint;
         byId('paymentImageHint').textContent = hint;
-        byId('paymentRequirement').textContent = !option ? '' : ({optional: 'Payment proof is optional.', either: 'Provide at least one accepted proof of payment.', all: 'Provide all accepted proofs of payment.'})[option.proof_requirement];
+        byId('paymentRequirement').textContent = !option ? (data.options.length ? 'Choose a payment method to see its proof requirements.' : 'No payment methods are available. Contact an administrator.') : ({optional: 'Payment proof is optional.', either: 'Provide at least one accepted proof of payment.', all: 'Provide all accepted proofs of payment.'})[option.proof_requirement];
         show(byId('paymentUploadWarning'), !data.upload_ready);
         imageInput.disabled = !data.upload_ready;
+        byId('paymentSubmit').disabled = !initialized || !option || busy;
     };
     const render = () => {
         const latest = data.latest;
@@ -172,11 +175,14 @@
         });
         show(byId('paymentHistory'), data.history.length > 1);
         show(byId('paymentContent'), true);
+        initialized = true;
+        byId('paymentSubmit').disabled = !selected();
     };
     document.addEventListener('click', async event => {
         const trigger = event.target.closest('[data-payment-part]');
         if (!trigger) return;
         const token = ++generation;
+        initialized = false;
         endpoint = root.dataset.baseUrl.replace(/0$/, trigger.dataset.paymentPart);
         mode = trigger.dataset.paymentMode;
         form.reset(); clearErrors();
@@ -190,7 +196,13 @@
             const result = await response.json();
             if (token !== generation) return;
             data = result; render();
-        } catch (exc) { if (token === generation) error(exc.message); }
+        } catch (exc) {
+            if (token === generation) {
+                initialized = false;
+                ['paymentSubmit', 'paymentApprove', 'paymentDeny'].forEach(id => show(byId(id), false));
+                error(exc.message);
+            }
+        }
         finally { if (token === generation) show(byId('paymentLoading'), false); }
     });
     root.addEventListener('hidden.bs.modal', () => {
@@ -216,7 +228,7 @@
         }
     }));
     const submit = async (action, payload) => {
-        if (busy) return;
+        if (busy || !initialized) return;
         busy = true; clearErrors();
         payload.set('revision', data.revision);
         payload.set('csrf_token', form.elements.csrf_token.value);
@@ -235,6 +247,7 @@
         } catch (_) { error('Connection interrupted. Close and reopen this modal to check whether your payment was saved.'); }
         finally {
             busy = false; buttons.forEach(button => { button.disabled = false; });
+            byId('paymentSubmit').disabled = !initialized || !selected();
             root.removeEventListener('hide.bs.modal', hideWhileSaving);
             byId('paymentSubmit').textContent = 'Submit Payment for Review';
         }

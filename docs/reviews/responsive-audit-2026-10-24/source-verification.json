@@ -1,0 +1,13 @@
+{
+  "application_code_unchanged_during_audit": true,
+  "before_diff_sha256": "596acac00e1fbc218a9b75330ab2b3effd76ec983c5c86fb24749a66d5078392",
+  "after_diff_sha256": "596acac00e1fbc218a9b75330ab2b3effd76ec983c5c86fb24749a66d5078392",
+  "preserved_pending_files": [
+    "app/static/css/payments.css",
+    "app/templates/admin/manage_participants.html"
+  ],
+  "generated_artifacts_directory": "docs\\reviews\\responsive-audit-2026-10-24",
+  "page_state_views": 59,
+  "viewport_combinations": 354,
+  "raw_screenshots": 404
+}

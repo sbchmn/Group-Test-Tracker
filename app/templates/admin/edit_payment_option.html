@@ -58,8 +58,8 @@
     <div class="col-lg-5">
         <div class="card">
             <div class="card-header">Payment Matrix</div>
-            <div class="card-body p-0">
-                <table class="table table-sm mb-0 align-middle">
+            <div class="card-body p-0 record-container">
+                <table class="table table-sm mb-0 align-middle record-table record-table-single">
                     <thead class="table-light">
                         <tr>
                             <th>Method</th>
@@ -70,9 +70,9 @@
                     <tbody>
                         {% for row in matrix_rows %}
                             <tr>
-                                <td><strong>{{ row.provider_name }}</strong></td>
-                                <td class="small">{{ row.input_field }}</td>
-                                <td class="small text-muted">{{ row.link_example }}</td>
+                                <td data-label="Method" class="record-title"><strong>{{ row.provider_name }}</strong></td>
+                                <td class="small record-wide" data-label="Input">{{ row.input_field }}</td>
+                                <td class="small text-muted record-wide" data-label="Link">{{ row.link_example }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

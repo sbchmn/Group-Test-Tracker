@@ -1,0 +1,830 @@
+[
+  {
+    "timestamp": 1792871240350.197,
+    "exceptionDetails": {
+      "exceptionId": 1,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.23.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 23
+    }
+  },
+  {
+    "timestamp": 1792871242657.164,
+    "exceptionDetails": {
+      "exceptionId": 2,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.24.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 24
+    }
+  },
+  {
+    "timestamp": 1792871244951.356,
+    "exceptionDetails": {
+      "exceptionId": 3,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.26.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 26
+    }
+  },
+  {
+    "timestamp": 1792871246832.94,
+    "exceptionDetails": {
+      "exceptionId": 4,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.28.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 28
+    }
+  },
+  {
+    "timestamp": 1792871248175.691,
+    "exceptionDetails": {
+      "exceptionId": 5,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.30.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 30
+    }
+  },
+  {
+    "timestamp": 1792871250029.783,
+    "exceptionDetails": {
+      "exceptionId": 6,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.32.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 32
+    }
+  },
+  {
+    "timestamp": 1792871251880.264,
+    "exceptionDetails": {
+      "exceptionId": 7,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.34.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 34
+    }
+  },
+  {
+    "timestamp": 1792871252645.081,
+    "exceptionDetails": {
+      "exceptionId": 8,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.36.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 36
+    }
+  },
+  {
+    "timestamp": 1792871253411.462,
+    "exceptionDetails": {
+      "exceptionId": 9,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.38.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 38
+    }
+  },
+  {
+    "timestamp": 1792871254176.435,
+    "exceptionDetails": {
+      "exceptionId": 10,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.40.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 40
+    }
+  },
+  {
+    "timestamp": 1792871254944.783,
+    "exceptionDetails": {
+      "exceptionId": 11,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.42.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 42
+    }
+  },
+  {
+    "timestamp": 1792871256244.426,
+    "exceptionDetails": {
+      "exceptionId": 12,
+      "text": "Uncaught",
+      "lineNumber": 8,
+      "columnNumber": 75,
+      "scriptId": "12",
+      "url": "http://127.0.0.1:57883/static/js/payments.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "update",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 8,
+            "columnNumber": 75
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 12,
+            "columnNumber": 50
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 2,
+            "columnNumber": 53
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:57883/static/js/payments.js",
+            "lineNumber": 267,
+            "columnNumber": 2
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "TypeError",
+        "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+        "objectId": "7888291376095396609.44.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "TypeError: Cannot set properties of null (setting 'textContent')\n    at update (http://127.0.0.1:57883/static/js/payments.js:9:76)\n    at http://127.0.0.1:57883/static/js/payments.js:13:51\n    at NodeList.forEach (<anonymous>)\n    at http://127.0.0.1:57883/static/js/payments.js:3:54\n    at http://127.0.0.1:57883/static/js/payments.js:268:3",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "TypeError: Cannot set properties of null (setting \u2026ttp://127.0.0.1:57883/static/js/payments.js:268:3"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Cannot set properties of null (setting 'textContent')"
+            }
+          ]
+        }
+      },
+      "executionContextId": 44
+    }
+  }
+]

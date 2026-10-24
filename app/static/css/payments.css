@@ -9,18 +9,45 @@
 .payment-history-item { border: 1px solid #dee2e6; border-radius: .5rem; padding: .8rem; margin-bottom: .75rem; }
 #payment-options { overflow-wrap: anywhere; }
 #payment-options .flex-grow-1 { min-width: 0; }
+.participant-toolbar, .participant-counts { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.participant-counts { column-gap: 1rem; }
+.participant-counts strong { color: #343a40; }
+.participants-table { width: 100%; table-layout: fixed; font-size: .875rem; }
+.participants-table th, .participants-table td { padding: .75rem .5rem; overflow-wrap: anywhere; }
+.participants-table th:first-child { width: 2rem; }
+.participants-table th:nth-child(2) { width: 9rem; }
+.participants-table th:nth-child(6) { width: 8rem; }
+.participants-table th:nth-child(7) { width: 10rem; }
+.participants-table .participant-actions-heading { width: 12rem; }
+.participants-table .badge { white-space: normal; line-height: 1.4; text-align: left; }
+.participants-table tbody tr { background: #fff; }
+.participant-actions { display: grid; gap: .5rem; }
+.participant-actions form { margin: 0; }
+.participant-primary-action, .participant-primary-action > .btn { width: 100%; }
+.participant-secondary-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.participant-actions .btn { min-height: 38px; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+.participant-actions .dropdown-item { min-height: 44px; }
+.participant-actions .dropdown-menu { min-width: 13rem; }
+@media (max-width: 1399.98px) {
+    .participants-table, .participants-table tbody { display: block; width: 100%; }
+    .participants-table thead { display: none; }
+    .participants-table tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+    .participants-table .participant-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .875rem 1rem; padding: 1rem; border: 1px solid #dee2e6; border-radius: .75rem; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .participants-table td { display: block; min-width: 0; padding: 0; border: 0; box-shadow: none; }
+    .participants-table td:first-child { display: none; }
+    .participants-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: .25rem; color: #6c757d; font-size: .75rem; font-weight: 500; }
+    .participants-table td:nth-child(2) { grid-column: 1 / -1; padding-bottom: .75rem; border-bottom: 1px solid #edf0f3; font-size: 1rem; }
+    .participants-table td:nth-child(2)::before, .participants-table td.participant-actions-cell::before { display: none; }
+    .participants-table .participant-actions-cell { grid-column: 1 / -1; padding-top: .875rem; border-top: 1px solid #edf0f3; }
+    .participant-actions .btn { min-height: 44px; }
+}
+@media (max-width: 767.98px) {
+    .participants-table tbody { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 575.98px) {
     #paymentModal .modal-footer { gap: .5rem; }
     #paymentModal .modal-footer .btn { flex: 1 1 42%; margin: 0; }
     #paymentModal .modal-footer #paymentSubmit { flex-basis: 100%; }
     #payment-options .payment-option-list .list-group-item > .d-flex { flex-wrap: wrap; }
-    .payment-admin-table thead { display: none; }
-    .payment-admin-table thead:has(#select-all) { display: block; }
-    .payment-admin-table thead:has(#select-all) th { display: none; }
-    .payment-admin-table thead:has(#select-all) th:has(#select-all) { display: block; width: 100% !important; padding: .5rem 0; }
-    .payment-admin-table, .payment-admin-table tbody, .payment-admin-table tr, .payment-admin-table td { display: block; width: 100%; }
-    .payment-admin-table tr { padding: .75rem; border-bottom: 1px solid #dee2e6; }
-    .payment-admin-table td { border: 0; padding: .3rem 0; text-align: left !important; overflow-wrap: anywhere; }
-    .payment-admin-table td[data-label]::before { content: attr(data-label) ': '; font-size: .8rem; color: #6c757d; }
-    .payment-admin-table .btn { margin: .2rem .2rem .2rem 0 !important; min-height: 44px; }
+
 }

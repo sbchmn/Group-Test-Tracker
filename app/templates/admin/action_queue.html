@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_actions.html" import more_menu %}
 
 {% block title %}Admin Action Queue{% endblock %}
 
@@ -11,42 +12,37 @@
     <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
 </div>
 
-<div class="d-flex justify-content-between align-items-center mb-2">
+<div class="bulk-toolbar mb-2">
     <h4 class="mb-0">Result Analysis</h4>
     <span class="badge text-bg-warning">{{ analysis_runs_pagination.total }} requiring attention</span>
 </div>
 {% if analysis_runs %}
     <div class="card border-warning mb-4">
-        <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
+        <div class="table-responsive record-container">
+            <table class="table table-sm table-hover align-middle mb-0 record-table ">
                 <thead class="table-light">
-                    <tr><th>Result</th><th>State</th><th>Provider</th><th>Findings</th><th>Ready</th><th class="text-end">Action</th></tr>
+                    <tr><th>Result</th><th>State</th><th>Provider</th><th>Findings</th><th>Ready</th><th class="text-end record-actions-heading">Action</th></tr>
                 </thead>
                 <tbody>
                     {% for run in analysis_runs %}
                         <tr>
-                            <td>
+                            <td data-label="Result" class="record-title">
                                 <strong>{{ run.target.title }}</strong>
                                 <div class="small text-muted">{{ 'Group Test' if run.group_test_id else 'Public Result' }} · {{ run.source_kind|title }} · Run {{ run.id }}</div>
                                 {% if run.status == 'failed' and run.error_message %}<div class="small text-danger">{{ run.error_message }}</div>{% endif %}
                             </td>
-                            <td><span class="badge text-bg-{{ 'warning' if run.status == 'needs_review' else 'danger' }}">{{ run.status|replace('_', ' ')|title }}</span></td>
-                            <td>{{ run.provider|title }}<div class="small text-muted">{{ run.provider_model }}</div></td>
-                            <td>{{ run.findings|length }}</td>
-                            <td>{{ (run.completed_at or run.created_at).strftime('%Y-%m-%d %H:%M') if (run.completed_at or run.created_at) else 'n/a' }}</td>
-                            <td class="text-end">
-                                <a class="btn btn-sm btn-{{ 'primary' if run.status == 'needs_review' else 'outline-danger' }}" href="{{ url_for('main.review_result_analysis', run_id=run.id) }}">{{ 'Review Findings' if run.status == 'needs_review' else 'Inspect Failure' }}</a>
-                                {% if run.status == 'failed' %}
-                                    <form method="POST" action="{{ url_for('main.acknowledge_result_analysis_failure', run_id=run.id) }}" class="d-inline" onsubmit="return confirm('Acknowledge this failure and remove it from the Action Queue?')">
+                            <td data-label="State"><span class="badge text-bg-{{ 'warning' if run.status == 'needs_review' else 'danger' }}">{{ run.status|replace('_', ' ')|title }}</span></td>
+                            <td data-label="Provider">{{ run.provider|title }}<div class="small text-muted">{{ run.provider_model }}</div></td>
+                            <td data-label="Findings">{{ run.findings|length }}</td>
+                            <td data-label="Ready">{{ (run.completed_at or run.created_at).strftime('%Y-%m-%d %H:%M') if (run.completed_at or run.created_at) else 'n/a' }}</td>
+                            <td class="text-end record-actions" data-label="Actions"><div class="action-stack"><a class="btn btn-sm btn-{{ 'primary' if run.status == 'needs_review' else 'outline-danger' }}" href="{{ url_for('main.review_result_analysis', run_id=run.id) }}">{{ 'Review Findings' if run.status == 'needs_review' else 'Inspect Failure' }}</a>{% if run.status == 'failed' %}{% call more_menu('analysisMore' ~ run.id) %}<li><form method="POST" action="{{ url_for('main.acknowledge_result_analysis_failure', run_id=run.id) }}" class="d-inline" onsubmit="return confirm('Acknowledge this failure and remove it from the Action Queue?')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="status" value="{{ status_filter }}">
                                         <input type="hidden" name="q" value="{{ search }}">
                                         <input type="hidden" name="page" value="{{ page }}">
                                         <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                        <button class="btn btn-sm btn-outline-secondary" type="submit">Acknowledge</button>
-                                    </form>
-                                {% endif %}
-                            </td>
+                                        <button class="dropdown-item" type="submit">Acknowledge</button>
+                                    </form></li>{% endcall %}{% endif %}</div></td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -134,9 +130,13 @@
         <div id="deny-selected-hidden"></div>
     </form>
 
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <span class="text-muted small">Showing {{ pending_parts|length }} request(s) on this page. Total filtered: {{ pending_parts_pagination.total }}</span>
+        <div class="bulk-toolbar mb-3">
             <div>
+                <label class="form-check d-flex align-items-center gap-2"><input type="checkbox" id="select-all" class="form-check-input m-0"><span>Select all join requests</span></label>
+                <span id="queue-selection-count" class="selection-count small text-muted" aria-live="polite">0 selected</span>
+            </div>
+            <span class="text-muted small">Showing {{ pending_parts|length }} request(s) on this page. Total filtered: {{ pending_parts_pagination.total }}</span>
+            <div class="action-row">
                 <button type="submit" class="btn btn-success btn-sm" form="approve-selected-form" onclick="return confirm('Approve selected participants?')">
                     <i class="bi bi-check2-square"></i> Approve Selected
                 </button>
@@ -146,34 +146,34 @@
             </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle payment-admin-table">
+        <div class="table-responsive record-container">
+            <table class="table table-sm table-hover align-middle record-table ">
                 <thead class="table-light">
                     <tr>
-                        <th style="width: 40px;"><input type="checkbox" id="select-all" aria-label="Select all visible join requests"><label for="select-all" class="d-sm-none ms-2 small">Select all visible join requests</label></th>
+                        <th style="width: 40px;"><span class="visually-hidden">Select request</span></th>
                         <th>Participant</th>
                         <th>Group Test</th>
                         <th>Item / Status</th>
                         <th>Requested / Reported</th>
-                        <th class="text-end">Actions</th>
+                        <th class="text-end record-actions-heading">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for part in pending_parts %}
                         {% set is_payment_report = part.approved %}
                         <tr>
-                            <td data-label="Select">
+                            <td data-label="Select" class="record-check {% if is_payment_report %}record-empty{% endif %}">
                                 {% if not is_payment_report %}
-                                    <input type="checkbox" value="{{ part.id }}" class="part-checkbox">
+                                    <label class="d-flex align-items-center gap-2"><input type="checkbox" value="{{ part.id }}" class="part-checkbox"><span class="record-card-only">Select request</span></label>
                                 {% else %}
                                     <span class="text-muted small">—</span>
                                 {% endif %}
                             </td>
-                            <td data-label="Participant">
+                            <td data-label="Participant" class="record-title">
                                 <strong>{{ part.name or part.user.username }}</strong>
                                 <div class="small text-muted">{{ part.user.email }}</div>
                             </td>
-                            <td data-label="Group Test">
+                            <td data-label="Group Test" class="record-wide">
                                 <a href="{{ url_for('main.test_detail', test_id=part.group_test.id) }}">{{ part.group_test.title }}</a>
                                 {% if part.group_test.compound %}
                                     <div class="small text-muted">{{ part.group_test.compound }}</div>
@@ -186,7 +186,7 @@
                                 {% else %}
                                     <span class="badge text-bg-warning">Join Request</span>
                                 {% endif %}
-                                <span class="badge bg-secondary text-uppercase">{{ part.group_test.status }}</span>
+                                <span class="badge bg-secondary">{{ part.group_test.status|replace('_', ' ')|title }}</span>
                             </td>
                             <td data-label="Requested / Reported">
                                 {% if is_payment_report %}
@@ -195,21 +195,14 @@
                                     {{ part.requested_at.strftime('%Y-%m-%d %H:%M') if part.requested_at else 'n/a' }}
                                 {% endif %}
                             </td>
-                            <td data-label="Actions" class="text-end">
-                                <a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage Test</a>
-                                {% if is_payment_report %}
-                                    <button type="button" class="btn btn-outline-primary btn-sm" data-payment-part="{{ part.id }}" data-payment-mode="review"><i class="bi bi-receipt me-1"></i> View Proof</button>
-                                    <div class="small text-muted mt-1">{% if part.payment_submissions %}{% set report = part.payment_submissions|first %}{{ 'Image' if report.image_key else '' }}{{ ' + ' if report.image_key and report.transaction_id else '' }}{{ 'Transaction ID' if report.transaction_id else '' }}{{ 'No proof provided' if not report.image_key and not report.transaction_id else '' }}{% else %}No proof provided{% endif %}</div>
-                                {% else %}
-                                    <form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
+                            <td class="text-end record-actions" data-label="Actions"><div class="action-stack">{% if is_payment_report %}<button type="button" class="btn btn-outline-primary btn-sm" data-payment-part="{{ part.id }}" data-payment-mode="review"><i class="bi bi-receipt me-1"></i> View Proof</button><a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage Test</a><div class="small text-muted mt-1">{% if part.payment_submissions %}{% set report = part.payment_submissions|first %}{{ 'Image' if report.image_key else '' }}{{ ' + ' if report.image_key and report.transaction_id else '' }}{{ 'Transaction ID' if report.transaction_id else '' }}{{ 'No proof provided' if not report.image_key and not report.transaction_id else '' }}{% else %}No proof provided{% endif %}</div>{% else %}<form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="status" value="{{ status_filter }}">
                                         <input type="hidden" name="q" value="{{ search }}">
                                         <input type="hidden" name="page" value="{{ page }}">
                                         <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
                                         <button type="submit" class="btn btn-success btn-sm">Approve</button>
-                                    </form>
-                                    <form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request?')">
+                                    </form><div class="action-row"><a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage</a><form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request?')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="status" value="{{ status_filter }}">
                                         <input type="hidden" name="q" value="{{ search }}">
@@ -217,9 +210,7 @@
                                         <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
                                         <input type="hidden" name="deny_reason" class="deny-row-reason" value="">
                                         <button type="submit" class="btn btn-outline-danger btn-sm">Deny</button>
-                                    </form>
-                                {% endif %}
-                            </td>
+                                    </form></div>{% endif %}</div></td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -256,11 +247,22 @@
         const selectAll = document.getElementById('select-all');
         if (!selectAll) return;
         const checkboxes = Array.from(document.querySelectorAll('.part-checkbox'));
+        function updateSelection() {
+            const count = checkboxes.filter(cb => cb.checked).length;
+            selectAll.checked = checkboxes.length > 0 && count === checkboxes.length;
+            selectAll.indeterminate = count > 0 && count < checkboxes.length;
+            selectAll.disabled = checkboxes.length === 0;
+            document.getElementById('queue-selection-count').textContent = count + ' selected';
+            document.querySelectorAll('[form="approve-selected-form"], [form="deny-selected-form"]').forEach(button => { button.disabled = count === 0; });
+        }
+        checkboxes.forEach(cb => cb.addEventListener('change', updateSelection));
         selectAll.addEventListener('change', function () {
             checkboxes.forEach(function (cb) {
                 cb.checked = selectAll.checked;
             });
+            updateSelection();
         });
+        updateSelection();
 
         function syncBulkFormIds(containerId) {
             const target = document.getElementById(containerId);

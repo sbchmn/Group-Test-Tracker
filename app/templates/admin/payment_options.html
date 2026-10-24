@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_actions.html" import more_menu %}
 
 {% block title %}Payment Options{% endblock %}
 
@@ -31,8 +32,8 @@
 
         <div class="card mb-4">
             <div class="card-header">Payment Matrix</div>
-            <div class="card-body p-0">
-                <table class="table table-sm mb-0 align-middle">
+            <div class="card-body p-0 record-container">
+                <table class="table table-sm mb-0 align-middle record-table record-table-single">
                     <thead class="table-light">
                         <tr>
                             <th>Method</th>
@@ -44,10 +45,10 @@
                     <tbody>
                         {% for row in matrix_rows %}
                             <tr>
-                                <td><strong>{{ row.provider_name }}</strong></td>
-                                <td class="small">{{ row.input_field }}<br><span class="text-muted">e.g. {{ row.input_example }}</span></td>
-                                <td class="small"><span class="text-muted">{{ row.link_example }}</span></td>
-                                <td class="small"><span class="text-muted">{{ row.destination_example }}</span></td>
+                                <td data-label="Method" class="record-title"><strong>{{ row.provider_name }}</strong></td>
+                                <td class="small record-wide" data-label="Input">{{ row.input_field }}<br><span class="text-muted">e.g. {{ row.input_example }}</span></td>
+                                <td class="small record-wide" data-label="Generated Link"><span class="text-muted">{{ row.link_example }}</span></td>
+                                <td class="small record-wide" data-label="Destination"><span class="text-muted">{{ row.destination_example }}</span></td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -59,9 +60,9 @@
     <div class="col-lg-7">
         <div class="card">
             <div class="card-header">Configured Options</div>
-            <div class="card-body p-0">
+            <div class="card-body p-0 record-container">
                 {% if option_contexts %}
-                    <table class="table table-sm mb-0 align-middle">
+                    <table class="table table-sm mb-0 align-middle record-table record-table-single">
                         <thead class="table-light">
                             <tr>
                                 <th>Method</th>
@@ -69,55 +70,51 @@
                                 <th>Details</th>
                                 <th>Preview</th>
                                 <th>Status</th>
-                                <th>Actions</th>
+                                <th class="record-actions-heading">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for option in option_contexts %}
                                 <tr>
-                                    <td>
+                                    <td data-label="Method" class="record-title">
                                         <div class="d-flex align-items-center gap-2">
                                             <span class="badge {{ option.badge_class }}"><i class="{{ option.icon_class }}"></i> {{ option.provider_name }}</span>
                                         </div>
                                         <div class="fw-semibold mt-1">{{ option.label }}</div>
                                         <small class="text-muted">{{ option.method_type }}</small>
                                     </td>
-                                    <td>{{ option.recipient_name or '—' }}</td>
-                                    <td class="small">
+                                    <td data-label="Recipient">{{ option.recipient_name or '—' }}</td>
+                                    <td class="small record-wide" data-label="Details">
                                         {% if option.destination_value %}<div>{{ option.destination_label }}: {{ option.destination_value }}</div>{% endif %}
                                         {% if option.network %}<div>Network: {{ option.network }}</div>{% endif %}
                                         {% if option.details %}<div>{{ option.details }}</div>{% endif %}<div class="text-muted mt-1">Proof: {{ option.proof_summary }}</div>
                                     </td>
-                                    <td class="small">
+                                    <td class="small" data-label="Preview">
                                         {% if option.payment_link %}
                                             <div><a href="{{ option.payment_link }}" target="_blank" rel="noopener">Open Payment Link</a></div>
                                         {% else %}
                                             <div class="text-muted">No direct link</div>
                                         {% endif %}
                                         {% if option.qr_payload %}
-                                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data={{ option.qr_payload|urlencode }}" alt="{{ option.provider_name }} QR" class="border rounded mt-1 payment-qr-thumb">
+                                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data={{ option.qr_payload|urlencode }}" alt="{{ option.provider_name }} QR" class="border rounded mt-1 payment-qr-thumb payment-option-qr">
                                         {% endif %}
                                     </td>
-                                    <td>
+                                    <td data-label="Status">
                                         {% if option.is_active %}
                                             <span class="badge bg-success">Active</span>
                                         {% else %}
                                             <span class="badge bg-secondary">Inactive</span>
                                         {% endif %}
                                     </td>
-                                    <td>
-                                        <div class="d-flex gap-1">
-                                            <a href="{{ url_for('main.edit_payment_option', option_id=option.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-                                            <form method="POST" action="{{ url_for('main.toggle_payment_option', option_id=option.id) }}">
+                                    <td data-label="Actions" class="record-actions"><div class="action-row"><a href="{{ url_for('main.edit_payment_option', option_id=option.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>{% call more_menu('paymentOptionMore' ~ option.id) %}
+<li><form method="POST" action="{{ url_for('main.toggle_payment_option', option_id=option.id) }}">
                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                <button type="submit" class="btn btn-sm btn-outline-primary">Toggle</button>
-                                            </form>
-                                            <form method="POST" action="{{ url_for('main.delete_payment_option', option_id=option.id) }}" onsubmit="return confirm('Delete this payment option? If in use, it will be set inactive instead.');">
+                                                <button type="submit" class="dropdown-item">Toggle</button>
+                                            </form></li><li><form method="POST" action="{{ url_for('main.delete_payment_option', option_id=option.id) }}" onsubmit="return confirm('Delete this payment option? If in use, it will be set inactive instead.');">
                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                            </form>
-                                        </div>
-                                    </td>
+                                                <button type="submit" class="dropdown-item text-danger">Delete</button>
+                                            </form></li>
+{% endcall %}</div></td>
                                 </tr>
                             {% endfor %}
                         </tbody>

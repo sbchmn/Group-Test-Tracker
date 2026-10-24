@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}Merge Duplicate Accounts{% endblock %}
+{% block content %}
+<div class="page-header mb-3"><div><h3>Merge Duplicate Accounts</h3><p class="text-muted mb-0">Choose the account to keep, review shared tests, and confirm once.</p></div><a href="{{ url_for('main.manage_users') }}" class="btn btn-outline-secondary">Back to Users</a></div>
+<div class="card mb-3"><div class="card-body">
+<form method="GET" class="row g-3 align-items-end">
+    <div class="col-md-5"><label for="primaryAccount" class="form-label">Primary account to keep</label><select id="primaryAccount" name="primary_id" class="form-select" required><option value="">Choose primary account</option>{% for user in users %}<option value="{{ user.id }}" {% if primary and user.id == primary.id %}selected{% endif %}>{{ user.username }} · {{ user.email }}</option>{% endfor %}</select></div>
+    <div class="col-md-5"><label for="duplicateAccount" class="form-label">Duplicate account to merge</label><select id="duplicateAccount" name="duplicate_id" class="form-select" required><option value="">Choose duplicate account</option>{% for user in users %}<option value="{{ user.id }}" {% if duplicate and user.id == duplicate.id %}selected{% endif %}>{{ user.username }} · {{ user.email }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100" type="submit">Preview</button></div>
+</form></div></div>
+{% if plan %}
+<div class="alert alert-info text-break">Keep <strong>{{ primary.username }}</strong> ({{ primary.email }}), their password, permissions, active status and notification preferences. Transfer {{ plan.duplicate_test_count }} test record(s) from <strong>{{ duplicate.username }}</strong>, resolving {{ plan.overlaps|length }} shared test(s) below. Existing sessions and unused bot-link tokens for both accounts will be invalidated.</div>
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="primary_id" value="{{ primary.id }}"><input type="hidden" name="duplicate_id" value="{{ duplicate.id }}"><input type="hidden" name="preview_token" value="{{ plan.token }}">
+    {% for overlap in plan.overlaps %}
+    <div class="card mb-3"><div class="card-header fw-semibold text-break">{{ overlap.test.title }}</div><div class="card-body">
+        <div class="record-container"><table class="table record-table"><thead><tr><th>Account</th><th>Membership</th><th>Assigned charge</th><th>Recorded payment</th><th>Proof history</th></tr></thead><tbody>
+        {% for side in ['primary', 'duplicate'] %}{% set part = overlap[side] %}<tr><td data-label="Account" class="record-title">{{ side|title }}: {{ part.user.username }}</td><td data-label="Membership">{{ 'Approved' if part.approved else ('Denied' if part.denied else 'Pending') }} · {{ 'Donor' if part.vial_donor else 'Non-donor' }}{% if part.is_late_buy_in %} · Late buy-in{% endif %}</td><td data-label="Assigned charge">${{ '%.2f'|format(part.amount_owed or 0) }}</td><td data-label="Recorded payment">${{ '%.2f'|format(part.amount_paid or 0) }} · {{ 'Verified' if part.paid_lab else ('Awaiting review' if part.payment_claim_pending else 'Unverified') }}</td><td data-label="Proof history">{{ part.payment_submissions|length }} report(s) <button type="button" class="btn btn-sm btn-outline-primary" data-payment-part="{{ part.id }}" data-payment-mode="review">View Payment</button></td></tr>{% endfor %}
+        </tbody></table></div>
+        <div class="row g-3 mt-1">{% for kind, label in [('membership','Membership and donor details'), ('charge','Assigned charge'), ('payment','Recorded payment and verification')] %}
+        <div class="col-md-4"><label for="{{ kind }}{{ overlap.test.id }}" class="form-label">{{ label }}</label><select id="{{ kind }}{{ overlap.test.id }}" name="{{ kind }}_{{ overlap.test.id }}" class="form-select" required><option value="">Choose record to keep</option><option value="primary">Primary: {{ primary.username }}</option><option value="duplicate">Duplicate: {{ duplicate.username }}</option></select></div>
+        {% endfor %}</div>
+        <p class="form-text mb-0">Both proof histories and notes are preserved. The unselected payment history is archived and cannot replace the selected current report. Amounts are never added together automatically. {% if overlap.test.costs_locked %}Frozen charges for other participants stay unchanged.{% else %}This test is Recruiting: the funding pool and approved shares recalculate after the merge.{% endif %}</p>
+    </div></div>
+    {% endfor %}
+    {% if plan.conflicts %}<div class="card mb-3"><div class="card-header">Conflicting messaging links</div><div class="card-body"><div class="row g-3">
+    {% for provider in plan.conflicts %}<div class="col-md-4"><label for="link{{ provider }}" class="form-label">{{ provider|title }} link to retain</label><div class="small text-muted mb-2 text-break">{% for side, account in [('Primary',primary),('Duplicate',duplicate)] %}<div>{{ side }}: {% for field in plan.link_fields[provider] %}{{ account|attr(field) or '—' }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endfor %}</div><select id="link{{ provider }}" name="link_{{ provider }}" class="form-select" required><option value="">Choose a link</option><option value="primary">Keep primary link</option><option value="duplicate">Use duplicate link</option></select></div>{% endfor %}
+    </div></div></div>{% endif %}
+    <div class="alert alert-warning">The duplicate account will be removed. Its old username, email and password will no longer sign in. An audit record retains the merge decisions and original participant values. Confirm only after verifying both accounts belong to the same person.</div>
+    <label class="form-check mb-3"><input type="checkbox" class="form-check-input" name="confirm_merge" value="yes" required><span class="form-check-label">I verified these accounts belong to the same person and reviewed the selections above.</span></label>
+    <div class="page-actions"><button class="btn btn-danger" type="submit">Confirm Account Merge</button><a href="{{ url_for('main.manage_users') }}" class="btn btn-outline-secondary">Cancel</a></div>
+</form>
+{% endif %}
+{% endblock %}

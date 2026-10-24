@@ -87,7 +87,7 @@ def _serialize_submission(submission):
         'explorer_url': explorer_url(snapshot.get('network'), submission.transaction_id)
         if snapshot.get('method_type') == 'crypto' else None,
         'image_url': url_for('payments.proof', submission_id=submission.id) if submission.image_key else None,
-        'status': submission.status, 'denial_reason': submission.denial_reason or '',
+        'archived_by_merge': submission.archived_by_merge, 'status': submission.status, 'denial_reason': submission.denial_reason or '',
         'submitted_at': submission.submitted_at.isoformat() + 'Z',
         'reviewed_at': submission.reviewed_at.isoformat() + 'Z' if submission.reviewed_at else None,
         'reviewed_by_id': submission.reviewed_by_id,
@@ -106,7 +106,7 @@ def detail(part_id):
         paid=bool(part.paid_lab), pending=part.payment_claim_pending,
         revision=part.payment_revision, preferred_option_id=part.preferred_payment_option_id,
         legacy_snapshot=part.preferred_payment_snapshot or 'No payment method recorded',
-        options=options, latest=_serialize_submission(reports[0]) if reports else None,
+        options=options, latest=_serialize_submission(part.current_payment_submission) if part.current_payment_submission else None,
         history=[_serialize_submission(report) for report in reports],
         upload_ready=payment_proof_storage_ready(),
         can_report=bool(current_user.id == part.user_id and part.approved and not part.denied and not part.paid_lab
@@ -143,7 +143,7 @@ def report(part_id):
     except ValueError:
         selected_id = 0
     option = next((item for item in part.group_test.payment_options if item.id == selected_id and item.is_active), None)
-    latest = part.payment_submissions[0] if part.payment_submissions else None
+    latest = part.current_payment_submission
     # Inactive/removed methods may be kept for an existing report, never selected anew.
     if latest and latest.method_snapshot.get('id') == selected_id:
         snapshot = latest.method_snapshot
@@ -229,7 +229,7 @@ def review_payment(part, approve):
     reason = request.form.get('reason', request.form.get('deny_reason', '')).strip()
     if not approve and (not reason or len(reason) > 1000):
         return 'Enter a denial reason of up to 1,000 characters.', 400
-    latest = reports[0] if reports else None
+    latest = part.current_payment_submission
     now = datetime.utcnow()
     if latest and latest.status == 'pending':
         latest.status = 'approved' if approve else 'denied'

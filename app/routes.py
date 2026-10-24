@@ -24,6 +24,7 @@ from itertools import zip_longest
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm.exc import StaleDataError
 import secrets
 import ipaddress
 import html
@@ -53,6 +54,10 @@ from .models import (
     group_test_tags,
     public_result_tags,
 )
+from . import costs as cost_policy
+from .costs import CostPolicyError
+from .usernames import username_field
+from . import account_merge
 from .system_accounts import is_reserved_identity
 from .links import safe_http_url, validate_http_link
 from .saas import (
@@ -162,6 +167,26 @@ def enforce_managed_tenant_contract():
     return None
 
 
+@main_bp.errorhandler(CostPolicyError)
+def handle_cost_policy_error(error):
+    db.session.rollback()
+    flash(str(error), 'warning')
+    test_id = (request.view_args or {}).get('test_id')
+    if not test_id and (request.view_args or {}).get('part_id'):
+        part = db.session.get(Participation, request.view_args['part_id'])
+        test_id = part.group_test_id if part else None
+    if test_id:
+        return redirect(url_for('main.manage_participants', test_id=test_id))
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.errorhandler(StaleDataError)
+def handle_concurrent_record_change(error):
+    db.session.rollback()
+    flash('This record changed while you were editing it. Reload and review the latest values before retrying.', 'warning')
+    return redirect(url_for('main.dashboard'))
+
+
 @main_bp.route('/version')
 def version_info():
     return render_template(
@@ -203,7 +228,7 @@ class LoginForm(FlaskForm):
 
 
 class RegisterForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email(), Length(max=120)])
     password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
@@ -334,7 +359,7 @@ class ParticipantStatusForm(FlaskForm):
 
 class UserForm(FlaskForm):
     """Form for admins to create/edit users."""
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email()])
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
     discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
@@ -351,7 +376,7 @@ class UserForm(FlaskForm):
 
 class ProfileForm(FlaskForm):
     """Form for users to edit their own profile details."""
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email()])
     tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
     discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
@@ -3125,7 +3150,7 @@ def test_detail(test_id):
             if part.user_id and part.user and part.approved and part.user.receive_group_test_notifications:
                 amount_owed = part.amount_owed
                 if amount_owed is None:
-                    amount_owed = costs.get('donor_pays' if part.vial_donor else 'non_donor_pays', 0)
+                    amount_owed = 0
                 send_group_test_notification(test, part.user, template, amount_owed=amount_owed)
                 sent += 1
         flash(f'Sent notifications to {sent} participant(s).', 'success')
@@ -3527,7 +3552,7 @@ def create_test():
             donor_shipping_cost=form.donor_shipping_cost.data or 0.0,
             donor_shipping_reimbursement=form.donor_shipping_reimbursement.data or 'credit',
             donor_shipping_reimbursed_by_id=form.donor_shipping_reimbursed_by_id.data or None,
-            refund_per_donor=form.refund_per_donor.data or 20.0,
+            refund_per_donor=form.refund_per_donor.data if form.refund_per_donor.data is not None else 20.0,
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
             results_link=form.results_link.data if form.status.data == 'closed' else None,
@@ -3541,6 +3566,8 @@ def create_test():
         db.session.add(test)
         db.session.flush()
         apply_tags_to_record(test, form.tag_text.data)
+        if test.status != 'recruiting':
+            cost_policy.freeze(test, current_user.id)
         db.session.commit()
         if uploaded_image_key:
             _queue_uploaded_result_analysis(test, current_user.id)
@@ -3575,6 +3602,8 @@ def edit_test(test_id):
     
     if form.validate_on_submit():
         previous_status = test.status
+        was_unlocked = not test.costs_locked
+        cost_policy.ensure_snapshot(test)
         form.populate_obj(test)
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -3652,6 +3681,10 @@ def edit_test(test_id):
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
 
+        if was_unlocked and test.status != 'recruiting':
+            cost_policy.freeze(test, current_user.id)
+        else:
+            _recalculate_approved_amounts_for_test(test)
         db.session.commit()
 
         for obsolete_key in obsolete_image_keys:
@@ -3765,24 +3798,19 @@ def manage_participants(test_id):
     parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
     costs = test.calculate_costs()
 
-    # Calculate live "Current Fair Share" for display (always accurate)
+    # Frozen and individually priced participants display their assigned charge.
     for p in parts:
-        if p.vial_donor:
-            p.current_fair_share = costs.get('donor_pays', 0)
-        else:
-            p.current_fair_share = costs.get('non_donor_pays', 0)
+        p.current_fair_share = p.amount_owed if test.costs_locked or p.is_late_buy_in else costs.get('donor_pays' if p.vial_donor else 'non_donor_pays', 0)
 
     return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
 
 
 def _recalculate_approved_amounts_for_test(test):
-    """Keep approved participant balances consistent after approval changes."""
-    costs = test.calculate_costs()
-    for approved_part in test.participations.filter_by(approved=True).all():
-        approved_part.update_amount_owed(costs)
+    cost_policy.recalculate(test)
 
 
-def _approve_participation_record(part):
+def _approve_participation_record(part, buy_in_amount=None):
+    cost_policy.price_approval(part, buy_in_amount)
     part.approved = True
     part.approved_at = datetime.utcnow()
     part.denied = False
@@ -3930,7 +3958,7 @@ def approve_from_queue(part_id):
         flash('Participant is already approved.', 'info')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
-    _approve_participation_record(part)
+    _approve_participation_record(part, request.form.get('buy_in_amount'))
     _recalculate_approved_amounts_for_test(part.group_test)
     db.session.commit()
     flash(f'Approved {part.name or part.user.username}.', 'success')
@@ -4096,7 +4124,14 @@ def update_participant(part_id):
         ):
             flash('Use Review Payment to change a submitted payment. Participants can update their reported amount in the payment modal.', 'warning')
             return redirect(url_for('main.manage_participants', test_id=test.id))
+        cost_policy.ensure_snapshot(test)
+        previously_approved = bool(part.approved)
+        becoming_approved = bool(form.approved.data and not previously_approved)
+        if becoming_approved:
+            cost_policy.price_approval(part, request.form.get('buy_in_amount'))
         form.populate_obj(part)
+        if part.is_late_buy_in and not becoming_approved and request.form.get('buy_in_amount', '').strip():
+            part.amount_owed = float(cost_policy.money(request.form['buy_in_amount']))
         if part.paid_lab:
             part.payment_claimed_at = None
             if not previous_paid or part.payment_verified_at is None:
@@ -4105,16 +4140,17 @@ def update_participant(part_id):
         else:
             part.payment_verified_at = None
             part.payment_verified_by_id = None
-        if form.approved.data and not part.approved:
-            _approve_participation_record(part)
-            # Auto-calculate owed on approval
-            costs = test.calculate_costs()
-            part.update_amount_owed(costs)
+        if becoming_approved:
+            part.approved_at = datetime.utcnow()
+            part.denied = False
+            part.denied_at = None
+            part.denied_reason = None
         elif not form.approved.data:
             part.approved = False
             part.approved_at = None
             part.payment_claimed_at = None
 
+        _recalculate_approved_amounts_for_test(test)
         db.session.commit()
         flash('Participant updated successfully.', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -4129,9 +4165,8 @@ def approve_request(part_id):
     """Quick approve endpoint (can be called from manage page)."""
     part = Participation.query.get_or_404(part_id)
     if not part.approved:
-        _approve_participation_record(part)
-        costs = part.group_test.calculate_costs()
-        part.update_amount_owed(costs)
+        _approve_participation_record(part, request.form.get('buy_in_amount'))
+        _recalculate_approved_amounts_for_test(part.group_test)
         db.session.commit()
         flash(f'Approved {part.name or part.user.username} for test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
@@ -4193,6 +4228,7 @@ def unapprove_participant_from_manage(test_id, part_id):
         flash('This participant is not currently approved.', 'info')
         return redirect(url_for('main.manage_participants', test_id=test.id))
 
+    cost_policy.ensure_snapshot(test)
     part.approved = False
     part.approved_at = None
     part.payment_claimed_at = None
@@ -4258,31 +4294,39 @@ def remove_participant(part_id):
     """Remove a participant from a test when they should not be included."""
     part = Participation.query.get_or_404(part_id)
     test = part.group_test
+    cost_policy.ensure_snapshot(test)
     db.session.delete(part)
+    _recalculate_approved_amounts_for_test(test)
     db.session.commit()
     flash(f'Removed {part.name or part.user.username} from the test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=test.id))
 
 
-@main_bp.route('/admin/recalculate-costs/<int:test_id>', methods=['POST'])
+@main_bp.route('/admin/recalculate-costs/<int:test_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def recalculate_all_costs(test_id):
-    """Recalculate and update amount_owed for all approved participants."""
     test = GroupTest.query.get_or_404(test_id)
-    costs = test.calculate_costs()
+    changes, token = cost_policy.preview(test)
+    if request.method == 'POST' and request.form.get('preview_token'):
+        cost_policy.confirm_recalculation(test, request.form['preview_token'], current_user.id)
+        db.session.commit()
+        flash('Costs recalculated. ' + ('Automatic recruiting updates are enabled.' if not test.costs_locked else 'Costs remain frozen.'), 'success')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+    return render_template('admin/review_cost_changes.html', test=test, changes=changes, preview_token=token,
+                           proposed_costs=test.calculate_live_costs())
 
-    updated_count = 0
-    for part in test.participations.filter_by(approved=True):
-        if part.vial_donor:
-            part.amount_owed = costs.get('donor_pays', 0)
-        else:
-            part.amount_owed = costs.get('non_donor_pays', 0)
-        updated_count += 1
 
+@main_bp.route('/admin/test/<int:test_id>/buy-in-price', methods=['POST'])
+@login_required
+@admin_required
+def set_buy_in_price(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    cost_policy.ensure_snapshot(test)
+    test.late_buy_in_amount = cost_policy.money(request.form.get('buy_in_amount'))
     db.session.commit()
-    flash(f'Recalculated costs for {updated_count} approved participants.', 'success')
-    return redirect(url_for('main.manage_participants', test_id=test_id))
+    flash('Default price saved for future late buy-ins. Existing assigned charges are unchanged.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
 
 
 @main_bp.route('/admin/add-participant/<int:test_id>', methods=['GET', 'POST'])
@@ -4309,14 +4353,14 @@ def add_participant_to_test(test_id):
             flash('User not found.', 'danger')
             return redirect(url_for('main.add_participant_to_test', test_id=test_id))
 
+        cost_policy.ensure_snapshot(test)
         part = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
         if part:
             # Reuse prior denied row to preserve request history while restoring access.
             part.name = user.username
             part.tg_username = user.tg_username
             part.active = True
-            part.approved = True
-            part.approved_at = datetime.utcnow()
+
             part.denied = False
             part.denied_at = None
             part.denied_reason = None
@@ -4327,16 +4371,15 @@ def add_participant_to_test(test_id):
                 user_id=user.id,
                 name=user.username,
                 tg_username=user.tg_username,
-                approved=True,
-                approved_at=datetime.utcnow(),
+                approved=False,
                 denied=False,
                 active=True
             )
             db.session.add(part)
 
-        # Calculate initial owed amount
-        costs = test.calculate_costs()
-        part.update_amount_owed(costs)
+        db.session.flush()
+        _approve_participation_record(part, request.form.get('buy_in_amount'))
+        _recalculate_approved_amounts_for_test(test)
         db.session.commit()
         flash(f'Added {user.username} to the test (auto-approved).', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -5797,6 +5840,31 @@ def manage_users():
     return render_template('admin/manage_users.html', users=users, support_user=support_user, support_status=support_status)
 
 
+@main_bp.route('/admin/users/merge', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def merge_users():
+    users = User.query.filter(User.system_account_key.is_(None)).order_by(User.username).all()
+    primary = db.session.get(User, request.values.get('primary_id', type=int)) if request.values.get('primary_id', type=int) else None
+    duplicate = db.session.get(User, request.values.get('duplicate_id', type=int)) if request.values.get('duplicate_id', type=int) else None
+    plan = None
+    try:
+        if primary and duplicate:
+            if request.method == 'POST':
+                account_merge.merge(primary, duplicate, current_user.id, request.form)
+                db.session.commit()
+                flash('Accounts merged. Existing sessions were signed out; use the primary account to sign in again.', 'success')
+                return redirect(url_for('main.manage_users'))
+            plan = account_merge.preview(primary, duplicate, current_user.id)
+        elif request.method == 'POST':
+            raise account_merge.MergeError('Choose a primary account and a duplicate account.')
+    except (account_merge.MergeError, IntegrityError, StaleDataError) as error:
+        db.session.rollback()
+        message = str(error) if isinstance(error, account_merge.MergeError) else 'A related record changed. Reload the preview and try again.'
+        flash(message, 'warning')
+    return render_template('admin/merge_users.html', users=users, primary=primary, duplicate=duplicate, plan=plan)
+
+
 @main_bp.route('/admin/managed-support/request', methods=['POST'])
 @login_required
 @admin_required
@@ -5980,12 +6048,16 @@ def set_results_link(test_id):
     if link and safe_http_url(link) is None:
         flash('Results link must be a full http:// or https:// URL.', 'danger')
         return redirect(url_for('main.test_detail', test_id=test_id))
+    was_unlocked = not test.costs_locked
+    cost_policy.ensure_snapshot(test)
     test.results_link = link if link else None
     if test.status != 'closed':
         test.status = 'closed'
     if test.results_link and not test.results_posted_at:
         test.results_posted_at = datetime.utcnow()
 
+    if was_unlocked:
+        cost_policy.freeze(test, current_user.id)
     db.session.commit()
     _notify_status_change_after_commit(test, previous_status)
     flash('Results link updated and test marked closed (if needed). Visible only to approved members.', 'success')

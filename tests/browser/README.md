@@ -24,3 +24,17 @@ are changed. It checks:
 
 The broader responsive audit screenshots and measurements are in
 `docs/reviews/responsive-audit-2026-10-24/`, with matching updated captures under `after/`.
+
+Run `python tests/browser/cost_policy.py` with the same dependencies and environment
+options to check automatic recruiting prices, status freezing, queue approvals,
+late buy-in overrides, explicit repricing, reopening and unlocking. It also checks
+eight views at 320, 390, 820, 1024 and 1440 pixels for page overflow, overlapping
+controls and clipped buttons. `layout_metrics.js` supplies the geometry checks.
+The frozen-price screenshots and measurements are in
+`docs/reviews/cost-freeze-2026-10-24/`.
+
+Run `python tests/browser/account_merge.py` to exercise the administrator merge
+preview, explicit overlap and messaging-link choices, archived payment history,
+and whitespace rejection. It checks the user list, account selection and merge
+preview at five widths from 320 to 1440 pixels. Evidence is saved under
+`docs/reviews/account-merge-2026-10-24/`.

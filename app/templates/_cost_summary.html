@@ -1,0 +1,28 @@
+{% set c = costs %}
+<div class="card mb-4 cost-highlight">
+    <div class="card-header bulk-toolbar"><span>Cost Summary · {{ 'Frozen cost basis' if test.costs_locked else 'Updating automatically' }}</span>{% if current_user.is_admin %}<a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-link">Adjust inputs</a>{% endif %}</div>
+    <div class="card-body">
+        <div class="row text-center g-2"><div class="col"><div class="fw-bold fs-4">{{ c.total_participants }}</div><div class="small text-muted">Cost-sharing participants</div></div><div class="col"><div class="fw-bold fs-4">{{ c.total_donors }}</div><div class="small text-muted">Vial donors</div></div><div class="col"><div class="fw-bold fs-4">{{ c.total_non_donors }}</div><div class="small text-muted">Non-donors</div></div></div>
+        {% if c.late_buy_in_count %}<p class="small text-muted mt-3">{{ c.late_buy_in_count }} approved late buy-in(s), counted separately from this cost-sharing basis.</p>{% endif %}
+        {% if c.get('legacy') %}<p class="small text-muted mt-3">Existing assigned charges have been preserved. Historical rates that cannot be established are shown as “Not recorded.”</p>{% endif %}
+        <hr>
+        {% set cost_inputs = c.get('inputs', {}) %}
+        {% set lab_items = cost_inputs.get('lab_test_details', test.lab_test_details) %}
+        {% if lab_items %}
+        <div class="mb-3">
+            <div class="fw-semibold mb-2">Lab Test Items</div>
+            <ul class="list-group list-group-flush">
+                {% for item in lab_items %}<li class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-center"><span>{{ item.name }}</span><span class="text-muted small">${{ '%.2f'|format(item.price or 0) }} · {{ item.vials_needed }} vial{% if item.vials_needed != 1 %}s{% endif %}</span></li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <dl class="row mb-0">
+            <dt class="col-7">Total lab + shipping</dt><dd class="col-5 text-end">${{ '%.2f'|format(c.total_fixed_cost) }}</dd>
+            {% if (cost_inputs.get('donor_shipping_cost', test.donor_shipping_cost) or 0) > 0 %}<dt class="col-7">Donor shipping (included)</dt><dd class="col-5 text-end">${{ '%.2f'|format(cost_inputs.get('donor_shipping_cost', test.donor_shipping_cost)) }}</dd>{% endif %}
+            <dt class="col-7">Non-donor share</dt><dd class="col-5 text-end">{% if c.non_donor_pays is none %}Not recorded{% else %}${{ '%.2f'|format(c.non_donor_pays) }}{% endif %}</dd>
+            <dt class="col-7">Donor share after credit</dt><dd class="col-5 text-end">{% if c.donor_pays is none %}Not recorded{% else %}${{ '%.2f'|format(c.donor_pays) }}{% endif %}</dd>
+        </dl>
+        {% if not c.get('legacy') %}<details class="small mt-2"><summary>How the split works</summary><p class="mt-2 mb-0">Base cost: ${{ '%.2f'|format(c.base_per_person) }} per cost-sharing participant. Donor credit: ${{ '%.2f'|format(c.effective_donor_refund) }} per donor. Non-donors fund the ${{ '%.2f'|format(c.total_refund_pool) }} refund pool.{% if (c.get('inputs', {}).get('donor_shipping_cost', test.donor_shipping_cost) or 0) > 0 %} Donor shipping and its reimbursement policy are included in this cost basis.{% endif %}</p></details>{% endif %}
+        {% if test.costs_locked %}<div class="small text-muted mt-3">Assigned participant charges are fixed, including individual buy-in overrides. Roster and budget edits do not change them without an explicit recalculation.</div>{% endif %}
+    </div>
+</div>

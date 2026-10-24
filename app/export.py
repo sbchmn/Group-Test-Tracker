@@ -22,6 +22,11 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     wb = Workbook()
     ws = wb.active
     ws.title = "MassPurity & Endo"
+    costs = test.calculate_costs()
+    basis = costs.get('inputs') or {
+        'total_lab_cost': test.total_lab_cost, 'shipping_cost': test.shipping_cost,
+        'refund_per_donor': test.refund_per_donor,
+    }
 
     # Styles
     header_font = Font(bold=True, size=12, name='Arial')
@@ -65,11 +70,11 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     ws['A7'] = "Size"
     ws['B7'] = test.size or ""
     ws['D7'] = "TOTAL LAB COST"
-    ws['E7'] = test.total_lab_cost or 0
+    ws['E7'] = basis['total_lab_cost'] or 0
     ws['E7'].number_format = currency_format
 
     ws['A8'] = "SHIPMENT TO LAB / COST"
-    ws['B8'] = test.shipping_cost or 0
+    ws['B8'] = basis['shipping_cost'] or 0
     ws['B8'].number_format = currency_format
 
     ws['A9'] = "ORDER NUMBER"
@@ -80,8 +85,9 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     ws['A10'] = "RESULTS LINK"
     ws['B10'] = test.results_link or ""
 
-    if test.lab_test_details:
-        for idx, item in enumerate(test.lab_test_details, start=1):
+    export_items = basis.get('lab_test_details', test.lab_test_details)
+    if export_items:
+        for idx, item in enumerate(export_items, start=1):
             row = 10 + idx
             ws.cell(row=row, column=4, value=item.get('name') or '')
             ws.cell(row=row, column=5, value=item.get('price') or 0)
@@ -104,7 +110,7 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     headers = [
         "#", "NAME", "TG Username", "Verified", "ACTIVE", "Order Status",
         "US Based", "Vial Donor", "State", "Pay Vial Collector", "Pay Lab",
-        "Paid Lab", "Amount Owed", "Amount Paid", "Notes / Approved"
+        "Paid Lab", "Amount Owed", "Amount Paid", "Notes / Approved", "Late Buy-in"
     ]
     header_row = start_row + 1
     for col, header in enumerate(headers, 1):
@@ -137,6 +143,7 @@ def generate_test_export(test: GroupTest) -> BytesIO:
         ws.cell(row=row, column=14).border = thin_border
         approved_str = "Approved" if p.approved else "Pending"
         ws.cell(row=row, column=15, value=f"{approved_str} | {p.notes or ''}").border = thin_border
+        ws.cell(row=row, column=16, value="Yes" if p.is_late_buy_in else "No").border = thin_border
 
     data_end = data_start + len(participations) - 1 if participations else data_start
 
@@ -148,12 +155,12 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     ws[f'A{input_row}'].fill = input_fill
 
     inputs = [
-        ("TOTAL GROUP PARTICIPANTS", f"=COUNTA(B{data_start}:B{data_end})" if participations else 0),
-        ("TOTAL DONORS", f'=COUNTIF(H{data_start}:H{data_end},"Yes")' if participations else 0),
-        ("TOTAL LAB TESTS COST", test.total_lab_cost or 0),
-        ("FINAL POSTAGE COST", test.shipping_cost or 0),
-        ("TOTAL REFUND AMOUNT TO DONOR (per donor)", test.refund_per_donor or 0),
-        ("TOTAL NON-VIAL COLLECTORS", f'=COUNTIF(H{data_start}:H{data_end},"No")' if participations else 0),
+        ("TOTAL COST-SHARING PARTICIPANTS", costs['total_participants'] if test.costs_locked else (f'=COUNTIFS(O{data_start}:O{data_end},"Approved*",P{data_start}:P{data_end},"No")' if participations else 0)),
+        ("TOTAL DONORS", costs['total_donors'] if test.costs_locked else (f'=COUNTIFS(H{data_start}:H{data_end},"Yes",O{data_start}:O{data_end},"Approved*",P{data_start}:P{data_end},"No")' if participations else 0)),
+        ("TOTAL LAB TESTS COST", basis['total_lab_cost'] or 0),
+        ("FINAL POSTAGE COST", basis['shipping_cost'] or 0),
+        ("TOTAL REFUND AMOUNT TO DONOR (per donor)", basis['refund_per_donor'] or 0),
+        ("TOTAL NON-VIAL COLLECTORS", costs['total_non_donors'] if test.costs_locked else (f'=COUNTIFS(H{data_start}:H{data_end},"No",O{data_start}:O{data_end},"Approved*",P{data_start}:P{data_end},"No")' if participations else 0)),
     ]
 
     for i, (label, value) in enumerate(inputs):
@@ -178,6 +185,15 @@ def generate_test_export(test: GroupTest) -> BytesIO:
         ("VIAL SHIPPER REFUND PER PERSON (example)", f"=B{input_row+5}"),
         ("EACH PERSON PAY DONOR SHIPPING (example)", f"=IF(B{input_row+1}>0,B{input_row+4}/B{input_row+1},0)"),
     ]
+    if test.costs_locked:
+        ws[f'A{calc_row}'] = 'FROZEN COST BASIS (assigned participant charges are preserved)'
+        calcs = [
+            ('COST-SHARING PARTICIPANTS', costs['total_participants']),
+            ('FROZEN NON-DONOR SHARE', costs['non_donor_pays'] if costs['non_donor_pays'] is not None else 'Not recorded'),
+            ('FROZEN DONOR SHARE', costs['donor_pays'] if costs['donor_pays'] is not None else 'Not recorded'),
+            ('APPROVED LATE BUY-INS (outside cost pool)', costs['late_buy_in_count']),
+            ('DEFAULT LATE BUY-IN PRICE', costs['late_buy_in_amount'] if costs['late_buy_in_amount'] is not None else 'Not confirmed'),
+        ]
 
     for i, (label, formula) in enumerate(calcs):
         r = calc_row + 1 + i
@@ -189,7 +205,7 @@ def generate_test_export(test: GroupTest) -> BytesIO:
     # Column widths
     ws.column_dimensions['A'].width = 32
     ws.column_dimensions['B'].width = 22
-    for col in range(3, 16):
+    for col in range(3, 17):
         ws.column_dimensions[get_column_letter(col)].width = 14
 
     # Freeze panes for participants table

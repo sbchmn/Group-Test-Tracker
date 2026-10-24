@@ -97,101 +97,8 @@ window.addEventListener('DOMContentLoaded', function() {
             </div>
         </div>
         
-        <!-- Cost Summary - Core value from original spreadsheet -->
-        <div class="card mb-4 cost-highlight">
-            <div class="card-header d-flex justify-content-between">
-                <span>Cost Summary &amp; Split (Auto-calculated)</span>
-                {% if current_user.is_admin %}
-                    <a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-link p-0">Adjust inputs →</a>
-                {% endif %}
-            </div>
-            <div class="card-body">
-                {% set c = costs %}
-                <div class="row text-center">
-                    <div class="col">
-                        <div class="fw-bold fs-4">{{ c.total_participants }}</div>
-                        <div class="small text-muted">Approved Participants</div>
-                    </div>
-                    <div class="col">
-                        <div class="fw-bold fs-4 text-success">{{ c.total_donors }}</div>
-                        <div class="small text-muted">Vial Donors</div>
-                    </div>
-                    <div class="col">
-                        <div class="fw-bold fs-4">{{ c.total_non_donors }}</div>
-                        <div class="small text-muted">Non-Donors</div>
-                    </div>
-                </div>
-                
-                <hr>
+        {% include '_cost_summary.html' %}
 
-                {% if test.lab_test_details %}
-                    <div class="mb-3">
-                        <div class="fw-semibold mb-2">Lab Test Items</div>
-                        <ul class="list-group list-group-flush">
-                            {% for item in test.lab_test_details %}
-                            <li class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-center">
-                                <span>{{ item.name }}</span>
-                                <span class="text-muted small">${{ '%.2f'|format(item.price or 0) }} · {{ item.vials_needed }} vial{% if item.vials_needed != 1 %}s{% endif %}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                {% endif %}
-
-                <table class="table table-sm mb-0">
-                    <tr>
-                        <td>Total Lab + Shipping</td>
-                        <td class="text-end fw-bold">${{ c.total_fixed_cost }}</td>
-                    </tr>
-                    {% if (test.donor_shipping_cost or 0) > 0 %}
-                    <tr>
-                        <td>Donor-specific shipping</td>
-                        <td class="text-end">${{ '%.2f'|format(test.donor_shipping_cost or 0) }}</td>
-                    </tr>
-                    {% endif %}
-                    <tr>
-                        <td>Refund Pool (to {{ c.total_donors }} donors × ${{ c.effective_donor_refund }})</td>
-                        <td class="text-end text-success">− ${{ c.total_refund_pool }}</td>
-                    </tr>
-                    <tr class="table-active">
-                        <td><strong>Non-Donor Pays</strong></td>
-                        <td class="text-end"><strong>${{ c.non_donor_pays }}</strong></td>
-                    </tr>
-                    <tr>
-                        <td><strong>Donor Pays (after credit)</strong></td>
-                        <td class="text-end"><strong>${{ c.donor_pays }}</strong></td>
-                    </tr>
-                </table>
-
-                {% set uplift_per_non = (c.total_refund_pool / c.total_non_donors) if c.total_non_donors > 0 else 0 %}
-                <div class="alert alert-light border mt-3 mb-0">
-                    <div class="fw-semibold mb-2">How the split works for this group</div>
-                    <div class="small">
-                        <div>Fixed cost = lab cost + shipping = ${{ '%.2f'|format(c.total_fixed_cost) }}</div>
-                        <div>Base share before refunds = ${{ '%.2f'|format(c.base_per_person) }} each across {{ c.total_participants }} approved participants</div>
-                        {% if c.total_donors > 0 %}
-                            <div>Refund pool = {{ c.total_donors }} donor × ${{ '%.2f'|format(c.effective_donor_refund) }} = ${{ '%.2f'|format(c.total_refund_pool) }}</div>
-                        {% endif %}
-                        {% if c.total_non_donors > 0 %}
-                            <div>Uplift added to each non-donor = ${{ '%.2f'|format(c.total_refund_pool) }} ÷ {{ c.total_non_donors }} = ${{ '%.2f'|format(uplift_per_non) }}</div>
-                            <div>Non-donor pay = ${{ '%.2f'|format(c.base_per_person) }} + ${{ '%.2f'|format(uplift_per_non) }} = ${{ '%.2f'|format(c.non_donor_pays) }}</div>
-                        {% endif %}
-                        {% if (test.donor_shipping_cost or 0) > 0 %}
-                            <div>Donor-shipping cost = ${{ '%.2f'|format(test.donor_shipping_cost or 0) }}</div>
-                            <div>Reimbursement policy = {{ 'credit to the donor' if test.donor_shipping_reimbursement == 'credit' else 'covered by participant' }}</div>
-                            {% if test.donor_shipping_reimbursement == 'participant' and reimbursed_by_user %}
-                                <div>Covered by = {{ reimbursed_by_user.username }}</div>
-                            {% endif %}
-                        {% endif %}
-                        {% if c.total_donors > 0 %}
-                            <div>Donor pay = ${{ '%.2f'|format(c.base_per_person) }} − ${{ '%.2f'|format(c.effective_donor_refund) }} = ${{ '%.2f'|format(c.donor_pays) }}</div>
-                        {% endif %}
-                    </div>
-                </div>
-                <small class="text-muted d-block mt-2">Formula: Non-donors fund donor refunds via small uplift. Transparent &amp; fair.</small>
-            </div>
-        </div>
-        
         {% if current_user.is_admin %}
         <div class="card mb-4">
             <div class="card-header">Notify Test Participants</div>
@@ -272,7 +179,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 <div class="card-body">
                     {% if my_part and my_part.approved and not my_part.denied %}
                     <div class="payment-summary mb-3">
-                        {% set report = my_part.payment_submissions|first %}
+                        {% set report = my_part.current_payment_submission %}
                         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                             <span class="fw-semibold">Your lab fee payment</span>
                             {% if my_part.paid_lab %}<span class="badge text-bg-success">Payment Verified</span>
@@ -372,7 +279,7 @@ window.addEventListener('DOMContentLoaded', function() {
             {% elif my_part and my_part.approved %}
                 <div class="alert alert-success">
                     <strong>You are an approved member.</strong><br>
-                    Your calculated share: <strong>${{ c.donor_pays if my_part.vial_donor else c.non_donor_pays }}</strong>
+                    Your amount owed: <strong>${{ '%.2f'|format(my_part.balance_due) }}</strong>
                     {% if my_part.vial_donor %}(as vial donor){% endif %}
                 </div>
 
@@ -420,7 +327,7 @@ window.addEventListener('DOMContentLoaded', function() {
                         <th>Role</th>
                         <th>Request State</th>
                         <th>Vendor Order</th>
-                        <th>Individual Fee</th>
+                        <th>Amount Owed</th>
                         <th>Lab Fee Paid</th>
                     </tr>
                 </thead>
@@ -446,10 +353,10 @@ window.addEventListener('DOMContentLoaded', function() {
                         <td data-label="Vendor Order">
                             <span class="badge bg-light text-dark">{{ (p.order_status or 'pending')|replace('_', ' ')|capitalize }}</span>
                         </td>
-                        <td class="small text-success" data-label="Individual Fee">
-                            ${{ '%.2f'|format( (p.amount_owed or 0) - (p.amount_paid or 0) if (p.amount_owed or 0) > (p.amount_paid or 0) else 0 ) }}
+                        <td class="small text-success" data-label="Amount Owed">
+                            ${{ '%.2f'|format( p.balance_due ) }}
                             {% if p.amount_paid and p.amount_paid > 0 %}
-                                <br><small class="text-muted">(paid ${{ '%.2f'|format(p.amount_paid) }})</small>
+                                <br><small class="text-muted">(reported ${{ '%.2f'|format(p.amount_paid) }})</small>
                             {% endif %}
                         </td>
                         <td data-label="Lab Fee Paid">

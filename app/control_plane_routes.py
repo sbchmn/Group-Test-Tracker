@@ -14,6 +14,7 @@ from flask import Blueprint, jsonify, request
 from werkzeug.security import generate_password_hash
 
 from . import control_plane, csrf, db
+from .usernames import check_username
 from .models import (
     RESERVED_SUPPORT_EMAIL,
     RESERVED_SUPPORT_SYSTEM_KEY,
@@ -81,6 +82,12 @@ def control_plane_bootstrap():
     verified, body = result
 
     payload = request.get_json(silent=True) or {}
+    try:
+        check_username(str(payload.get('username') or ''))
+        check_username(str(payload.get('support_username') or ''))
+    except ValueError as error:
+        db.session.rollback()
+        return jsonify({'error': str(error)}), 400
     username = str(payload.get('username') or '').strip()
     email = str(payload.get('email') or '').strip()
     password_hash = str(payload.get('password_hash') or '')
@@ -140,6 +147,11 @@ def control_plane_support():
 
     payload = request.get_json(silent=True) or {}
     action = str(payload.get('action') or '').strip()
+    try:
+        check_username(str(payload.get('username') or ''))
+    except ValueError as error:
+        db.session.rollback()
+        return jsonify({'error': str(error)}), 400
     username = str(payload.get('username') or '').strip()
     email = str(payload.get('email') or '').strip()
     password_hash = payload.get('password_hash')

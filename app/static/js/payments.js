@@ -163,9 +163,10 @@
             changeMethod(true);
         }
         const history = byId('paymentHistoryContent'); history.replaceChildren();
-        data.history.slice(1).forEach(report => {
+        const historicalReports = data.history.filter(report => report.id !== data.latest?.id);
+        historicalReports.forEach(report => {
             const item = node('details', null, 'payment-history-item');
-            item.append(node('summary', `$${report.amount} · ${report.status} · ${dateText(report.submitted_at)}`));
+            item.append(node('summary', `$${report.amount} · ${report.status}${report.archived_by_merge ? ' · archived by account merge' : ''} · ${dateText(report.submitted_at)}`));
             item.append(node('div', report.method.title, 'small fw-semibold mt-2'));
             if (report.method.destination) item.append(node('div', `Destination: ${report.method.destination}`, 'small'));
             if (report.method.network) item.append(node('div', `Network: ${report.method.network}`, 'small'));
@@ -173,7 +174,7 @@
             if (report.reviewed_at) item.append(node('div', `Reviewed ${dateText(report.reviewed_at)}`, 'small text-muted'));
             appendEvidence(item, report); history.append(item);
         });
-        show(byId('paymentHistory'), data.history.length > 1);
+        show(byId('paymentHistory'), historicalReports.length > 0);
         show(byId('paymentContent'), true);
         initialized = true;
         byId('paymentSubmit').disabled = !selected();

@@ -62,9 +62,6 @@ window.onload = function() {
             {% for item in test.lab_test_details %}
                 addLabTestRow('{{ item.name|e }}', '{{ item.price }}', '{{ item.vials_needed }}', '{{ (item.result or '')|e }}');
             {% endfor %}
-        {% else %}
-            addLabTestRow('MASS, PURITY + ID', '360', '1', '');
-            addLabTestRow('STERILITY', '290', '0', '');
         {% endif %}
     }
 }

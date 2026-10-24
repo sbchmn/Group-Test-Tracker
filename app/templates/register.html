@@ -15,6 +15,7 @@
                             {{ form.username.label(class="form-label") }}
                             {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else "")) }}
                             {% for e in form.username.errors %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+                    <div class="form-text">No spaces or other whitespace, including before or after the username.</div>
                         </div>
                         <div class="col-md-6 mb-3">
                             {{ form.email.label(class="form-label") }}

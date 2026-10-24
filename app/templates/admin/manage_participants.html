@@ -4,7 +4,7 @@
 
 {% block content %}
 <h3>Manage Participants for "{{ test.title }}"</h3>
-<p class="text-muted">Approve, deny, or reopen requests and update participant status from one page. Costs recalculate live.</p>
+<p class="text-muted">Approve, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recruiting and stay fixed after freezing.</p>
 
 <div class="mb-3 d-flex flex-wrap gap-3 justify-content-between align-items-center">
     <div class="participant-toolbar">
@@ -15,12 +15,7 @@
         <a href="{{ url_for('main.add_participant_to_test', test_id=test.id) }}" class="btn btn-sm btn-primary">
             <i class="bi bi-person-plus"></i> Add Existing User
         </a>
-        <form method="POST" action="{{ url_for('main.recalculate_all_costs', test_id=test.id) }}" class="m-0">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('Recalculate current fair share for ALL approved participants?')">
-                <i class="bi bi-arrow-repeat"></i> Recalculate All Costs
-            </button>
-        </form>
+
     </div>
     <div class="participant-counts small text-muted">
         <span>Approved: <strong>{{ participations|selectattr('approved')|list|length }}</strong>
@@ -31,6 +26,8 @@
         </span>
     </div>
 </div>
+
+{% include 'admin/_cost_policy_controls.html' %}
 
 {% if not participations %}
     <div class="alert alert-info">No participation requests yet.</div>
@@ -46,8 +43,8 @@
                     <th>Request State</th>
                     <th>Order Status</th>
                     <th>Paid Lab?</th>
-                    <th>Stored Owed</th>
-                    <th>Current Fair Share</th>
+                    <th>Assigned Charge</th>
+                    <th>{{ 'Pricing Basis' if test.costs_locked else 'Current Fair Share' }}</th>
                     <th class="participant-actions-heading">Actions</th>
                 </tr>
             </thead>
@@ -85,18 +82,19 @@
                             <span class="text-muted small"><i class="bi bi-x-circle me-1"></i>Unpaid</span>
                         {% endif %}
                     </td>
-                    <td data-label="Stored Owed" class="small">
+                    <td data-label="Assigned Charge" class="small">
                         ${{ '%.2f'|format(p.amount_owed) }}<br>
                         <small class="text-muted">Paid: ${{ '%.2f'|format(p.amount_paid) }}</small>
                     </td>
-                    <td data-label="Current Fair Share" class="small text-success fw-bold">
-                        ${{ '%.2f'|format(p.current_fair_share) }}
+                    <td data-label="{{ 'Pricing Basis' if test.costs_locked else 'Current Fair Share' }}" class="small text-success fw-bold">
+                        {% if not p.approved %}<span class="text-muted">Awaiting approval</span>{% elif p.is_late_buy_in %}Late buy-in{% elif test.costs_locked %}Frozen share{% else %}${{ '%.2f'|format(p.current_fair_share) }}{% endif %}
                     </td>
                     <td data-label="Actions" class="participant-actions-cell">
                         <div class="participant-actions">
                             {% if not p.approved %}
                                 <form method="POST" action="{{ url_for('main.approve_request', part_id=p.id) }}" class="participant-primary-action">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    {% set pricing_test = test %}{% set pricing_id = p.id %}{% include 'admin/_buy_in_amount.html' %}
                                     <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check2 me-1"></i> Approve</button>
                                 </form>
                             {% elif not p.denied %}
@@ -149,14 +147,7 @@
     </div>
 {% endif %}
 
-<div class="mt-4">
-    <h6>Cost Summary (live)</h6>
-    <div class="cost-highlight small">
-        Non-Donor: <strong>${{ costs.non_donor_pays }}</strong> &nbsp;|&nbsp; 
-        Donor: <strong>${{ costs.donor_pays }}</strong> &nbsp;|&nbsp; 
-        Refund per donor: <strong>${{ costs.effective_donor_refund }}</strong>
-    </div>
-</div>
+{% include '_cost_summary.html' %}
 {% endblock %}
 
 {% block scripts %}

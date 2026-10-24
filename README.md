@@ -193,6 +193,8 @@ The repository does not currently install a Google Analytics tag. The Privacy Po
 
 ### Register and Login
 
+New usernames and username changes reject whitespace anywhere, including leading/trailing spaces, tabs and Unicode whitespace. Existing usernames remain usable without being silently renamed. This policy applies to registration, admin creation, profile changes, CLI creation and managed provisioning.
+
 1. Open Register.
 2. Enter username, email, password, and optional Telegram username.
 3. Submit and log in from the Login page.
@@ -345,7 +347,15 @@ Deploy this change with the normal database migration (`flask --app run.py db up
 3. Deny with required reason.
 4. Reopen denied requests.
 5. Remove participant if needed.
-6. Recalculate costs after major membership changes.
+6. Review the pricing status above the participant list. During unlocked **Recruiting**, approvals, removals, donor changes, and budget edits recalculate all approved cost-sharing participants automatically. These updates do not send payment notifications.
+
+Shares freeze when a test leaves Recruiting, before status notifications or digests are queued. Returning to Recruiting keeps them frozen until an administrator uses **Unlock and Recalculate**, reviews the proposed charges, and confirms. Outside Recruiting, **Review Cost Changes** provides a one-time recalculation with confirmation and keeps pricing frozen. A preview expires if the roster, payments, or cost inputs change.
+
+Participants approved after freezing are late buy-ins. They default to the frozen non-donor share, with an individual override on approval or the participant editor. Administrators can also change the default for future buy-ins without altering existing charges. Late buy-ins remain outside the original cost-sharing pool, including after an explicit unlock. Bulk approval uses the saved default; if no unambiguous default exists, set or confirm one first. No partial batch is approved on a pricing error.
+
+The group detail list retains one **Amount Owed** column: the assigned charge less the recorded payment, with a minimum of zero. Frozen summaries and exports use the saved cost basis. Payment forms, notification template `amount_owed`, bot status, and export participant charges use each participant's assigned charge, including individual overrides. Recalculation preserves recorded payments, payment evidence, and verification records.
+
+Apply `flask --app run.py db upgrade` before running this version. Existing tests outside Recruiting are frozen without changing historical charges. Historical non-donor charges provide the late buy-in default only when consistent; otherwise an administrator must confirm a default. Historical rates that cannot be established display as **Not recorded**.
 
 Payment controls on each approved row:
 
@@ -433,6 +443,12 @@ Supported sources and limits:
 2. Create users or edit existing users.
 3. Toggle active state.
 4. Trigger password reset delivery for selected user.
+
+**Merge Duplicate Accounts** lets an administrator choose a primary account, preview the duplicate's records and confirm the merge. The primary keeps its username, email, password, permissions, active state and notification preferences. Records unique to the duplicate transfer to the primary. For shared tests, explicitly choose the membership details, assigned charge and recorded payment/verification to retain; amounts are never automatically added. Both proof histories and notes survive, with the unselected payment history archived separately from the current report.
+
+Conflicting Telegram, Discord and Root links require a choice; otherwise missing links transfer. Recruiting funding shares recalculate quietly after the merge, while frozen shares stay fixed. Related ownership, reviewer references, hidden tests and digest records transfer. Existing sessions and unused bot-link tokens for both accounts are invalidated. The duplicate is removed and an audit record preserves the decisions and original participant values. System accounts cannot be merged; you cannot merge away your signed-in account or the last active administrator.
+
+Deploy with `flask --app run.py db upgrade`. The account-merge migration adds audit/history metadata and prevents SQLite from reusing deleted user IDs. No existing username is rewritten.
 
 Deactivation behavior:
 

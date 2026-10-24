@@ -3,6 +3,7 @@
 {% block title %}Payment Options{% endblock %}
 
 {% block content %}
+<datalist id="payment-networks">{% for chain in ['Bitcoin','Litecoin','Bitcoin Cash','Ethereum','Arbitrum','Optimism','Base','Polygon','Solana','Tron','BNB Smart Chain'] %}<option value="{{ chain }}">{% endfor %}</datalist>
 <h3>Payment Options</h3>
 <p class="text-muted">Create reusable payment methods and recipients for assignment to group tests.</p>
 
@@ -18,8 +19,9 @@
                     <div class="mb-3">{{ form.recipient_name.label(class="form-label") }}{{ form.recipient_name(class="form-control") }}</div>
                     <div class="mb-3">{{ form.account_handle.label(class="form-label") }}{{ form.account_handle(class="form-control") }}</div>
                     <div class="mb-3">{{ form.wallet_address.label(class="form-label") }}{{ form.wallet_address(class="form-control") }}</div>
-                    <div class="mb-3">{{ form.network.label(class="form-label") }}{{ form.network(class="form-control") }}</div>
+                    <div class="mb-3">{{ form.network.label(class="form-label") }}{{ form.network(class="form-control", list="payment-networks") }}</div>
                     <div class="mb-3">{{ form.details.label(class="form-label") }}{{ form.details(class="form-control", rows=2) }}</div>
+                    {% include 'admin/_payment_proof_settings.html' %}
                     <div class="mb-3">{{ form.qr_payload_override.label(class="form-label") }}{{ form.qr_payload_override(class="form-control") }}</div>
                     <div class="mb-3 form-check">{{ form.is_active(class="form-check-input") }} {{ form.is_active.label(class="form-check-label") }}</div>
                     <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
@@ -84,7 +86,7 @@
                                     <td class="small">
                                         {% if option.destination_value %}<div>{{ option.destination_label }}: {{ option.destination_value }}</div>{% endif %}
                                         {% if option.network %}<div>Network: {{ option.network }}</div>{% endif %}
-                                        {% if option.details %}<div>{{ option.details }}</div>{% endif %}
+                                        {% if option.details %}<div>{{ option.details }}</div>{% endif %}<div class="text-muted mt-1">Proof: {{ option.proof_summary }}</div>
                                     </td>
                                     <td class="small">
                                         {% if option.payment_link %}

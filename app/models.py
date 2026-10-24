@@ -569,6 +569,9 @@ class PaymentOption(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     label = db.Column(db.String(120), nullable=False)
     method_type = db.Column(db.String(40), nullable=False, index=True)
+    proof_image_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    proof_transaction_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    proof_requirement = db.Column(db.String(12), default='optional', nullable=False)
     recipient_name = db.Column(db.String(120), nullable=True)
     account_handle = db.Column(db.String(200), nullable=True)
     wallet_address = db.Column(db.String(255), nullable=True)
@@ -953,6 +956,8 @@ class Participation(db.Model):
     payment_verified_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     preferred_payment_option_id = db.Column(db.Integer, db.ForeignKey('payment_options.id'), nullable=True)
     preferred_payment_snapshot = db.Column(db.Text, nullable=True)
+    payment_revision = db.Column(db.Integer, default=0, nullable=False)
+    __mapper_args__ = {'version_id_col': payment_revision}
     notes = db.Column(db.Text, nullable=True)
     
     requested_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -963,6 +968,10 @@ class Participation(db.Model):
     denied_reason = db.Column(db.Text, nullable=True)
 
     preferred_payment_option = db.relationship('PaymentOption', lazy='joined')
+    payment_submissions = db.relationship(
+        'PaymentSubmission', backref='participation', cascade='all, delete-orphan',
+        order_by='PaymentSubmission.id.desc()', lazy='selectin',
+    )
     
     def update_amount_owed(self, costs_dict):
         """Helper to sync individual owed based on role (donor vs non). Call after approve or recalc."""
@@ -977,3 +986,20 @@ class Participation(db.Model):
 
     def __repr__(self):
         return f'<Participation user={self.user_id} test={self.group_test_id} approved={self.approved}>'
+
+
+class PaymentSubmission(db.Model):
+    """An immutable report payload; decisions retain the evidence reviewed."""
+    __tablename__ = 'payment_submissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    participation_id = db.Column(db.Integer, db.ForeignKey('participations.id'), nullable=False, index=True)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    method_snapshot = db.Column(db.JSON, nullable=False)
+    transaction_id = db.Column(db.String(255), nullable=True)
+    image_key = db.Column(db.String(500), nullable=True)
+    status = db.Column(db.String(16), default='pending', nullable=False)
+    submitted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    denial_reason = db.Column(db.String(1000), nullable=True)

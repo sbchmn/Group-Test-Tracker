@@ -3,7 +3,7 @@
 {% block title %}Admin Action Queue{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
     <div>
         <h3 class="mb-1">Admin Action Queue</h3>
         <p class="text-muted mb-0">Review every item that currently requires administrator approval or attention.</p>
@@ -147,10 +147,10 @@
         </div>
 
         <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle">
+            <table class="table table-sm table-hover align-middle payment-admin-table">
                 <thead class="table-light">
                     <tr>
-                        <th style="width: 40px;"><input type="checkbox" id="select-all"></th>
+                        <th style="width: 40px;"><input type="checkbox" id="select-all" aria-label="Select all visible join requests"><label for="select-all" class="d-sm-none ms-2 small">Select all visible join requests</label></th>
                         <th>Participant</th>
                         <th>Group Test</th>
                         <th>Item / Status</th>
@@ -162,24 +162,24 @@
                     {% for part in pending_parts %}
                         {% set is_payment_report = part.approved %}
                         <tr>
-                            <td>
+                            <td data-label="Select">
                                 {% if not is_payment_report %}
                                     <input type="checkbox" value="{{ part.id }}" class="part-checkbox">
                                 {% else %}
                                     <span class="text-muted small">—</span>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td data-label="Participant">
                                 <strong>{{ part.name or part.user.username }}</strong>
                                 <div class="small text-muted">{{ part.user.email }}</div>
                             </td>
-                            <td>
+                            <td data-label="Group Test">
                                 <a href="{{ url_for('main.test_detail', test_id=part.group_test.id) }}">{{ part.group_test.title }}</a>
                                 {% if part.group_test.compound %}
                                     <div class="small text-muted">{{ part.group_test.compound }}</div>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td data-label="Item / Status">
                                 {% if is_payment_report %}
                                     <span class="badge text-bg-info">Payment Report</span>
                                     <div class="small text-muted">Reported ${{ '%.2f'|format(part.amount_paid or 0) }} · owed ${{ '%.2f'|format(part.amount_owed or 0) }}</div>
@@ -188,32 +188,18 @@
                                 {% endif %}
                                 <span class="badge bg-secondary text-uppercase">{{ part.group_test.status }}</span>
                             </td>
-                            <td>
+                            <td data-label="Requested / Reported">
                                 {% if is_payment_report %}
                                     {{ part.payment_claimed_at.strftime('%Y-%m-%d %H:%M') if part.payment_claimed_at else 'n/a' }}
                                 {% else %}
                                     {{ part.requested_at.strftime('%Y-%m-%d %H:%M') if part.requested_at else 'n/a' }}
                                 {% endif %}
                             </td>
-                            <td class="text-end">
+                            <td data-label="Actions" class="text-end">
                                 <a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage Test</a>
                                 {% if is_payment_report %}
-                                    <form method="POST" action="{{ url_for('main.confirm_participant_payment', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Confirm this reported payment and mark lab fees as paid?')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="status" value="{{ status_filter }}">
-                                        <input type="hidden" name="q" value="{{ search }}">
-                                        <input type="hidden" name="page" value="{{ page }}">
-                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                        <button type="submit" class="btn btn-success btn-sm">Confirm Payment</button>
-                                    </form>
-                                    <form method="POST" action="{{ url_for('main.reject_participant_payment_claim', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Reject this payment report? The participant can report payment again.')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="status" value="{{ status_filter }}">
-                                        <input type="hidden" name="q" value="{{ search }}">
-                                        <input type="hidden" name="page" value="{{ page }}">
-                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                        <button type="submit" class="btn btn-outline-info btn-sm">Reject Report</button>
-                                    </form>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" data-payment-part="{{ part.id }}" data-payment-mode="review"><i class="bi bi-receipt me-1"></i> View Proof</button>
+                                    <div class="small text-muted mt-1">{% if part.payment_submissions %}{% set report = part.payment_submissions|first %}{{ 'Image' if report.image_key else '' }}{{ ' + ' if report.image_key and report.transaction_id else '' }}{{ 'Transaction ID' if report.transaction_id else '' }}{{ 'No proof provided' if not report.image_key and not report.transaction_id else '' }}{% else %}No proof provided{% endif %}</div>
                                 {% else %}
                                     <form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

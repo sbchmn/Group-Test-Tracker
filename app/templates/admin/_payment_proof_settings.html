@@ -1,0 +1,11 @@
+<fieldset class="payment-summary mb-3" data-proof-policy>
+    <legend class="fs-6 fw-semibold">Payment proof</legend>
+    <p class="small text-muted">Choose what participants can submit for this payment destination.</p>
+    <div class="form-check mb-2">{{ form.proof_image_enabled(class="form-check-input") }} {{ form.proof_image_enabled.label(class="form-check-label") }}</div>
+    <div class="form-check mb-3">{{ form.proof_transaction_enabled(class="form-check-input") }} {{ form.proof_transaction_enabled.label(class="form-check-label") }}</div>
+    {{ form.proof_requirement.label(class="form-label") }}
+    {{ form.proof_requirement(class="form-select") }}
+    {% for error in form.proof_requirement.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+    <div class="form-text">“All accepted proofs” requires both when both types are enabled. Existing submitted reports remain reviewable.</div>
+    <div class="form-text">Image proof accepts JPEG, PNG, or WebP up to 8 MB and uses your configured storage.</div>
+</fieldset>

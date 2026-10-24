@@ -16,7 +16,7 @@ from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
     FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField, FileField
 )
-from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL, Regexp
+from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL, Regexp, ValidationError
 from datetime import datetime, date
 from datetime import timedelta, timezone
 from functools import wraps
@@ -328,9 +328,6 @@ class ParticipantStatusForm(FlaskForm):
         ('received_from_vendor', 'Received from Vendor'),
         ('ready_to_ship', 'Ready to Ship to Lab')
     ])
-    payment_claim = BooleanField('I have paid my lab fees (submits for administrator verification)')
-    amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
-    preferred_payment_option_id = SelectField('Preferred Payment Method', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes / Comments', validators=[Optional()])
     submit = SubmitField('Update My Status')
 
@@ -548,6 +545,16 @@ class PaymentOptionForm(FlaskForm):
     details = TextAreaField('Details / Notes', validators=[Optional()])
     qr_payload_override = StringField('QR Payload Override', validators=[Optional(), Length(max=500)])
     is_active = BooleanField('Active', default=True)
+    proof_image_enabled = BooleanField('Accept image proof')
+    proof_transaction_enabled = BooleanField('Accept transaction ID')
+    proof_requirement = SelectField('Proof requirement', choices=[
+        ('optional', 'Optional'), ('either', 'At least one accepted proof'), ('all', 'All accepted proofs'),
+    ], default='optional', validators=[DataRequired()])
+
+    def validate_proof_requirement(self, field):
+        if field.data != 'optional' and not (self.proof_image_enabled.data or self.proof_transaction_enabled.data):
+            raise ValidationError('Enable at least one proof type before requiring proof.')
+
     submit = SubmitField('Save Payment Option')
 
 
@@ -606,20 +613,6 @@ def populate_payment_option_choices(form, include_ids=None):
     ]
 
 
-def _serialize_payment_option_snapshot(option):
-    if option is None:
-        return ''
-
-    parts = [option.display_title()]
-    if option.account_handle:
-        parts.append(f"Handle: {option.account_handle}")
-    if option.wallet_address:
-        parts.append(f"Wallet: {option.wallet_address}")
-    if option.network:
-        parts.append(f"Network: {option.network}")
-    return ' | '.join(parts)
-
-
 def _result_file_kind(result_key):
     value = (result_key or '').strip().lower()
     if value.endswith('.pdf'):
@@ -637,6 +630,7 @@ def _build_payment_option_context(option):
         'label': option.label,
         'title': option.display_title(),
         'method_type': option.method_type,
+        'proof_summary': (' + '.join(filter(None, ['Image' if option.proof_image_enabled else '', 'Transaction ID' if option.proof_transaction_enabled else ''])) or 'None') + ' / ' + {'optional': 'optional', 'either': 'at least one required', 'all': 'all required'}.get(option.proof_requirement, 'optional'),
         'is_active': bool(option.is_active),
         'provider_name': profile.get('provider_name') or option.method_type,
         'icon_class': profile.get('icon_class') or 'bi bi-credit-card-2-front',
@@ -3349,54 +3343,14 @@ def update_my_participant_status(test_id):
         return redirect(url_for('main.test_detail', test_id=test_id))
 
     form = ParticipantStatusForm(obj=part)
-    available_options = [option for option in test.payment_options if option.is_active]
-    form.preferred_payment_option_id.choices = [(0, 'No preference selected')] + [
-        (option.id, option.display_title()) for option in available_options
-    ]
-    if not form.is_submitted():
-        form.preferred_payment_option_id.data = part.preferred_payment_option_id or 0
-        form.payment_claim.data = part.payment_claimed_at is not None
-
-    first_claim = False
     if form.validate_on_submit():
         part.order_status = form.order_status.data
-        if form.amount_paid.data is not None:
-            part.amount_paid = form.amount_paid.data
         part.notes = form.notes.data or part.notes
-        if part.paid_lab:
-            part.payment_claimed_at = None
-        elif form.payment_claim.data:
-            first_claim = part.payment_claimed_at is None
-            part.payment_claimed_at = datetime.utcnow()
-        else:
-            part.payment_claimed_at = None
-
-        selected_id = int(form.preferred_payment_option_id.data or 0)
-        if test.status in ('testing', 'ready_for_payment') and selected_id > 0:
-            selected_option = next((opt for opt in available_options if opt.id == selected_id), None)
-            if selected_option:
-                part.preferred_payment_option_id = selected_option.id
-                part.preferred_payment_snapshot = _serialize_payment_option_snapshot(selected_option)
-        elif selected_id == 0:
-            part.preferred_payment_option_id = None
-            part.preferred_payment_snapshot = None
-
         db.session.commit()
-        if first_claim:
-            _notify_payment_claim(test, part)
-            db.session.commit()
         flash("Your status has been updated.", "success")
         return redirect(url_for('main.test_detail', test_id=test_id))
 
-    selected_option = next((opt for opt in available_options if opt.id == (form.preferred_payment_option_id.data or 0)), None)
-    return render_template(
-        'participant_update_status.html',
-        form=form,
-        test=test,
-        part=part,
-        available_payment_options=[_build_payment_option_context(option) for option in available_options],
-        selected_payment_option=_build_payment_option_context(selected_option),
-    )
+    return render_template('participant_update_status.html', form=form, test=test, part=part)
 
 
 @main_bp.route('/test/<int:test_id>/request', methods=['GET', 'POST'])
@@ -4137,6 +4091,11 @@ def update_participant(part_id):
     
     if form.validate_on_submit():
         previous_paid = bool(part.paid_lab)
+        if part.payment_submissions and (
+            bool(form.paid_lab.data) != previous_paid or form.amount_paid.data != part.amount_paid
+        ):
+            flash('Use Review Payment to change a submitted payment. Participants can update their reported amount in the payment modal.', 'warning')
+            return redirect(url_for('main.manage_participants', test_id=test.id))
         form.populate_obj(part)
         if part.paid_lab:
             part.payment_claimed_at = None
@@ -4259,15 +4218,9 @@ def _payment_action_redirect():
 def confirm_participant_payment(part_id):
     """Administrator confirmation of lab fees; the only path that sets paid_lab."""
     part = Participation.query.get_or_404(part_id)
-    if not part.approved or part.denied:
-        flash('Only approved participants can be marked paid.', 'warning')
-    else:
-        part.paid_lab = True
-        part.payment_claimed_at = None
-        part.payment_verified_at = datetime.utcnow()
-        part.payment_verified_by_id = current_user.id
-        db.session.commit()
-        flash(f'Lab fees marked paid for {part.name or part.user.username}.', 'success')
+    from .payments import review_payment
+    message, status = review_payment(part, True)
+    flash(message, 'success' if status == 200 else 'warning')
     return _payment_action_redirect()
 
 
@@ -4292,12 +4245,9 @@ def unmark_participant_payment(part_id):
 @admin_required
 def reject_participant_payment_claim(part_id):
     part = Participation.query.get_or_404(part_id)
-    if part.payment_claimed_at is None:
-        flash('There is no pending payment claim for this participant.', 'info')
-    else:
-        part.payment_claimed_at = None
-        db.session.commit()
-        flash(f'Payment claim from {part.name or part.user.username} rejected. They can report payment again.', 'info')
+    from .payments import review_payment
+    message, status = review_payment(part, False)
+    flash(message, 'info' if status == 200 else 'warning')
     return _payment_action_redirect()
 
 
@@ -5364,6 +5314,9 @@ def payment_options():
             details=form.details.data or None,
             qr_payload_override=form.qr_payload_override.data or None,
             is_active=bool(form.is_active.data),
+            proof_image_enabled=bool(form.proof_image_enabled.data),
+            proof_transaction_enabled=bool(form.proof_transaction_enabled.data),
+            proof_requirement=form.proof_requirement.data,
         )
         db.session.add(option)
         db.session.commit()
@@ -5409,6 +5362,9 @@ def edit_payment_option(option_id):
         option.network = form.network.data or None
         option.details = form.details.data or None
         option.qr_payload_override = form.qr_payload_override.data or None
+        option.proof_image_enabled = bool(form.proof_image_enabled.data)
+        option.proof_transaction_enabled = bool(form.proof_transaction_enabled.data)
+        option.proof_requirement = form.proof_requirement.data
         option.is_active = bool(form.is_active.data)
         db.session.commit()
         flash('Payment option updated.', 'success')

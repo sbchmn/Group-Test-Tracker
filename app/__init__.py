@@ -182,6 +182,8 @@ def create_app(config_overrides=None):
     # === Register Blueprints ===
     from .routes import main_bp
     app.register_blueprint(main_bp)
+    from .payments import payment_bp
+    app.register_blueprint(payment_bp)
     from .control_plane_routes import control_plane_bp
     app.register_blueprint(control_plane_bp)
     from .root_routes import root_bp

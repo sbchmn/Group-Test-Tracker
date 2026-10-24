@@ -260,9 +260,10 @@ If approved:
 
 1. Open a test detail page.
 2. Click Update My Order and Payment Status.
-3. Update order progress, amount paid, and notes.
-4. To report your lab-fee payment, tick "I have paid my lab fees". This submits the report for administrator verification; it can be amended while pending.
-5. Save.
+3. Update order progress and notes, then save.
+4. To report payment, use **Report Payment** on the test's Available Payment Methods panel (or the payment button in Update My Status). A modal contains the full submission flow.
+5. Select the method used, enter the amount paid, and provide the proof requested for that method: one image, one transaction ID, either, or both.
+6. Submit for administrator review. The button becomes **Update Payment** and reopens saved details while pending or after denial. Verified payments use **View Payment** with read-only details.
 
 Payment verification behavior:
 
@@ -270,7 +271,7 @@ Payment verification behavior:
 
 Payment method behavior:
 
-- If the test is in ready_for_payment or testing and payment options are configured, you can choose your preferred payment method and view generated destination/link/QR details.
+- Payment methods and reporting are available in ready_for_payment, testing, and closed tests. A submitted method/destination/network and its proof requirements are preserved with the report, including after administrators edit or deactivate the option. Order-status updates do not change payment reports.
 
 ### View Results (My Results)
 
@@ -318,8 +319,18 @@ Important behavior:
 3. Fill destination details by method (handle, link, wallet address, network, or custom fields).
 4. Use generated matrix preview to confirm destination label, payment link, and QR payload behavior.
 5. Toggle Active to hide/show options for new assignments.
-6. Edit existing options to refine details.
+6. Edit existing options to refine details. Configure accepted proof types (image and/or transaction ID) and require none, at least one, or all accepted types. Existing options default to optional proof. Crypto network suggestions distinguish chain-specific explorers; custom networks remain supported with copyable transaction IDs.
 7. Delete unused options. If an option is already assigned or selected, delete safely deactivates it.
+
+#### Payment proof storage
+
+Payment images use the existing S3/Spaces connection and bucket, under the separate `payment-proofs/receipts/YYYY/MM/DD/` prefix. No second bucket or new environment variable is needed. Result public-read ACL settings, public base URLs, and public cache settings are not applied to payment proofs. Proof responses are served by authenticated application routes with `private, no-store`; only the reporting participant and administrators can access them. Result analysis is never run on payment proofs.
+
+Configure any anonymous/public bucket policy or CDN access to cover only the result prefixes, excluding `payment-proofs/*`. A bucket-wide public-read policy overrides an object's default private ACL; putting a file into a separate folder alone does not make it private. The same restriction applies to Spaces/CDN policies. Existing private buckets or results made public individually through the existing upload ACL setting require no new bucket. See [AWS prefix-scoped public access guidance](https://repost.aws/knowledge-center/read-access-objects-s3-bucket).
+
+Images accept JPEG, PNG, and WebP up to 8 MB. The server validates and re-encodes them to strip metadata and honor phone orientation. Earlier submissions retain their evidence for review history; failed database saves clean up newly uploaded objects. Proof retention follows the application's existing database/object-storage retention procedures; automatic historical-proof expiry is not introduced here.
+
+Deploy this change with the normal database migration (`flask --app run.py db upgrade`) before serving the updated application. The migration defaults existing payment options to optional proof and leaves existing payment claims reviewable.
 
 ### Delete Group Test
 
@@ -338,9 +349,9 @@ Important behavior:
 
 Payment controls on each approved row:
 
-- Confirm Payment appears when a participant has reported payment; it marks lab fees paid, records who verified, and clears the pending report.
+- **Review Payment** opens the shared review modal with amount, destination, network, image, transaction ID, explorer link, and submission history. **Approve Payment** marks fees paid and records the reviewer; stale report versions cannot be approved.
 - Mark Paid sets payment for participants who have not reported; Unmark Paid revokes a prior verification.
-- Reject Payment Report dismisses a report (the participant can report again); no reason is required.
+- **Deny Payment** requires a reason, preserves evidence, and notifies the participant through their configured channel (with the existing email fallback). The reason remains visible in the app if delivery fails. Participants can correct and resubmit.
 - Unapprove removes approval and any pending payment report; the participant returns to the request flow.
 
 ### Admin Action Queue (Cross-Test)
@@ -350,7 +361,7 @@ Use as the central inbox for anything requiring administrator approval or attent
 1. Open Admin -> Action Queue.
 2. Review completed result-analysis findings and inspect failed analysis runs.
 3. Filter participation requests and payment reports by status and keyword.
-4. Approve or deny single requests; Confirm Payment or Reject Report handles participant payment reports. Every non-results item shares the one queue list and shows the buttons for its type.
+4. Approve or deny single join requests. **View Proof** opens the same payment review modal used by Manage Participants, with Approve Payment and Deny Payment controls. Decisions return to the current queue filters and page.
 5. Select multiple join-request rows for bulk approve/deny.
 6. Use Approve All Filtered for large backlogs (it applies only to join requests; pending payment reports are never bulk-approved).
 7. Enter confirmation text when prompted for filtered bulk approval.

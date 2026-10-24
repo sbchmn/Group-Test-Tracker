@@ -1,5 +1,4 @@
 import io
-import os
 from datetime import datetime
 from uuid import uuid4
 
@@ -349,3 +348,76 @@ def delete_result_image(object_key):
     except Exception:
         current_app.logger.exception("Failed deleting result image from object storage")
         return False
+
+
+def payment_proof_storage_ready():
+    return storage_is_ready()
+
+
+def _payment_proof_settings():
+    settings = get_storage_settings()
+    try:
+        _assert_configured(settings)
+    except StorageConfigurationError as exc:
+        raise StorageConfigurationError('Payment proof uploads are unavailable. Contact an administrator.') from exc
+    # A sibling prefix keeps result public-read ACLs, public URLs, and public
+    # caching out of receipt uploads. Bucket policy must exclude this prefix.
+    return {**settings, 'path_prefix': 'payment-proofs', 'make_public': False, 'public_base_url': ''}
+
+
+def upload_payment_proof(file_storage):
+    """Store normalized receipts privately under a separate prefix in the same bucket."""
+    settings = _payment_proof_settings()
+    payload = file_storage.stream.read(8 * 1024 * 1024 + 1)
+    if not payload or len(payload) > 8 * 1024 * 1024:
+        raise StorageUploadError('Choose an image up to 8 MB.')
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    try:
+        with Image.open(io.BytesIO(payload)) as source:
+            if source.format not in {'JPEG', 'PNG', 'WEBP'}:
+                raise StorageUploadError('Choose a JPEG, PNG, or WebP image.')
+            if source.width * source.height > 20_000_000:
+                raise StorageUploadError('Image dimensions are too large. Choose a smaller image.')
+            # Re-encode to remove metadata and preserve phone photo orientation.
+            image = ImageOps.exif_transpose(source).convert('RGB')
+            output = io.BytesIO()
+            image.save(output, format='JPEG', quality=90)
+            if output.tell() > 16 * 1024 * 1024:
+                raise StorageUploadError('The processed image is too large. Choose a smaller image.')
+    except StorageUploadError:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise StorageUploadError('This image could not be read. Choose a JPEG, PNG, or WebP image.') from exc
+    object_key = _build_object_key(settings, 'receipts', 'jpg')
+    try:
+        _build_client(settings).put_object(
+            Bucket=settings['bucket'], Key=object_key, Body=output.getvalue(),
+            ContentType='image/jpeg', CacheControl='private, no-store',
+        )
+    except Exception as exc:
+        current_app.logger.exception('Payment proof upload failed')
+        raise StorageUploadError('Image upload failed. Your report has not been changed; please try again.') from exc
+    return object_key
+
+
+def read_payment_proof(object_key):
+    settings = _payment_proof_settings()
+    try:
+        response = _build_client(settings).get_object(Bucket=settings['bucket'], Key=object_key)
+        try:
+            payload = response['Body'].read(16 * 1024 * 1024 + 1)
+        finally:
+            response['Body'].close()
+        if len(payload) > 16 * 1024 * 1024:
+            raise StorageReadError('Proof image is too large.')
+        return payload
+    except Exception as exc:
+        raise StorageReadError('Unable to load this proof image. Please try again.') from exc
+
+
+def delete_payment_proof(object_key):
+    try:
+        settings = _payment_proof_settings()
+        _build_client(settings).delete_object(Bucket=settings['bucket'], Key=object_key)
+    except Exception:
+        current_app.logger.exception('Unable to clean up uncommitted payment proof')

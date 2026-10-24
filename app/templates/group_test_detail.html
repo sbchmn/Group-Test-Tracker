@@ -266,10 +266,26 @@ window.addEventListener('DOMContentLoaded', function() {
     
     <!-- Right: Participation / Request -->
     <div class="col-lg-5">
-        {% if test.status == 'ready_for_payment' and payment_options %}
+        {% if (test.status in ['ready_for_payment', 'testing', 'closed'] and payment_options) or (my_part and (my_part.payment_submissions or my_part.payment_claimed_at or my_part.paid_lab)) %}
             <div class="card mb-3" id="payment-options">
                 <div class="card-header">Available Payment Methods</div>
                 <div class="card-body">
+                    {% if my_part and my_part.approved and not my_part.denied %}
+                    <div class="payment-summary mb-3">
+                        {% set report = my_part.payment_submissions|first %}
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                            <span class="fw-semibold">Your lab fee payment</span>
+                            {% if my_part.paid_lab %}<span class="badge text-bg-success">Payment Verified</span>
+                            {% elif my_part.payment_claimed_at %}<span class="badge text-bg-info">Awaiting Review</span>
+                            {% elif report and report.status == 'denied' %}<span class="badge text-bg-danger">Payment Denied</span>
+                            {% endif %}
+                        </div>
+                        {% if report and report.status == 'denied' and not my_part.paid_lab %}<p class="small mb-2">{{ report.denial_reason }}</p>{% endif %}
+                        <button type="button" class="btn btn-primary w-100" data-payment-part="{{ my_part.id }}" data-payment-mode="report">
+                            <i class="bi bi-receipt me-1"></i> {{ 'View Payment' if my_part.paid_lab else ('Update Payment' if report or my_part.payment_claimed_at else 'Report Payment') }}
+                        </button>
+                    </div>
+                    {% endif %}
                     <ul class="list-group list-group-flush payment-option-list">
                         {% for option in payment_options %}
                             <li class="list-group-item px-0">
@@ -294,7 +310,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                         </div>
                                     </div>
                                     {% if option.qr_payload %}
-                                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ option.qr_payload|urlencode }}" alt="{{ option.provider_name }} QR" class="border rounded payment-qr-thumb">
+                                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ option.qr_payload|urlencode }}" alt="{{ option.provider_name }} QR" class="border rounded payment-qr-thumb flex-shrink-0">
                                     {% endif %}
                                 </div>
                             </li>
@@ -372,7 +388,7 @@ window.addEventListener('DOMContentLoaded', function() {
                         {% if selected_payment_option.payment_link %}<div class="mt-2 d-flex flex-wrap gap-2"><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><span class="d-md-none">{{ selected_payment_option.mobile_action_label }}</span><span class="d-none d-md-inline">{{ selected_payment_option.desktop_action_label }}</span></a>{% if selected_payment_option.copy_value %}<button type="button" class="btn btn-sm btn-outline-secondary" data-copy-value="{{ selected_payment_option.copy_value }}"><i class="bi bi-copy"></i> Copy</button>{% endif %}</div>{% endif %}
                         {% if selected_payment_option.qr_payload %}
                             <div class="mt-2">
-                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Selected payment QR" class="border rounded payment-qr-thumb">
+                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Selected payment QR" class="border rounded payment-qr-thumb flex-shrink-0">
                             </div>
                         {% endif %}
                     </div>
@@ -392,7 +408,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 <div class="card-header">
                     <strong>Participants</strong> ({{ test.num_approved }} approved)
                 </div>
-                <div class="card-body p-0">
+                <div class="card-body p-0 table-responsive">
                     <table class="table table-sm table-hover mb-0">
                         <thead class="table-light">
                             <tr>

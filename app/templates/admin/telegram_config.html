@@ -20,6 +20,23 @@
     <div class="card-body">
         <form method="POST" novalidate>
             {{ form.hidden_tag() }}
+            <div class="card mb-3">
+                <div class="card-header">Support Users When Another Bot Interrupts</div>
+                <div class="card-body">
+                    <div class="form-check mb-3">
+                        {{ form.telegram_bot_retorts_enabled(class="form-check-input") }}
+                        {{ form.telegram_bot_retorts_enabled.label(class="form-check-label") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.telegram_bot_retorts_chat_ids.label(class="form-label") }}
+                        {{ form.telegram_bot_retorts_chat_ids(class="form-control", placeholder="-1001234567890") }}
+                        {% for error in form.telegram_bot_retorts_chat_ids.errors %}<div class="text-danger">{{ error }}</div>{% endfor %}
+                    </div>
+                    <p class="small text-muted">When another bot directly replies to a user's command explicitly addressed to this bot, GTT replies with a short, playful AI retort supporting the user. Limited to these groups, one attempt per original command and one attempt every 60 seconds per group. GTT ignores further bot replies.</p>
+                    <p class="small text-muted">Uses the provider, model, and credentials selected in <a href="{{ url_for('main.result_analysis_config') }}">Result Analysis Configuration</a>. The selected provider must be enabled and configured. Sends the command name (without arguments) and up to 1,000 characters of the other bot's reply to that provider.</p>
+                    <p class="small text-muted mb-0">Enable Bot-to-Bot Communication Mode in BotFather and give GTT group admin rights or disable Group Privacy Mode so it can receive these replies.</p>
+                </div>
+            </div>
             <div class="mb-3">
                 {{ form.telegram_bot_token.label(class="form-label") }}
                 {{ form.telegram_bot_token(class="form-control") }}

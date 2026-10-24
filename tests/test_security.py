@@ -2169,7 +2169,7 @@ class SecurityTests(unittest.TestCase):
         with self.app.app_context():
             self.assertIsNone(PaymentOption.query.get(option_id))
 
-    def test_testing_status_page_shows_payment_option_selector_for_approved_participant(self):
+    def test_testing_status_page_opens_payment_modal_for_approved_participant(self):
         with self.app.app_context():
             db.create_all()
             admin = User(username="admin", email="admin@example.com", is_admin=True)
@@ -2194,8 +2194,9 @@ class SecurityTests(unittest.TestCase):
         response = self.client.get(f"/test/{test_id}/my-status")
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
-        self.assertIn("Preferred Payment Method", body)
-        self.assertIn("Venmo Main", body)
+        self.assertIn('data-payment-mode="report"', body)
+        self.assertIn("Report Payment", body)
+        self.assertIn("Payment method used", body)
 
     def test_ready_for_payment_shows_payment_methods_at_top_of_right_column(self):
         with self.app.app_context():
@@ -2680,7 +2681,11 @@ class SecurityTests(unittest.TestCase):
             outsider.set_password("secret")
             db.session.add_all([admin, member, outsider])
             db.session.flush()
+            option = PaymentOption(label="Lab payment", method_type="other", account_handle="collector", is_active=True)
+            db.session.add(option)
+            db.session.flush()
             test = GroupTest(
+                payment_options=[option],
                 title="Payment gate test",
                 status="closed",
                 created_by=admin.id,
@@ -2711,6 +2716,7 @@ class SecurityTests(unittest.TestCase):
             return {
                 "test_id": test.id,
                 "part_id": part.id,
+                "option_id": option.id,
                 "pending_part_id": pending_part.id,
                 "admin_id": admin.id,
             }
@@ -2723,10 +2729,10 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403)
 
         response = self.client.post(
-            f"/test/{ids['test_id']}/my-status",
-            data={"order_status": "pending", "payment_claim": "true", "amount_paid": "50"},
+            f"/payments/{ids['part_id']}/report",
+            data={"revision": self.client.get(f"/payments/{ids['part_id']}").json['revision'], "option_id": ids['option_id'], "amount": "50"},
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         with self.app.app_context():
             part = db.session.get(Participation, ids["part_id"])
             self.assertIsNotNone(part.payment_claimed_at)
@@ -2743,7 +2749,7 @@ class SecurityTests(unittest.TestCase):
         queue_page = self.client.get("/admin/action-queue").get_data(as_text=True)
         self.assertIn('<span class="badge text-bg-info">Payment Report</span>', queue_page)
         self.assertIn("Join Request", queue_page)
-        self.assertIn("Confirm Payment", queue_page)
+        self.assertIn("View Proof", queue_page)
         self.assertIn("pay-member", queue_page)
 
         response = self.client.post(f"/admin/payment/confirm/{ids['part_id']}", data={})
@@ -2770,7 +2776,7 @@ class SecurityTests(unittest.TestCase):
         ids = self._payment_review_fixture(claimed=True)
         self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
 
-        response = self.client.post(f"/admin/payment/reject-claim/{ids['part_id']}", data={})
+        response = self.client.post(f"/admin/payment/reject-claim/{ids['part_id']}", data={"reason": "Please correct your receipt."})
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
             part = db.session.get(Participation, ids["part_id"])
@@ -2861,16 +2867,16 @@ class SecurityTests(unittest.TestCase):
         self.client.post("/login", data={"username": "pay-member", "password": "secret"})
         with patch("app.routes.send_notification_message") as mock_send:
             self.client.post(
-                f"/test/{ids['test_id']}/my-status",
-                data={"order_status": "pending", "payment_claim": "true", "amount_paid": "50"},
+                f"/payments/{ids['part_id']}/report",
+                data={"revision": self.client.get(f"/payments/{ids['part_id']}").json['revision'], "option_id": ids['option_id'], "amount": "50"},
             )
         subjects = [call.args[2] for call in mock_send.call_args_list]
         self.assertIn("PAY REVIEW Payment gate test", subjects)
 
         with patch("app.routes.send_notification_message") as mock_amend:
             self.client.post(
-                f"/test/{ids['test_id']}/my-status",
-                data={"order_status": "pending", "payment_claim": "true", "amount_paid": "75"},
+                f"/payments/{ids['part_id']}/report",
+                data={"revision": self.client.get(f"/payments/{ids['part_id']}").json['revision'], "option_id": ids['option_id'], "amount": "75"},
             )
         mock_amend.assert_not_called()
         with self.app.app_context():
@@ -2882,8 +2888,8 @@ class SecurityTests(unittest.TestCase):
         ids = self._payment_review_fixture(claimed=True)
         self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
         page = self.client.get(f"/admin/manage-participants/{ids['test_id']}").get_data(as_text=True)
-        self.assertIn("Confirm Payment", page)
-        self.assertIn("Reject Payment Report", page)
+        self.assertIn("Review Payment", page)
+        self.assertIn("Deny Payment", page)
         self.assertIn("Payment reported", page)
         self.assertNotIn(" Mark Paid</button>", page)
 
@@ -3062,6 +3068,7 @@ class SecurityTests(unittest.TestCase):
     def test_telegram_public_group_commands_unaffected_by_deactivation(self):
         with self.app.app_context():
             db.create_all()
+            db.session.add(NotificationConfig(key='builtin_testing_allow_non_private', value='true'))
             db.session.commit()
 
         with patch("app.routes.send_telegram_chat_message") as mock_send:

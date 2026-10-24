@@ -24,6 +24,10 @@ OUTBOUND_HTTP_TIMEOUT_SECONDS = 10
 
 
 def _get_config(key, default=None):
+    from .managed_integrations import managed_integration_value
+    configured, value = managed_integration_value(key)
+    if configured:
+        return value
     item = NotificationConfig.query.filter_by(key=key).first()
     if item is None:
         return default

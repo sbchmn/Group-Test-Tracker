@@ -34,6 +34,7 @@
         <label class="form-check-label">Approved (check to approve &amp; auto-calculate owed amount)</label>
     </div>
     
+    {% if not part.approved or part.is_late_buy_in %}{% set pricing_test = test %}{% set pricing_id = part.id %}{% if part.is_late_buy_in %}{% set pricing_amount = part.amount_owed %}{% endif %}{% include 'admin/_buy_in_amount.html' %}{% endif %}
     <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
     <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-secondary">Back to List</a>
 </form>

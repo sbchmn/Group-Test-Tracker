@@ -173,6 +173,8 @@ def create_app(config_overrides=None):
             return None
         if raw_epoch and str(user.session_epoch) != raw_epoch:
             return None
+        if not raw_epoch and user.session_epoch != 0:
+            return None
         if not user.is_active:
             return None
         if user.is_reserved_support_account and not user.support_access_active:
@@ -182,6 +184,8 @@ def create_app(config_overrides=None):
     # === Register Blueprints ===
     from .routes import main_bp
     app.register_blueprint(main_bp)
+    from .payments import payment_bp
+    app.register_blueprint(payment_bp)
     from .control_plane_routes import control_plane_bp
     app.register_blueprint(control_plane_bp)
     from .root_routes import root_bp
@@ -243,6 +247,11 @@ def create_app(config_overrides=None):
 
             if not user:
                 # Creating new user
+                from .usernames import check_username
+                try:
+                    check_username(username)
+                except ValueError as error:
+                    raise click.ClickException(str(error))
                 if not password:
                     click.echo("Error: --password is required when creating a new user.")
                     return

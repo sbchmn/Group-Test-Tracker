@@ -6,6 +6,17 @@
 <h3>Storage Configuration</h3>
 <p class="text-muted">Configure S3-compatible object storage for result file uploads (images and PDFs on AWS S3 or DigitalOcean Spaces).</p>
 
+{% if managed_storage_keys %}
+<div class="alert alert-info">
+    Settings supplied by the control plane are shown below with disabled fields.
+    Change those values in the control plane's Tenant integrations page.
+    Other fields remain editable. Saved secret values are masked.
+    <details><summary>Settings managed by the control plane</summary>
+        <ul>{% for key in managed_storage_keys %}<li><code>{{ key }}</code></li>{% endfor %}</ul>
+    </details>
+</div>
+{% endif %}
+
 <div class="card mb-4">
     <div class="card-body">
         <form method="POST" novalidate>
@@ -91,7 +102,7 @@
                 </div>
             </div>
 
-            <div class="mt-4 d-flex gap-2">
+            <div class="page-actions mt-4">
                 <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
                 <a href="{{ url_for('main.admin_settings') }}" class="btn btn-secondary">Back to Settings</a>
                 <span class="small text-muted align-self-center">Current status: {{ 'Enabled' if storage_enabled else 'Disabled' }}</span>

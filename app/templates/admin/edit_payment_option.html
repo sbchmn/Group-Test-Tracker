@@ -3,6 +3,7 @@
 {% block title %}Edit Payment Option{% endblock %}
 
 {% block content %}
+<datalist id="payment-networks">{% for chain in ['Bitcoin','Litecoin','Bitcoin Cash','Ethereum','Arbitrum','Optimism','Base','Polygon','Solana','Tron','BNB Smart Chain'] %}<option value="{{ chain }}">{% endfor %}</datalist>
 <h3>Edit Payment Option</h3>
 <p class="text-muted">Update method details while preserving existing test and participant references.</p>
 
@@ -15,8 +16,9 @@
             <div class="mb-3">{{ form.recipient_name.label(class="form-label") }}{{ form.recipient_name(class="form-control") }}</div>
             <div class="mb-3">{{ form.account_handle.label(class="form-label") }}{{ form.account_handle(class="form-control") }}</div>
             <div class="mb-3">{{ form.wallet_address.label(class="form-label") }}{{ form.wallet_address(class="form-control") }}</div>
-            <div class="mb-3">{{ form.network.label(class="form-label") }}{{ form.network(class="form-control") }}</div>
+            <div class="mb-3">{{ form.network.label(class="form-label") }}{{ form.network(class="form-control", list="payment-networks") }}</div>
             <div class="mb-3">{{ form.details.label(class="form-label") }}{{ form.details(class="form-control", rows=2) }}</div>
+            {% include 'admin/_payment_proof_settings.html' %}
             <div class="mb-3">{{ form.qr_payload_override.label(class="form-label") }}{{ form.qr_payload_override(class="form-control") }}</div>
             <div class="mb-3 form-check">{{ form.is_active(class="form-check-input") }} {{ form.is_active.label(class="form-check-label") }}</div>
             <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
@@ -56,8 +58,8 @@
     <div class="col-lg-5">
         <div class="card">
             <div class="card-header">Payment Matrix</div>
-            <div class="card-body p-0">
-                <table class="table table-sm mb-0 align-middle">
+            <div class="card-body p-0 record-container">
+                <table class="table table-sm mb-0 align-middle record-table record-table-single">
                     <thead class="table-light">
                         <tr>
                             <th>Method</th>
@@ -68,9 +70,9 @@
                     <tbody>
                         {% for row in matrix_rows %}
                             <tr>
-                                <td><strong>{{ row.provider_name }}</strong></td>
-                                <td class="small">{{ row.input_field }}</td>
-                                <td class="small text-muted">{{ row.link_example }}</td>
+                                <td data-label="Method" class="record-title"><strong>{{ row.provider_name }}</strong></td>
+                                <td class="small record-wide" data-label="Input">{{ row.input_field }}</td>
+                                <td class="small text-muted record-wide" data-label="Link">{{ row.link_example }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

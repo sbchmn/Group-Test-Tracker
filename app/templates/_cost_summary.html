@@ -3,7 +3,11 @@
     <div class="card-header bulk-toolbar"><span>Cost Summary · {{ 'Frozen cost basis' if test.costs_locked else 'Updating automatically' }}</span>{% if current_user.is_admin %}<a href="{{ url_for('main.edit_test', test_id=test.id) }}" class="btn btn-sm btn-link">Adjust inputs</a>{% endif %}</div>
     <div class="card-body">
         <div class="row text-center g-2"><div class="col"><div class="fw-bold fs-4">{{ c.total_participants }}</div><div class="small text-muted">Cost-sharing participants</div></div><div class="col"><div class="fw-bold fs-4">{{ c.total_donors }}</div><div class="small text-muted">Vial donors</div></div><div class="col"><div class="fw-bold fs-4">{{ c.total_non_donors }}</div><div class="small text-muted">Non-donors</div></div></div>
-        {% if c.late_buy_in_count %}<p class="small text-muted mt-3">{{ c.late_buy_in_count }} approved late buy-in(s), counted separately from this cost-sharing basis.</p>{% endif %}
+        {% if c.late_buy_in_count %}
+        <p class="small text-muted mt-3"><strong>{{ c.late_buy_in_count }} additional member{{ 's' if c.late_buy_in_count != 1 else '' }}</strong> approved after costs were frozen. Their buy-ins are priced separately and do not count toward the original participant count, base cost split, or donor refund calculation.</p>
+        {% elif test.costs_locked %}
+        <p class="small text-muted mt-3">Members approved after costs are frozen are tagged “Additional member.” Their buy-ins are priced separately and do not change the original base cost split or existing members’ shares.</p>
+        {% endif %}
         {% if c.get('legacy') %}<p class="small text-muted mt-3">Existing assigned charges have been preserved. Historical rates that cannot be established are shown as “Not recorded.”</p>{% endif %}
         <hr>
         {% set cost_inputs = c.get('inputs', {}) %}
@@ -22,49 +26,52 @@
             <dt class="col-7">Non-donor share</dt><dd class="col-5 text-end">{% if c.non_donor_pays is none %}Not recorded{% else %}${{ '%.2f'|format(c.non_donor_pays) }}{% endif %}</dd>
             <dt class="col-7">Donor share after credit</dt><dd class="col-5 text-end">{% if c.donor_pays is none %}Not recorded{% else %}${{ '%.2f'|format(c.donor_pays) }}{% endif %}</dd>
         </dl>
-        {% if not c.get('legacy') %}
-        {% set donor_shipping = cost_inputs.get('donor_shipping_cost', test.donor_shipping_cost) or 0 %}
-        {% set reimbursement = cost_inputs.get('donor_shipping_reimbursement', test.donor_shipping_reimbursement) %}
-        {% set uplift_per_non = c.total_refund_pool / c.total_non_donors if c.total_non_donors > 0 else 0 %}
-        {% set shipping_credit = donor_shipping / c.total_donors if donor_shipping > 0 and reimbursement == 'credit' and c.total_donors > 0 else 0 %}
+        {% set e = cost_explanation|default(c) %}
+        {% set explanation_inputs = e.get('inputs', {}) %}
+        {% set donor_shipping = explanation_inputs.get('donor_shipping_cost', test.donor_shipping_cost) or 0 %}
+        {% set reimbursement = explanation_inputs.get('donor_shipping_reimbursement', test.donor_shipping_reimbursement) %}
+        {% set uplift_per_non = e.total_refund_pool / e.total_non_donors if e.total_non_donors > 0 else 0 %}
+        {% set shipping_credit = donor_shipping / e.total_donors if donor_shipping > 0 and reimbursement == 'credit' and e.total_donors > 0 else 0 %}
         <details class="small mt-2">
             <summary>How the split works</summary>
             <div class="mt-2">
-                {% if test.costs_locked %}<p>This explanation uses the saved costs and cost-sharing roster from when these shares were calculated.</p>{% endif %}
+                {% if c.get('legacy') %}
+                <p>This calculation uses this test’s current costs and cost-sharing participants. Existing assigned charges stay fixed unless an administrator explicitly recalculates them.</p>
+                {% elif test.costs_locked %}<p>This explanation uses the saved costs and cost-sharing roster from when these shares were calculated.</p>{% endif %}
                 <ol class="ps-3 mb-2">
                     <li class="mb-2">
                         <strong>Fixed cost:</strong> lab cost + shipping{% if donor_shipping > 0 %} + donor shipping{% endif %}
-                        = ${{ '%.2f'|format(cost_inputs.get('total_lab_cost', test.total_lab_cost) or 0) }} + ${{ '%.2f'|format(cost_inputs.get('shipping_cost', test.shipping_cost) or 0) }}{% if donor_shipping > 0 %} + ${{ '%.2f'|format(donor_shipping) }}{% endif %}
-                        = <strong>${{ '%.2f'|format(c.total_fixed_cost) }}</strong>.
+                        = ${{ '%.2f'|format(explanation_inputs.get('total_lab_cost', test.total_lab_cost) or 0) }} + ${{ '%.2f'|format(explanation_inputs.get('shipping_cost', test.shipping_cost) or 0) }}{% if donor_shipping > 0 %} + ${{ '%.2f'|format(donor_shipping) }}{% endif %}
+                        = <strong>${{ '%.2f'|format(e.total_fixed_cost) }}</strong>.
                     </li>
-                    {% if c.total_participants > 0 %}
+                    {% if e.total_participants > 0 %}
                     <li class="mb-2">
-                        <strong>Base share before refunds:</strong> ${{ '%.2f'|format(c.total_fixed_cost) }} ÷ {{ c.total_participants }} cost-sharing participant{{ 's' if c.total_participants != 1 else '' }}
-                        = <strong>${{ '%.2f'|format(c.base_per_person) }} each</strong>.
+                        <strong>Base share before refunds:</strong> ${{ '%.2f'|format(e.total_fixed_cost) }} ÷ {{ e.total_participants }} cost-sharing participant{{ 's' if e.total_participants != 1 else '' }}
+                        = <strong>${{ '%.2f'|format(e.base_per_person) }} each</strong>.
                     </li>
-                    {% if c.total_donors > 0 %}
+                    {% if e.total_donors > 0 %}
                     <li class="mb-2">
-                        <strong>Refund pool:</strong> {{ c.total_donors }} donor{{ 's' if c.total_donors != 1 else '' }} × ${{ '%.2f'|format(c.effective_donor_refund) }} credit per donor
-                        = <strong>${{ '%.2f'|format(c.total_refund_pool) }}</strong>.
-                        {% if c.total_non_donors > 0 %}Non-donors fund this pool through an uplift added to their base share.
+                        <strong>Refund pool:</strong> {{ e.total_donors }} donor{{ 's' if e.total_donors != 1 else '' }} × ${{ '%.2f'|format(e.effective_donor_refund) }} credit per donor
+                        = <strong>${{ '%.2f'|format(e.total_refund_pool) }}</strong>.
+                        {% if e.total_non_donors > 0 %}Non-donors fund this pool through an uplift added to their base share.
                         {% else %}There are no non-donors to fund an uplift; the configured donor credit still applies.{% endif %}
                     </li>
                     {% else %}
                     <li class="mb-2">There are no vial donors in this cost-sharing group, so no donor credits or refund uplift apply.</li>
                     {% endif %}
-                    {% if c.total_non_donors > 0 %}
+                    {% if e.total_non_donors > 0 %}
                     <li class="mb-2">
-                        <strong>Uplift added to each non-donor:</strong> ${{ '%.2f'|format(c.total_refund_pool) }} ÷ {{ c.total_non_donors }} non-donor{{ 's' if c.total_non_donors != 1 else '' }}
+                        <strong>Uplift added to each non-donor:</strong> ${{ '%.2f'|format(e.total_refund_pool) }} ÷ {{ e.total_non_donors }} non-donor{{ 's' if e.total_non_donors != 1 else '' }}
                         = <strong>${{ '%.2f'|format(uplift_per_non) }}</strong>.<br>
-                        <strong>Non-donor pay:</strong> ${{ '%.2f'|format(c.base_per_person) }} base share + ${{ '%.2f'|format(uplift_per_non) }} uplift
-                        = <strong>${{ '%.2f'|format(c.non_donor_pays) }}</strong>.
+                        <strong>Non-donor pay:</strong> ${{ '%.2f'|format(e.base_per_person) }} base share + ${{ '%.2f'|format(uplift_per_non) }} uplift
+                        = <strong>${{ '%.2f'|format(e.non_donor_pays) }}</strong>.
                     </li>
                     {% endif %}
-                    {% if c.total_donors > 0 %}
+                    {% if e.total_donors > 0 %}
                     <li class="mb-2">
-                        <strong>Donor pay:</strong> ${{ '%.2f'|format(c.base_per_person) }} base share − ${{ '%.2f'|format(c.effective_donor_refund) }} donor credit{% if shipping_credit > 0 %} − ${{ '%.2f'|format(shipping_credit) }} donor-shipping credit{% endif %}
-                        = <strong>${{ '%.2f'|format(c.donor_pays) }}</strong>.
-                        {% if c.donor_pays < 0 %}A negative donor share represents a credit back to the donor.{% endif %}
+                        <strong>Donor pay:</strong> ${{ '%.2f'|format(e.base_per_person) }} base share − ${{ '%.2f'|format(e.effective_donor_refund) }} donor credit{% if shipping_credit > 0 %} − ${{ '%.2f'|format(shipping_credit) }} donor-shipping credit{% endif %}
+                        = <strong>${{ '%.2f'|format(e.donor_pays) }}</strong>.
+                        {% if e.donor_pays < 0 %}A negative donor share represents a credit back to the donor.{% endif %}
                     </li>
                     {% endif %}
                     {% else %}
@@ -76,19 +83,25 @@
                     <strong>Donor shipping:</strong> ${{ '%.2f'|format(donor_shipping) }} is included in the fixed cost above.
                     {% if reimbursement == 'credit' %}
                         Reimbursement policy: credit to the donor.
-                        {% if c.total_donors > 0 %}The ${{ '%.2f'|format(donor_shipping) }} shipping credit is divided across {{ c.total_donors }} donor{{ 's' if c.total_donors != 1 else '' }}: ${{ '%.2f'|format(donor_shipping) }} ÷ {{ c.total_donors }} = ${{ '%.2f'|format(shipping_credit) }} extra credit per donor.
+                        {% if e.total_donors > 0 %}The ${{ '%.2f'|format(donor_shipping) }} shipping credit is divided across {{ e.total_donors }} donor{{ 's' if e.total_donors != 1 else '' }}: ${{ '%.2f'|format(donor_shipping) }} ÷ {{ e.total_donors }} = ${{ '%.2f'|format(shipping_credit) }} extra credit per donor.
                         {% else %}No donor-shipping credit is applied while there are no donors.{% endif %}
                     {% else %}
                         Reimbursement policy: covered by the designated participant rather than an extra donor credit.
-                        {% if reimbursed_by_user is defined and reimbursed_by_user and reimbursed_by_user.id == cost_inputs.get('donor_shipping_reimbursed_by_id', test.donor_shipping_reimbursed_by_id) %}Covered by: {{ reimbursed_by_user.username }}.{% endif %}
+                        {% if reimbursed_by_user is defined and reimbursed_by_user and reimbursed_by_user.id == explanation_inputs.get('donor_shipping_reimbursed_by_id', test.donor_shipping_reimbursed_by_id) %}Covered by: {{ reimbursed_by_user.username }}.{% endif %}
                     {% endif %}
                 </p>
                 {% endif %}
-                {% if c.late_buy_in_count %}<p class="mb-2">Late buy-ins are priced separately and are not included in this cost-sharing calculation.</p>{% endif %}
-                {% if c.total_participants > 0 %}<p class="text-muted mb-0">Amounts are displayed to the nearest cent, so adding the displayed components may produce a small rounding difference.</p>{% endif %}
+                {% if c.late_buy_in_count %}<p class="mb-2">Additional members are not included in the participant or donor counts used above. Their separately assigned buy-in charges do not change the original base cost split.</p>{% endif %}
+                {% if e.total_participants > 0 %}<p class="text-muted mb-0">Amounts are displayed to the nearest cent, so adding the displayed components may produce a small rounding difference.</p>{% endif %}
+                {% if c.get('legacy') %}
+                <p class="mt-2 mb-0"><strong>Recorded assigned charges:</strong>
+                    {% if c.total_non_donors > 0 %}Non-donors: {% if c.non_donor_pays is none %}see individual participant charges{% else %}${{ '%.2f'|format(c.non_donor_pays) }} each{% endif %}.{% endif %}
+                    {% if c.total_donors > 0 %}Donors: {% if c.donor_pays is none %}see individual participant charges{% else %}${{ '%.2f'|format(c.donor_pays) }} each{% endif %}.{% endif %}
+                    The participant list remains the source for individual amounts and overrides.
+                </p>
+                {% endif %}
             </div>
         </details>
-        {% endif %}
         {% if test.costs_locked %}<div class="small text-muted mt-3">Assigned participant charges are fixed, including individual buy-in overrides. Roster and budget edits do not change them without an explicit recalculation.</div>{% endif %}
     </div>
 </div>

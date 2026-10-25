@@ -281,6 +281,9 @@ window.addEventListener('DOMContentLoaded', function() {
                     <strong>You are an approved member.</strong><br>
                     Your amount owed: <strong>${{ '%.2f'|format(my_part.balance_due) }}</strong>
                     {% if my_part.vial_donor %}(as vial donor){% endif %}
+                    {% if my_part.is_late_buy_in %}
+                    <div class="mt-2"><span class="badge text-bg-info">Additional member</span><div class="small mt-1">Your buy-in is priced separately because you joined after costs were frozen. It does not change the original base cost split.</div></div>
+                    {% endif %}
                 </div>
 
                 {% if test.status in ['testing', 'ready_for_payment'] and selected_payment_option %}
@@ -336,6 +339,7 @@ window.addEventListener('DOMContentLoaded', function() {
                     <tr class="{% if not p.approved %}table-warning{% endif %}">
                         <td class="small record-title" data-label="Name / TG">
                             {{ p.name or p.user.username }}<br>
+                            {% if p.is_late_buy_in %}<span class="badge text-bg-info mb-1">Additional member</span><br>{% endif %}
                             <span class="text-muted">{{ p.tg_username or '' }}</span>
                         </td>
                         <td data-label="Role">

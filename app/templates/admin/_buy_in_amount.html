@@ -1,8 +1,8 @@
 {% if pricing_amount is defined or (pricing_test.costs_locked and pricing_id not in (pricing_test.cost_snapshot or {}).get('participant_ids', [])) %}
 <div class="mb-2 text-start">
-    <label class="form-label small" for="buyIn{{ pricing_id }}">Buy-in amount ($)</label>
+    <label class="form-label small" for="buyIn{{ pricing_id }}">Additional member buy-in ($)</label>
     <input type="number" class="form-control form-control-sm" id="buyIn{{ pricing_id }}" name="buy_in_amount" min="0" max="9999999999.99" step="0.01" inputmode="decimal"
            {% if pricing_amount is defined and pricing_amount is not none %}value="{{ '%.2f'|format(pricing_amount) }}"{% elif pricing_test.late_buy_in_price is not none %}value="{{ '%.2f'|format(pricing_test.late_buy_in_price) }}"{% else %}required{% endif %}>
-    <div class="form-text small">{% if pricing_amount is defined %}Changes apply only to this participant. Leave blank to keep their assigned charge.{% elif pricing_test.late_buy_in_price is none %}Confirm a default for future late buy-ins. Existing charges stay unchanged.{% else %}Leave blank to use the frozen default. An override applies only to this participant.{% endif %}</div>
+    <div class="form-text small">{% if pricing_amount is defined %}Changes apply only to this participant. Leave blank to keep their assigned charge.{% elif pricing_test.late_buy_in_price is none %}Confirm a default for future additional members. Existing charges stay unchanged.{% else %}Leave blank to use the frozen default. An override applies only to this participant.{% endif %}</div>
 </div>
 {% endif %}

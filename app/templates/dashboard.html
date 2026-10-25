@@ -139,6 +139,7 @@
                                     <span class="badge bg-secondary">Non-Donor</span>
                                 {% endif %}
                                 <span class="badge bg-success ms-1">Approved</span>
+                                {% if test.my_participation.is_late_buy_in %}<span class="badge text-bg-info ms-1">Additional member</span>{% endif %}
                             {% else %}
                                 <span class="badge bg-warning text-dark">Pending Approval</span>
                             {% endif %}

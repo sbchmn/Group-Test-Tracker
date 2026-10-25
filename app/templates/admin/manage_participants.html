@@ -54,11 +54,12 @@
                     <td data-label="#">{{ loop.index }}</td>
                     <td data-label="Name / TG">
                         <strong>{{ p.name or p.user.username }}</strong><br>
+                        {% if p.is_late_buy_in %}<span class="badge text-bg-info mb-1">Additional member</span><br>{% endif %}
                         <small class="text-muted">@{{ p.tg_username or p.user.tg_username or '—' }}</small>
                     </td>
                     <td data-label="US / State">{{ 'US' if p.us_based else 'INTL' }} {{ p.state or '' }}</td>
                     <td data-label="Vial Donor">
-                        {% if p.vial_donor %}<span class="badge bg-info">Yes - gets credit</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}
+                        {% if p.vial_donor %}<span class="badge bg-info">Yes{% if not p.is_late_buy_in %} - gets credit{% endif %}</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}
                     </td>
                     <td data-label="Request State">
                         {% if p.approved %}
@@ -87,7 +88,7 @@
                         <small class="text-muted">Paid: ${{ '%.2f'|format(p.amount_paid) }}</small>
                     </td>
                     <td data-label="{{ 'Pricing Basis' if test.costs_locked else 'Current Fair Share' }}" class="small text-success fw-bold">
-                        {% if not p.approved %}<span class="text-muted">Awaiting approval</span>{% elif p.is_late_buy_in %}Late buy-in{% elif test.costs_locked %}Frozen share{% else %}${{ '%.2f'|format(p.current_fair_share) }}{% endif %}
+                        {% if not p.approved %}<span class="text-muted">Awaiting approval</span>{% elif p.is_late_buy_in %}Separate buy-in{% elif test.costs_locked %}Frozen share{% else %}${{ '%.2f'|format(p.current_fair_share) }}{% endif %}
                     </td>
                     <td data-label="Actions" class="participant-actions-cell">
                         <div class="participant-actions">

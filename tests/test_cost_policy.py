@@ -125,6 +125,7 @@ class CostPolicyTests(unittest.TestCase):
                 self.assertIn('$67.50 base share + $20.00 uplift = $87.50', text)
                 self.assertIn('$67.50 base share − $20.00 donor credit − $15.00 donor-shipping credit = $32.50', text)
                 self.assertIn('Reimbursement policy: credit to the donor.', text)
+                self.assertNotIn('current costs and cost-sharing participants', text)
                 self.assertNotIn('$9999.00', text)
                 self.assertNotIn('$999.00', text)
         self.assertEqual(self.charges(), {'donor': 32.5, 'member': 87.5})
@@ -150,6 +151,62 @@ class CostPolicyTests(unittest.TestCase):
         self.assertIn('no non-donors to fund an uplift', text)
         self.assertIn('$883.00 base share − $20.00 donor credit = $863.00', text)
         self.assertNotIn('÷ 0', text)
+
+
+    def test_eight_member_older_test_shows_math_without_repricing_or_creating_snapshot(self):
+        with self.app.app_context():
+            test = db.session.get(GroupTest, self.test_id)
+            test.status = 'ready_for_payment'
+            test.total_lab_cost = 883
+            for name in ('donor', 'member', 'late', 'other'):
+                part = db.session.get(Participation, self.ids[name])
+                part.approved = True
+                part.amount_owed = 80 if part.vial_donor else 100
+            for number in range(4):
+                user = User(username=f'extra{number}', email=f'extra{number}@example.test', password_hash='hash')
+                db.session.add(user)
+                db.session.flush()
+                db.session.add(Participation(group_test_id=test.id, user_id=user.id, approved=True, amount_owed=100, name=user.username))
+            db.session.commit()
+            revision = test.cost_revision
+            self.assertIsNone(test.cost_snapshot)
+            original_charges = self.charges()
+        for path in (f'/test/{self.test_id}', f'/admin/manage-participants/{self.test_id}'):
+            with self.subTest(path=path):
+                text = self.explanation(path)
+                self.assertIn('$883.00 ÷ 8 cost-sharing participants = $110.38 each', text)
+                self.assertIn('1 donor × $20.00 credit per donor = $20.00', text)
+                self.assertIn('$20.00 ÷ 7 non-donors = $2.86', text)
+                self.assertIn('$113.23', text)
+                self.assertIn('$90.38', text)
+                self.assertIn('Recorded assigned charges: Non-donors: $100.00 each. Donors: $80.00 each.', text)
+                self.assertIn('current costs and cost-sharing participants', text)
+        self.assertEqual(self.charges(), original_charges)
+        with self.app.app_context():
+            test = db.session.get(GroupTest, self.test_id)
+            self.assertIsNone(test.cost_snapshot)
+            self.assertEqual(test.cost_revision, revision)
+
+    def test_saved_legacy_snapshot_shows_current_math_and_preserves_individual_charges(self):
+        with self.app.app_context():
+            test = db.session.get(GroupTest, self.test_id)
+            test.status = 'ready_for_payment'
+            for name, charge in (('member', 50), ('other', 65)):
+                part = db.session.get(Participation, self.ids[name])
+                part.approved = True
+                part.amount_owed = charge
+            db.session.flush()
+            test.cost_snapshot = costs.legacy_snapshot(test)
+            test.costs_frozen = True
+            test.total_lab_cost = 800
+            db.session.commit()
+            original_snapshot = json.dumps(test.cost_snapshot, sort_keys=True)
+        text = self.explanation(f'/test/{self.test_id}')
+        self.assertIn('$800.00 ÷ 2 cost-sharing participants = $400.00 each', text)
+        self.assertIn('Non-donors: see individual participant charges', text)
+        self.assertEqual(self.charges(), {'member': 50, 'other': 65})
+        with self.app.app_context():
+            self.assertEqual(json.dumps(db.session.get(GroupTest, self.test_id).cost_snapshot, sort_keys=True), original_snapshot)
 
     def test_manage_and_queue_approval_reprice_entire_recruiting_cohort_quietly(self):
         with patch('app.routes.send_notification_message') as notify:
@@ -179,6 +236,33 @@ class CostPolicyTests(unittest.TestCase):
             self.assertEqual((data['total_participants'], data['total_non_donors'], data['late_buy_in_count']), (2, 1, 2))
             self.assertEqual(test.late_buy_in_price, Decimal('320.00'))
             self.assertNotIn('participant_ids', data)
+        for path in (f'/test/{self.test_id}', f'/admin/manage-participants/{self.test_id}'):
+            with self.subTest(path=path):
+                body = self.client.get(path).get_data(as_text=True)
+                self.assertEqual(body.count('>Additional member</span>'), 2)
+                self.assertIn('2 additional members', body)
+                self.assertIn('do not count toward the original participant count, base cost split, or donor refund calculation', body)
+                self.assertIn('$600.00 ÷ 2 cost-sharing participants = $300.00 each', self.explanation(path))
+        self.login('late')
+        self.assertIn('>Additional member</span>', self.client.get('/dashboard').get_data(as_text=True))
+        self.assertIn('Your buy-in is priced separately', self.client.get(f'/test/{self.test_id}').get_data(as_text=True))
+        self.assertEqual(self.charges(), {'donor': 280, 'member': 320, 'late': 320, 'other': 75.25})
+
+    def test_additional_vial_donor_does_not_enter_original_donor_or_base_counts(self):
+        self.freeze()
+        with self.app.app_context():
+            db.session.get(Participation, self.ids['late']).vial_donor = True
+            db.session.commit()
+        self.approve('late', buy_in_amount='75')
+        with self.app.app_context():
+            test = db.session.get(GroupTest, self.test_id)
+            displayed = test.calculate_costs()
+            explanation = costs.explanation_costs(test, displayed)
+            self.assertEqual((explanation['total_participants'], explanation['total_donors'], explanation['total_non_donors']), (2, 1, 1))
+            self.assertTrue(db.session.get(Participation, self.ids['late']).is_late_buy_in)
+            self.assertEqual(displayed['late_buy_in_count'], 1)
+        self.assertEqual(self.charges(), {'donor': 280, 'member': 320, 'late': 75})
+        self.assertIn('1 additional member', self.client.get(f'/test/{self.test_id}').get_data(as_text=True))
 
     def test_add_existing_user_uses_same_default_and_override(self):
         self.freeze()

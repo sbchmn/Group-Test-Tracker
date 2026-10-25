@@ -3272,6 +3272,7 @@ def test_detail(test_id):
         my_part=my_part,
         show_participant_list=show_participant_list,
         reimbursed_by_user=reimbursed_by_user,
+        cost_explanation=cost_policy.explanation_costs(test, costs),
         notify_form=form,
         notification_templates=templates,
         payment_options=payment_option_contexts,
@@ -3903,7 +3904,8 @@ def manage_participants(test_id):
     for p in parts:
         p.current_fair_share = p.amount_owed if test.costs_locked or p.is_late_buy_in else costs.get('donor_pays' if p.vial_donor else 'non_donor_pays', 0)
 
-    return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
+    return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs,
+                           cost_explanation=cost_policy.explanation_costs(test, costs))
 
 
 def _recalculate_approved_amounts_for_test(test):

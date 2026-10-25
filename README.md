@@ -408,6 +408,14 @@ Shares freeze when a test leaves Recruiting, before status notifications or dige
 
 Participants approved after freezing are late buy-ins. They default to the frozen non-donor share, with an individual override on approval or the participant editor. Administrators can also change the default for future buy-ins without altering existing charges. Late buy-ins remain outside the original cost-sharing pool, including after an explicit unlock. Bulk approval uses the saved default; if no unambiguous default exists, set or confirm one first. No partial batch is approved on a pricing error.
 
+These participants are labeled **Additional member** in participant lists and
+their own dashboard/test status. The cost summary explains that additional members
+do not count toward the original participant base or donor refund calculation;
+their buy-in charges are separate. **How the split works** remains collapsible and
+is available on older tests too. If an older test has no original saved breakdown,
+the explanation uses its current cost-sharing details while preserving individual
+assigned charges.
+
 The group detail list retains one **Amount Owed** column: the assigned charge less the recorded payment, with a minimum of zero. Frozen summaries and exports use the saved cost basis. Payment forms, notification template `amount_owed`, bot status, and export participant charges use each participant's assigned charge, including individual overrides. Recalculation preserves recorded payments, payment evidence, and verification records.
 
 Apply `flask --app run.py db upgrade` before running this version. Existing tests outside Recruiting are frozen without changing historical charges. Historical non-donor charges provide the late buy-in default only when consistent; otherwise an administrator must confirm a default. Historical rates that cannot be established display as **Not recorded**.

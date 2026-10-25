@@ -164,6 +164,8 @@ def _link_discord_account(token_value, discord_user_id, discord_username):
         return "This Discord account is already linked to a different user."
     if link_error == "user-owned":
         return "This Group Test Manager account is already linked to a different Discord account."
+    if link_error == "username-owned":
+        return "That Discord username is already recorded on another account. Contact an administrator to resolve it before linking."
     if link_error == "inactive-user":
         return "This Group Test Manager account is deactivated. Contact an administrator."
     if link_error in {"missing-user", "conflict"} or user is None:
@@ -703,7 +705,7 @@ class DiscordBot(commands.Bot):
                 _link_discord_account,
                 token_value,
                 interaction.user.id,
-                _discord_display_name(interaction),
+                str(interaction.user.name),
             )
             await interaction.edit_original_response(content=text)
 

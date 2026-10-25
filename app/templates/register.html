@@ -25,7 +25,20 @@
                     </div>
                     <div class="mb-3">
                         {{ form.tg_username.label(class="form-label") }}
-                        {{ form.tg_username(class="form-control", placeholder="@yourtelegram") }}
+                        {{ form.tg_username(class="form-control" + (" is-invalid" if form.tg_username.errors else ""), placeholder="@yourtelegram") }}
+                        {% for e in form.tg_username.errors %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.discord_username.label(class="form-label") }}
+                        {{ form.discord_username(class="form-control" + (" is-invalid" if form.discord_username.errors else "")) }}
+                        {% for e in form.discord_username.errors %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+                        <div class="form-text">Use your unique Discord username, rather than a server nickname.</div>
+                    </div>
+                    <div class="mb-3">
+                        {{ form.notification_channel.label(class="form-label") }}
+                        {{ form.notification_channel(class="form-select" + (" is-invalid" if form.notification_channel.errors else ""), aria_describedby="notification-help") }}
+                        {% for e in form.notification_channel.errors %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+                        <div id="notification-help" class="form-text">For Telegram or Discord, we’ll help you link your account after your first login. Email stays active until linking succeeds. If you skip or don’t finish within seven days, your preference will remain Email.</div>
                     </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">

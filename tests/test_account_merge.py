@@ -172,7 +172,7 @@ class AccountMergeTests(unittest.TestCase):
             proofs_before=[(p.id,p.participation_id,p.amount,p.status,p.image_key,p.transaction_id,p.archived_by_merge) for p in PaymentSubmission.query.order_by(PaymentSubmission.id)]
             revision_before=kept.payment_revision
             stamp(directory='migrations',revision='b4d6f8a0c2e3')
-            upgrade(directory='migrations')
+            upgrade(directory='migrations',revision='c5e7a9b1d3f4')
             db.session.expire_all();kept=db.session.get(Participation,self.parts['primary'])
             self.assertEqual((kept.name,kept.tg_username),('primary','primary_handle'))
             self.assertEqual(kept.payment_revision,revision_before+1)
@@ -184,7 +184,7 @@ class AccountMergeTests(unittest.TestCase):
             original=db.session.get(Participation,untouched_id);db.session.delete(original);db.session.flush()
             edited=db.session.get(Participation,later_id);edited.user_id=self.ids['primary'];db.session.commit()
             downgrade(directory='migrations',revision='b4d6f8a0c2e3')
-            upgrade(directory='migrations');db.session.expire_all()
+            upgrade(directory='migrations',revision='c5e7a9b1d3f4');db.session.expire_all()
             edited=db.session.get(Participation,later_id)
             self.assertEqual((edited.name,edited.tg_username),('Edited later','edited_handle'))
 

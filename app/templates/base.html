@@ -133,7 +133,7 @@
     <footer class="container mt-5 text-center text-muted small">
         {% if branding.enabled %}
         <p>{{ brand_name }}{% if branding.tagline %} · {{ branding.tagline }}{% endif %}</p>
-        <p class="branding-attribution">Powered by GTM</p>
+        <p class="branding-attribution"><a class="text-muted" href="https://grouptest.online">Powered by GTM</a></p>
         {% else %}<p>Group Test Manager • Replaces manual spreadsheets • Built for DigitalOcean</p>{% endif %}
         <p>
             <a class="text-muted" href="{{ url_for('main.terms_of_service') }}">Terms of Service</a>

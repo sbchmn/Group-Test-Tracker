@@ -2414,7 +2414,7 @@ def _telegram_help_custom_commands_block():
 
 
 def _telegram_help_message():
-    return (
+    body = (
         brand_text("Group Test Manager bot commands:\n"
         "/tests - list tests you can see\n"
         "/mytests - list tests you are interacting with\n"
@@ -2423,7 +2423,16 @@ def _telegram_help_message():
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/submitcoa <public link> - submit a COA for administrator review (or attach a PDF/image)\n"
         "/help - show this help message")
-    ) + _telegram_help_custom_commands_block() + bot_credit()
+    ) + _telegram_help_custom_commands_block()
+    credit = bot_credit(format='html')
+    return html.escape(body) + credit if credit else body
+
+
+def _send_telegram_help(chat_id):
+    from .branding import effective_settings
+    if effective_settings()['enabled']:
+        return send_telegram_chat_message(chat_id, _telegram_help_message(), parse_mode='HTML')
+    return send_telegram_chat_message(chat_id, _telegram_help_message())
 
 
 def _public_results_telegram_tag_keyboard(tags, page, total_pages):
@@ -3065,7 +3074,7 @@ def telegram_webhook():
     db.session.commit()
 
     if lower == '/help':
-        send_telegram_chat_message(chat_id, _telegram_help_message())
+        _send_telegram_help(chat_id)
         return jsonify({'ok': True})
 
     if lower == '/tests':
@@ -3147,7 +3156,7 @@ def telegram_webhook():
     ):
         return jsonify({'ok': True})
 
-    send_telegram_chat_message(chat_id, _telegram_help_message())
+    _send_telegram_help(chat_id)
     return jsonify({'ok': True})
 
 

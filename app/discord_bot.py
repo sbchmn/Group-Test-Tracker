@@ -136,7 +136,7 @@ def _build_help_text():
             base_lines.append("Custom commands:")
             for template in custom_commands:
                 base_lines.append(f"/{_normalize_command_name(template.command)} - {template.description or 'Custom reply'}")
-        credit = bot_credit()
+        credit = bot_credit(format='markdown')
         if credit:
             base_lines[0] = brand_text('Group Test Manager on Discord:')
     return "\n".join(base_lines) + credit

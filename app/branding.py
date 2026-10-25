@@ -84,8 +84,14 @@ def brand_text(text):
     return str(text).replace('Group Test Manager', settings['name']).replace('Group Test Tracker', settings['name'])
 
 
-def bot_credit():
-    return '\n\nPowered by GTM' if effective_settings()['enabled'] else ''
+def bot_credit(format='text'):
+    if not effective_settings()['enabled']:
+        return ''
+    if format == 'html':
+        return '\n\n<a href="https://grouptest.online">Powered by GTM</a>'
+    if format == 'markdown':
+        return '\n\n[Powered by GTM](https://grouptest.online)'
+    return '\n\nPowered by GTM — https://grouptest.online'
 
 
 def template_variables():
@@ -225,8 +231,8 @@ def email_parts(body, settings=None):
     content = body if re.search(r'<[a-zA-Z][^>]*>', body or '') else html.escape(body or '').replace('\n', '<br>')
     markup = (f'<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#212529;background:#ffffff;padding:24px;overflow-wrap:anywhere;word-break:break-word;'
               f'border-top:4px solid {settings["light_accent"]}">{logo_markup}<h1 style="font-size:22px">{name}</h1>'
-              f'{content}<hr><p style="font-size:12px;color:#595959">Powered by GTM</p></div>')
-    return f'{settings["name"]}\n\n{body}\n\nPowered by GTM', markup
+              f'{content}<hr><p style="font-size:12px;color:#595959"><a href="https://grouptest.online" style="color:#595959">Powered by GTM</a></p></div>')
+    return f'{settings["name"]}\n\n{body}\n\nPowered by GTM — https://grouptest.online', markup
 
 
 def context():

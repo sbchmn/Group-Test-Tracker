@@ -86,6 +86,7 @@ class BrandingTests(unittest.TestCase):
         page = self.client.get('/', follow_redirects=True).data
         self.assertIn(b'Community Lab', page)
         self.assertIn(b'Powered by GTM', page)
+        self.assertIn(b'href="https://grouptest.online">Powered by GTM</a>', page)
         terms = self.client.get('/terms').data
         self.assertIn(b'Customer LLC', terms)
         self.assertIn(b'legal@example.com', terms)
@@ -217,7 +218,9 @@ class BrandingTests(unittest.TestCase):
                 payload = json.loads(send.call_args.args[0].data)['Messages'][0]
                 self.assertEqual(payload['From'], {'Email': 'sender@example.com', 'Name': 'Community Lab'})
                 self.assertIn('<p>Custom text</p>', payload['HTMLPart'])
+                self.assertIn('<a href="https://grouptest.online"', payload['HTMLPart'])
                 self.assertIn('Powered by GTM', payload['TextPart'])
+                self.assertIn('https://grouptest.online', payload['TextPart'])
             self.assertEqual(template.email_body, '<p>Custom text</p>')
             self.assertEqual(render_notification_template('{{ brand_name }}: {{ username }}', {'username': 'Alex'}), 'Community Lab: Alex')
             self.assertEqual(brand_text('Group Test Manager link'), 'Community Lab link')
@@ -280,6 +283,20 @@ class BrandingTests(unittest.TestCase):
         self.assertIn(b'preference: "dark"', page.data)
         self.assertEqual(self.client.post('/admin/branding/preview/register').status_code, 405)
         self.assertEqual(self.version(), version)
+
+    def test_bot_attribution_links_and_telegram_help_escapes_plain_text(self):
+        self.publish()
+        with self.app.app_context():
+            from app.branding import bot_credit
+            from app.routes import _send_telegram_help
+            self.assertIn('[Powered by GTM](https://grouptest.online)', bot_credit(format='markdown'))
+            self.assertIn('https://grouptest.online', bot_credit())
+            with patch('app.routes.send_telegram_chat_message') as send:
+                _send_telegram_help('123')
+            body = send.call_args.args[1]
+            self.assertIn('&lt;test_id&gt;', body)
+            self.assertIn('<a href="https://grouptest.online">Powered by GTM</a>', body)
+            self.assertEqual(send.call_args.kwargs['parse_mode'], 'HTML')
 
 
 class BrandingMigrationTests(unittest.TestCase):

@@ -11,6 +11,7 @@ from flask_login import UserMixin
 from . import db
 import json
 from urllib.parse import quote
+from sqlalchemy.orm import deferred
 
 # Immutable system-account marker for the control plane's reserved support identity.
 # Authorization is tied only to this key, never to username/email text matching.
@@ -71,6 +72,7 @@ class User(UserMixin, db.Model):
     notification_channel = db.Column(db.String(20), default='email', nullable=False)
     pending_notification_channel = db.Column(db.String(20), nullable=True)
     notification_setup_expires_at = db.Column(db.DateTime, nullable=True)
+    theme_preference = db.Column(db.String(10), nullable=False, default='site', server_default='site')
     digest_frequency = db.Column(db.String(20), default='off', nullable=False)
     digest_hourly_minute_utc = db.Column(db.Integer, default=0, nullable=False)
     digest_daily_hour_utc = db.Column(db.Integer, default=9, nullable=False)
@@ -1061,6 +1063,35 @@ class PaymentSubmission(db.Model):
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     denial_reason = db.Column(db.String(1000), nullable=True)
     archived_by_merge = db.Column(db.Boolean, default=False, nullable=False)
+
+
+class BrandingState(db.Model):
+    __tablename__ = 'branding_state'
+    id = db.Column(db.Integer, primary_key=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    draft = db.Column(db.JSON, nullable=False, default=dict)
+    published = db.Column(db.JSON, nullable=False, default=dict)
+    __mapper_args__ = {'version_id_col': version}
+
+
+class BrandingRevision(db.Model):
+    __tablename__ = 'branding_revisions'
+    id = db.Column(db.Integer, primary_key=True)
+    actor_id = db.Column(db.Integer, nullable=False)
+    action = db.Column(db.String(20), nullable=False)
+    settings = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class BrandingAsset(db.Model):
+    __tablename__ = 'branding_assets'
+    id = db.Column(db.String(32), primary_key=True)
+    data = deferred(db.Column(db.LargeBinary(length=4194304), nullable=False))
+    icon_data = deferred(db.Column(db.LargeBinary(length=4194304), nullable=False))
+    width = db.Column(db.Integer, nullable=False)
+    height = db.Column(db.Integer, nullable=False)
+    published = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class AccountMergeAudit(db.Model):

@@ -30,6 +30,7 @@ import ipaddress
 import html
 import re
 
+from .branding import brand_text, bot_credit
 from . import db, csrf, limiter
 import os
 import json
@@ -785,7 +786,7 @@ def _telegram_testing_message(config_map):
     register_url = f"{base_url}{url_for('main.register')}"
     login_url = f"{base_url}{url_for('main.login')}"
     return (
-        "To join and view group testing, sign up or log in at Group Test Manager.\n"
+        f"To join and view group testing, sign up or log in at {brand_text('Group Test Manager')}.\n"
         f"Sign up: {register_url}\n"
         f"Log in: {login_url}"
     )
@@ -2414,15 +2415,15 @@ def _telegram_help_custom_commands_block():
 
 def _telegram_help_message():
     return (
-        "Group Test Manager bot commands:\n"
+        brand_text("Group Test Manager bot commands:\n"
         "/tests - list tests you can see\n"
         "/mytests - list tests you are interacting with\n"
         "/testing - get signup/login links for group testing\n"
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/submitcoa <public link> - submit a COA for administrator review (or attach a PDF/image)\n"
-        "/help - show this help message"
-    ) + _telegram_help_custom_commands_block()
+        "/help - show this help message")
+    ) + _telegram_help_custom_commands_block() + bot_credit()
 
 
 def _public_results_telegram_tag_keyboard(tags, page, total_pages):
@@ -3001,7 +3002,7 @@ def telegram_webhook():
                     send_telegram_chat_message(chat_id, 'We found a possible profile match by username. For security, generate a link token from your profile and use /start <token> to confirm.')
                     db.session.commit()
                     return jsonify({'ok': True})
-            send_telegram_chat_message(chat_id, 'Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.')
+            send_telegram_chat_message(chat_id, brand_text('Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.'))
             db.session.commit()
             return jsonify({'ok': True})
 
@@ -3041,7 +3042,7 @@ def telegram_webhook():
     if linked_user is None:
         linked_user = User.query.filter_by(telegram_chat_id=chat_id).first()
     if linked_user is None:
-        send_telegram_chat_message(chat_id, 'Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.')
+        send_telegram_chat_message(chat_id, brand_text('Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.'))
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -4664,7 +4665,7 @@ def _builtin_testing_scope_allowed(chat_id, chat_type, message_thread_id=None):
 
 def _telegram_command_menu_entries(include_groups=False):
     descriptions = {
-        'start': 'Link your Group Test Manager account',
+        'start': brand_text('Link your Group Test Manager account'),
         'help': 'Show available bot commands',
         'tests': 'List tests you can see',
         'mytests': 'List your test requests and approvals',
@@ -4886,7 +4887,7 @@ def send_root_test_message():
     if not entitlement_enabled(entitlement_for('root')):
         abort(404)
 
-    if send_root_message('Test message from Group Test Manager.'):
+    if send_root_message(brand_text('Test message from Group Test Manager.')):
         flash('Root test message queued. It appears once the bridge polls for it.', 'success')
     else:
         flash('Could not queue the Root test message. Save a Root status channel ID first.', 'danger')

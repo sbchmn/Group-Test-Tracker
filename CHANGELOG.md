@@ -62,6 +62,10 @@ identified explicitly below.
 - Added license and third-party attribution information to the Version page.
 - Identified PyMuPDF's AGPL/commercial licensing choice as a distribution gate.
 
+## 4.2 - 2026-10-24
+
+Added optional customer branding that any administrator can configure, including the app name, logos, browser icon, colors, fonts, help links, and operator details on the built-in legal pages. Administrators can save a private draft, preview phone/tablet/desktop layouts, publish it, and restore earlier revisions. Members can choose light, dark, or their device’s appearance. Published branding also appears in email presentation and default bot wording, while preserving existing message templates, delivery settings, and a small “Powered by GTM” credit. Customers keep their existing website addresses.
+
 ## 4.1 - 2026-10-24
 
 `3422a53` — Added notification preferences during registration and guided Telegram or Discord account linking after login. Email stays active until linking is completed, and reminders stop after completion, skipping, or seven days. New accounts cannot reuse existing usernames, Telegram usernames, or Discord usernames. Existing duplicate accounts and notification fallback behavior are preserved. Updated screens were checked across desktop, tablet, and mobile.

@@ -147,7 +147,7 @@ window.onload = function() {
         {% if existing_results_image_url %}
             <div class="mt-2 d-flex align-items-center gap-3">
                 {% if test.results_image_key and (test.results_image_key|lower)[-4:] == '.pdf' %}
-                    <div class="d-flex align-items-center justify-content-center" style="width: 88px; height: 88px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
+                    <div class="d-flex align-items-center justify-content-center" style="width: 88px; height: 88px; border-radius: 8px; border: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg);">
                         <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
                     </div>
                 {% else %}

@@ -144,7 +144,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                 data-file-kind="{{ test_results_file_kind or 'image' }}"
                                 data-image-title="{{ test.title }}">
                             {% if (test_results_file_kind or 'image') == 'pdf' %}
-                                <div class="d-flex align-items-center justify-content-center" style="width: 90px; height: 90px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
+                                <div class="d-flex align-items-center justify-content-center" style="width: 90px; height: 90px; border-radius: 8px; border: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg);">
                                     <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
                                 </div>
                             {% else %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Privacy Policy - Group Test Manager{% endblock %}
+{% block title %}Privacy Policy - {{ brand_name }}{% endblock %}
 
 {% block content %}
 <article class="legal-document mx-auto bg-white rounded p-4 p-md-5 shadow-sm">
@@ -8,7 +8,7 @@
     <p class="text-muted"><strong>Effective date:</strong> {{ legal_effective_date }}</p>
 
     <p>
-        This Privacy Policy explains how the operator of this Group Test Manager deployment ("Operator," "we," "us,"
+        This Privacy Policy explains how the operator of this {{ brand_name }} deployment ("Operator," "we," "us,"
         or "our"), {{ legal_operator_name }}, collects, uses, discloses, and retains information when you use the website, an account, a Telegram
         or Discord bot, automated report analysis, notifications, or related features (collectively, the "Service").
         The Operator is responsible for the Service's processing; Telegram, Discord, Google, laboratories, payment

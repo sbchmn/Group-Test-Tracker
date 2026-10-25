@@ -29,6 +29,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 	- [Update Your Participation Status](#update-your-participation-status)
 	- [View Results (My Results)](#view-results-my-results)
 - [Admin How-To](#admin-how-to)
+	- [Branding and Appearance](#branding-and-appearance)
 	- [Create Group Test](#create-group-test)
 	- [Edit Group Test](#edit-group-test)
 	- [Delete Group Test](#delete-group-test)
@@ -65,6 +66,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 ## What This App Includes
 
 - Account registration, login, logout, profile management, and password reset.
+- Optional customer branding with private drafts, responsive previews, publication history, and light/dark themes.
 - Group test lifecycle management (recruiting, ready_for_payment, testing, closed).
 - Participant request, approve, deny, reopen, and status management.
 - Cost split automation with donor-credit logic.
@@ -87,6 +89,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 - Data models: [app/models.py](app/models.py)
 - Main routes/forms/business logic: [app/routes.py](app/routes.py)
 - Notification transport and templating: [app/notifications.py](app/notifications.py)
+- Branding settings and workflows: [app/branding.py](app/branding.py), [app/branding_routes.py](app/branding_routes.py)
 - Object storage and image validation: [app/storage.py](app/storage.py)
 - Templates: [app/templates](app/templates)
 - Migrations: [migrations/versions](migrations/versions)
@@ -289,6 +292,58 @@ Note:
 - You must be an approved participant whose lab-fee payment an administrator has verified (or admin) to open group test result images.
 
 ## Admin How-To
+
+### Branding and Appearance
+
+Open **Admin → Settings → Branding & Appearance**. Any customer administrator can
+enable customer branding; no platform approval or separate feature entitlement is
+required. Your existing `customer.grouptest.online` address stays the same.
+
+Enter an app name, optional short name, tagline and welcome text. Upload a primary
+logo, optional logo for dark backgrounds, and browser icon. Images must be PNG,
+JPEG, or WebP, no larger than 2 MB or 16 megapixels. Images are resized and stored
+in GTM's database, so branding does not require result-file storage. Include the
+database in your backups to retain branding images and revision history.
+
+Choose System Sans, Figtree, or Lora, plus accent, navigation, and surface colors
+for light and dark themes. Fonts are served locally. Link and button text colors
+adjust for readability; invalid surface colors show a contrast error. Layouts and
+status colors remain consistent across customers.
+
+**Save draft**, review the private previews at phone/tablet/desktop sizes, then
+**Publish saved draft**. Draft changes do not affect members or outgoing messages.
+Preview pages use sample content with interactions disabled. Published history
+records the administrator, action, and timestamp; choose a revision to restore
+and publish it. Concurrent edits are rejected with a request to reload.
+
+**Discard draft changes** copies the published settings back into the editor.
+**Return to GTM branding** disables customer branding while keeping your custom
+draft. Legal operator details, integration credentials, and member preferences
+are not reset. A small “Powered by GTM” credit remains on branded sites and in
+branded email footers and bot help output.
+
+Optional support email and HTTPS user/admin help links replace the corresponding
+branding links. Administrator help remains restricted to admins. Built-in Terms
+and Privacy pages use your brand and operator/contact details; blank legal fields
+retain deployment-level defaults. Platform billing and support-access endpoints
+are unchanged.
+
+Published branding supplies the default email sender display name and a branded
+email wrapper, preserving the original message body. It also supplies default bot
+wording and the default Discord webhook name. Existing custom templates and
+explicit webhook names remain intact. Templates can use `{{ brand_name }}`,
+`{{ brand_short_name }}`, `{{ brand_tagline }}`, and `{{ brand_support_email }}`.
+Sender addresses, bot usernames/avatars, and credentials remain managed through
+their existing integrations. Email logos use the configured public service URL;
+when none is configured, the email still includes the brand name without a logo.
+
+Members can change **Appearance** in the footer to Light, Dark, Device preference,
+or Site default. Signed-in choices follow the account across devices; anonymous
+choices are remembered in that browser. Device preference reacts to device theme
+changes. Existing deployments default to the original light appearance.
+
+Apply migration `e7a9b1c3d5f6` with `flask --app run db upgrade` before deploying
+this code. No live database is changed by the automated review scripts.
 
 ### Create Group Test
 

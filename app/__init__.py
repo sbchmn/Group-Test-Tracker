@@ -190,6 +190,10 @@ def create_app(config_overrides=None):
     app.register_blueprint(control_plane_bp)
     from .root_routes import root_bp
     app.register_blueprint(root_bp)
+    from .branding_routes import branding_bp
+    app.register_blueprint(branding_bp)
+    from .branding import context as branding_context
+    app.context_processor(branding_context)
 
     # === Notification defaults ===
     with app.app_context():

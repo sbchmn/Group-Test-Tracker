@@ -112,7 +112,9 @@ def contrast(first, second):
 
 
 def foreground(color):
-    return '#ffffff' if contrast(color, '#ffffff') >= contrast(color, '#000000') else '#000000'
+    # Keep conventional white labels on saturated primary buttons whenever they
+    # meet the text contrast requirement; pale accents still need dark labels.
+    return '#ffffff' if contrast(color, '#ffffff') >= 4.5 else '#000000'
 
 
 def hover_color(color):

@@ -234,8 +234,10 @@ class BrandingTests(unittest.TestCase):
             self.assertEqual(effective_settings()['name'], 'New published name')
 
     def test_bright_accents_get_readable_links_buttons_and_hover_states(self):
+        self.assertEqual(foreground(DEFAULTS['light_accent']), '#ffffff')
+        self.assertEqual(foreground('#ffff00'), '#000000')
         for mode, surface in (('light', '#ffffff'), ('dark', '#212529')):
-            for accent in ('#ffff00', '#ffffff', '#000000', '#887766'):
+            for accent in (DEFAULTS['light_accent'], DEFAULTS['dark_accent'], '#ffff00', '#ffffff', '#000000', '#887766'):
                 self.assertGreaterEqual(contrast(link_color(accent, surface, mode), surface), 4.5)
                 self.assertGreaterEqual(contrast(accent, foreground(accent)), 4.5)
                 self.assertGreaterEqual(contrast(hover_color(accent), foreground(accent)), 4.5)

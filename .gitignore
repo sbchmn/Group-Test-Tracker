@@ -20,3 +20,6 @@ tmp_debug.py
 *-stderr.txt
 *-stdout.txt
 test_output.txt
+
+# Generated review screenshots (keep review scripts and written reports)
+/docs/reviews/**/*.[pP][nN][gG]

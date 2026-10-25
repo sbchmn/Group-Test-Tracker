@@ -15,7 +15,7 @@ body { font-family: var(--gtm-font); background: var(--bs-tertiary-bg); color: v
 .brand-logo-dark { display: var(--gtm-logo-alternative); }
 .brand-short-name { display: none; }
 .brand-full-name, .brand-short-name { min-width: 0; }
-.btn-primary { --bs-btn-bg: var(--gtm-accent); --bs-btn-border-color: var(--gtm-accent); --bs-btn-color: var(--gtm-accent-text); --bs-btn-hover-bg: var(--gtm-accent-hover); --bs-btn-hover-border-color: var(--bs-btn-hover-bg); --bs-btn-hover-color: var(--gtm-accent-text); --bs-btn-active-bg: var(--bs-btn-hover-bg); --bs-btn-active-color: var(--gtm-accent-text); }
+.btn-primary { --bs-btn-bg: var(--gtm-accent); --bs-btn-border-color: var(--gtm-accent); --bs-btn-color: var(--gtm-accent-text); --bs-btn-hover-bg: var(--gtm-accent-hover); --bs-btn-hover-border-color: var(--bs-btn-hover-bg); --bs-btn-hover-color: var(--gtm-accent-text); --bs-btn-active-bg: var(--bs-btn-hover-bg); --bs-btn-active-color: var(--gtm-accent-text); --bs-btn-active-border-color: var(--gtm-accent-hover); --bs-btn-disabled-bg: var(--gtm-accent); --bs-btn-disabled-border-color: var(--gtm-accent); --bs-btn-disabled-color: var(--gtm-accent-text); }
 .btn-outline-primary { --bs-btn-color: var(--gtm-link); --bs-btn-border-color: var(--gtm-link); --bs-btn-hover-bg: var(--gtm-accent); --bs-btn-hover-color: var(--gtm-accent-text); --bs-btn-hover-border-color: var(--gtm-accent); --bs-btn-active-bg: var(--gtm-accent); --bs-btn-active-color: var(--gtm-accent-text); }
 .text-primary { color: var(--gtm-link) !important; }
 .bg-primary { background-color: var(--gtm-accent) !important; color: var(--gtm-accent-text) !important; }

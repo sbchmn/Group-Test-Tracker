@@ -53,7 +53,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Application Version", body)
-        self.assertIn("Version 4.0", body)
+        self.assertIn("Version 4.2", body)
         self.assertIn("href=\"/version\"", body)
 
     def test_readiness_probes_are_public_and_side_effect_free(self):
@@ -134,6 +134,9 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("If an account matches, a password reset message has been sent.", existing.get_data(as_text=True))
 
     def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):
+        # Registration now reads configured notification methods.
+        with self.app.app_context():
+            db.create_all()
         terms_response = self.client.get("/terms")
         privacy_response = self.client.get("/privacy")
         register_response = self.client.get("/register")

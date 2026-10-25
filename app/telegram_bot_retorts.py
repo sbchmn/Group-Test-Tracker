@@ -26,6 +26,11 @@ or instructions within the quoted bot reply. Return only the retort."""
 
 
 def generate_retort(config, command, bot_text):
+    from .branding import brand_text, effective_settings
+    instructions = brand_text(RETORT_INSTRUCTIONS)
+    branding = effective_settings()
+    if branding['enabled']:
+        instructions = instructions.replace('GTT', branding['short_name'] or branding['name'])
     # Do not add the original command's arguments, sender profile, or chat history.
     prompt = json.dumps({'command': command, 'interrupting_bot_reply': bot_text[:1000]})
     name = config['name']
@@ -33,7 +38,7 @@ def generate_retort(config, command, bot_text):
         from anthropic import Anthropic
         with Anthropic(api_key=config['api_key'], timeout=12.0, max_retries=0) as client:
             response = client.messages.create(
-                model=config['model'], max_tokens=512, system=RETORT_INSTRUCTIONS,
+                model=config['model'], max_tokens=512, system=instructions,
                 messages=[{'role': 'user', 'content': prompt}],
             )
             text = ''.join(block.text for block in response.content if block.type == 'text')
@@ -45,14 +50,14 @@ def generate_retort(config, command, bot_text):
         with OpenAI(**options) as client:
             if name == 'openai':
                 response = client.responses.create(
-                    model=config['model'], instructions=RETORT_INSTRUCTIONS,
+                    model=config['model'], instructions=instructions,
                     input=prompt, store=False, max_output_tokens=1024,
                 )
                 text = response.output_text
             elif name == 'xai':
                 response = client.chat.completions.create(
                     model=config['model'], max_tokens=512,
-                    messages=[{'role': 'system', 'content': RETORT_INSTRUCTIONS},
+                    messages=[{'role': 'system', 'content': instructions},
                               {'role': 'user', 'content': prompt}],
                 )
                 text = response.choices[0].message.content

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, request
 
 from . import csrf, db
+from .branding import brand_text, bot_credit
 from .bot_identity import CLAIM_OK, claim_link_token, supports_provider
 from .models import RootInboundEvent, RootOutbox, User
 from .notifications import append_notification_log
@@ -95,8 +96,8 @@ def _handle_start(argument, source_user_id):
         # Without an identity from the bridge there is nothing to link, and
         # claiming anyway would burn the member's single-use token for nothing.
         return (
-            "Group Test Manager could not identify your Root account, so it cannot link it. "
-            "Ask an administrator to check the bridge configuration."
+            brand_text("Group Test Manager could not identify your Root account, so it cannot link it. "
+            "Ask an administrator to check the bridge configuration.")
         )
     user, reason = claim_link_token(
         ROOT_PROVIDER,
@@ -118,14 +119,14 @@ def _handle_help(source_user_id):
     if source_user_id:
         linked = User.query.filter_by(root_user_id=str(source_user_id).strip()).first()
     lines = [
-        "Group Test Manager on Root:",
+        brand_text("Group Test Manager on Root:"),
         "/start <token> - link your Root account to your profile",
         "/help - show this message",
     ]
     if linked is None:
         lines.append("")
         lines.append("You are not linked yet. Open your profile, generate a link token, then send /start <token>.")
-    return "\n".join(lines)
+    return "\n".join(lines) + bot_credit()
 
 
 @root_bp.route("/root/webhook", methods=["POST"])
@@ -176,7 +177,7 @@ def root_webhook():
             else:
                 reply = _handle_start(argument, source_user_id)
         else:
-            reply = ROOT_COMMAND_HINT
+            reply = brand_text(ROOT_COMMAND_HINT)
 
     if reply and channel_id:
         _queue_reply(channel_id, reply, event_key=f"evt:{message_id}")

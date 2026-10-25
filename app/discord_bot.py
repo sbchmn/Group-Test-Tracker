@@ -22,6 +22,7 @@ from .models import (
     TelegramCommandTemplate,
     User,
 )
+from .branding import brand_text, bot_credit
 from .bot_identity import claim_link_token
 from .links import safe_http_url
 from .notifications import append_notification_log, render_notification_template, send_discord_status_channel_message
@@ -135,7 +136,10 @@ def _build_help_text():
             base_lines.append("Custom commands:")
             for template in custom_commands:
                 base_lines.append(f"/{_normalize_command_name(template.command)} - {template.description or 'Custom reply'}")
-    return "\n".join(base_lines)
+        credit = bot_credit(format='markdown')
+        if credit:
+            base_lines[0] = brand_text('Group Test Manager on Discord:')
+    return "\n".join(base_lines) + credit
 
 
 async def _run_db(fn, *args, **kwargs):
@@ -152,7 +156,7 @@ def _linked_user_response(discord_user_id, builder, *args):
     if user is None:
         return "Your Discord account is not linked yet. Run /start <token> from your profile."
     if not user.is_active:
-        return "This Group Test Manager account is deactivated. Contact an administrator."
+        return brand_text("This Group Test Manager account is deactivated. Contact an administrator.")
     return builder(user, *args)
 
 
@@ -163,9 +167,11 @@ def _link_discord_account(token_value, discord_user_id, discord_username):
     if link_error == "discord-owned":
         return "This Discord account is already linked to a different user."
     if link_error == "user-owned":
-        return "This Group Test Manager account is already linked to a different Discord account."
+        return brand_text("This Group Test Manager account is already linked to a different Discord account.")
+    if link_error == "username-owned":
+        return "That Discord username is already recorded on another account. Contact an administrator to resolve it before linking."
     if link_error == "inactive-user":
-        return "This Group Test Manager account is deactivated. Contact an administrator."
+        return brand_text("This Group Test Manager account is deactivated. Contact an administrator.")
     if link_error in {"missing-user", "conflict"} or user is None:
         return "The linked user no longer exists or the link was claimed concurrently."
     return "Discord account linked successfully."
@@ -241,7 +247,7 @@ def _discord_public_results_access(user_id, channel_id, guild_id):
         if dm_user is None:
             return False, 'Your Discord account is not linked yet. Run /start <token> from your profile.'
         if not dm_user.is_active:
-            return False, 'This Group Test Manager account is deactivated. Contact an administrator.'
+            return False, brand_text('This Group Test Manager account is deactivated. Contact an administrator.')
     return True, None
 
 
@@ -602,7 +608,7 @@ def _run_dynamic_command(template_id, discord_user_id, display_name, channel_id,
     if user is None:
         return "Your Discord account is not linked yet. Run /start <token> from your profile."
     if not user.is_active:
-        return "This Group Test Manager account is deactivated. Contact an administrator."
+        return brand_text("This Group Test Manager account is deactivated. Contact an administrator.")
 
     class CommandInteraction:
         def __init__(self):
@@ -687,13 +693,13 @@ class DiscordBot(commands.Bot):
             text = await _run_db(_build_help_text)
             await interaction.edit_original_response(content=text)
 
-        @self.tree.command(name="start", description="Link this Discord account with Group Test Manager")
+        @self.tree.command(name="start", description="Link this Discord account with your website account")
         @app_commands.describe(token="Link token from your profile page")
         async def start_command(interaction: discord.Interaction, token: str | None = None):
             token_value = str(token or "").strip()
             if not token_value:
                 await interaction.response.send_message(
-                    "Open your Group Test Manager profile, generate a Discord link token, then run /start <token>.",
+                    brand_text("Open your Group Test Manager profile, generate a Discord link token, then run /start <token>."),
                     ephemeral=True,
                 )
                 return
@@ -703,7 +709,7 @@ class DiscordBot(commands.Bot):
                 _link_discord_account,
                 token_value,
                 interaction.user.id,
-                _discord_display_name(interaction),
+                str(interaction.user.name),
             )
             await interaction.edit_original_response(content=text)
 

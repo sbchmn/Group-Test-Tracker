@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ app_name }} Version{% endblock %}
+{% block title %}{{ brand_name }} Version{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
@@ -8,7 +8,8 @@
         <div class="card">
             <div class="card-body">
                 <p class="text-uppercase text-muted small mb-2">Application Version</p>
-                <h1 class="h3 mb-3">{{ app_name }} <span class="text-muted">v{{ app_version }}</span></h1>
+                <h1 class="h3 mb-3">{{ brand_name }} <span class="text-muted">v{{ app_version }}</span></h1>
+                {% if branding.enabled %}<p class="small text-muted"><a class="text-muted" href="https://grouptest.online">Powered by {{ app_name }}</a></p>{% endif %}
                 <p class="mb-0">{{ app_release }}</p>
                 <hr>
                 <h2 class="h5">Provisioned Plan</h2>

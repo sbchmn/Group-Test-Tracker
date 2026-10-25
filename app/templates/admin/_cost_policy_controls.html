@@ -11,12 +11,12 @@
         {% if test.costs_locked %}
         <form method="POST" action="{{ url_for('main.set_buy_in_price', test_id=test.id) }}" class="mt-3">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <label for="defaultBuyIn" class="form-label small">Default late buy-in price ($)</label>
+            <label for="defaultBuyIn" class="form-label small">Default additional member buy-in ($)</label>
             <div class="input-action" style="max-width: 440px;">
                 <input type="number" id="defaultBuyIn" name="buy_in_amount" class="form-control" min="0" step="0.01" inputmode="decimal" required {% if test.late_buy_in_price is not none %}value="{{ '%.2f'|format(test.late_buy_in_price) }}"{% endif %}>
                 <button class="btn btn-outline-primary" type="submit">Save Default</button>
             </div>
-            <div class="form-text">Only future late buy-ins use this default. Their payments do not change the original cost-sharing pool.</div>
+            <div class="form-text">Only future additional members use this default. They are approved after costs are frozen and do not count toward the original base cost split.</div>
         </form>
         {% endif %}
     </div>

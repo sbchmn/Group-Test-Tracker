@@ -29,6 +29,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 	- [Update Your Participation Status](#update-your-participation-status)
 	- [View Results (My Results)](#view-results-my-results)
 - [Admin How-To](#admin-how-to)
+	- [Branding and Appearance](#branding-and-appearance)
 	- [Create Group Test](#create-group-test)
 	- [Edit Group Test](#edit-group-test)
 	- [Delete Group Test](#delete-group-test)
@@ -65,6 +66,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 ## What This App Includes
 
 - Account registration, login, logout, profile management, and password reset.
+- Optional customer branding with private drafts, responsive previews, publication history, and light/dark themes.
 - Group test lifecycle management (recruiting, ready_for_payment, testing, closed).
 - Participant request, approve, deny, reopen, and status management.
 - Cost split automation with donor-credit logic.
@@ -87,6 +89,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 - Data models: [app/models.py](app/models.py)
 - Main routes/forms/business logic: [app/routes.py](app/routes.py)
 - Notification transport and templating: [app/notifications.py](app/notifications.py)
+- Branding settings and workflows: [app/branding.py](app/branding.py), [app/branding_routes.py](app/branding_routes.py)
 - Object storage and image validation: [app/storage.py](app/storage.py)
 - Templates: [app/templates](app/templates)
 - Migrations: [migrations/versions](migrations/versions)
@@ -290,6 +293,58 @@ Note:
 
 ## Admin How-To
 
+### Branding and Appearance
+
+Open **Admin → Settings → Branding & Appearance**. Any customer administrator can
+enable customer branding; no platform approval or separate feature entitlement is
+required. Your existing `customer.grouptest.online` address stays the same.
+
+Enter an app name, optional short name, tagline and welcome text. Upload a primary
+logo, optional logo for dark backgrounds, and browser icon. Images must be PNG,
+JPEG, or WebP, no larger than 2 MB or 16 megapixels. Images are resized and stored
+in GTM's database, so branding does not require result-file storage. Include the
+database in your backups to retain branding images and revision history.
+
+Choose System Sans, Figtree, or Lora, plus accent, navigation, and surface colors
+for light and dark themes. Fonts are served locally. Link and button text colors
+adjust for readability; invalid surface colors show a contrast error. Layouts and
+status colors remain consistent across customers.
+
+**Save draft**, review the private previews at phone/tablet/desktop sizes, then
+**Publish saved draft**. Draft changes do not affect members or outgoing messages.
+Preview pages use sample content with interactions disabled. Published history
+records the administrator, action, and timestamp; choose a revision to restore
+and publish it. Concurrent edits are rejected with a request to reload.
+
+**Discard draft changes** copies the published settings back into the editor.
+**Return to GTM branding** disables customer branding while keeping your custom
+draft. Legal operator details, integration credentials, and member preferences
+are not reset. A small “Powered by GTM” credit remains on branded sites and in
+branded email footers and bot help output.
+
+Optional support email and HTTPS user/admin help links replace the corresponding
+branding links. Administrator help remains restricted to admins. Built-in Terms
+and Privacy pages use your brand and operator/contact details; blank legal fields
+retain deployment-level defaults. Platform billing and support-access endpoints
+are unchanged.
+
+Published branding supplies the default email sender display name and a branded
+email wrapper, preserving the original message body. It also supplies default bot
+wording and the default Discord webhook name. Existing custom templates and
+explicit webhook names remain intact. Templates can use `{{ brand_name }}`,
+`{{ brand_short_name }}`, `{{ brand_tagline }}`, and `{{ brand_support_email }}`.
+Sender addresses, bot usernames/avatars, and credentials remain managed through
+their existing integrations. Email logos use the configured public service URL;
+when none is configured, the email still includes the brand name without a logo.
+
+Members can change **Appearance** in the footer to Light, Dark, Device preference,
+or Site default. Signed-in choices follow the account across devices; anonymous
+choices are remembered in that browser. Device preference reacts to device theme
+changes. Existing deployments default to the original light appearance.
+
+Apply migration `e7a9b1c3d5f6` with `flask --app run db upgrade` before deploying
+this code. No live database is changed by the automated review scripts.
+
 ### Create Group Test
 
 1. Open Admin -> Create Test.
@@ -352,6 +407,14 @@ Deploy this change with the normal database migration (`flask --app run.py db up
 Shares freeze when a test leaves Recruiting, before status notifications or digests are queued. Returning to Recruiting keeps them frozen until an administrator uses **Unlock and Recalculate**, reviews the proposed charges, and confirms. Outside Recruiting, **Review Cost Changes** provides a one-time recalculation with confirmation and keeps pricing frozen. A preview expires if the roster, payments, or cost inputs change.
 
 Participants approved after freezing are late buy-ins. They default to the frozen non-donor share, with an individual override on approval or the participant editor. Administrators can also change the default for future buy-ins without altering existing charges. Late buy-ins remain outside the original cost-sharing pool, including after an explicit unlock. Bulk approval uses the saved default; if no unambiguous default exists, set or confirm one first. No partial batch is approved on a pricing error.
+
+These participants are labeled **Additional member** in participant lists and
+their own dashboard/test status. The cost summary explains that additional members
+do not count toward the original participant base or donor refund calculation;
+their buy-in charges are separate. **How the split works** remains collapsible and
+is available on older tests too. If an older test has no original saved breakdown,
+the explanation uses its current cost-sharing details while preserving individual
+assigned charges.
 
 The group detail list retains one **Amount Owed** column: the assigned charge less the recorded payment, with a minimum of zero. Frozen summaries and exports use the saved cost basis. Payment forms, notification template `amount_owed`, bot status, and export participant charges use each participant's assigned charge, including individual overrides. Recalculation preserves recorded payments, payment evidence, and verification records.
 

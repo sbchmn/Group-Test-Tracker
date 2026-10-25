@@ -27,14 +27,16 @@
 
                     <div class="mb-3">
                         {{ form.tg_username.label(class="form-label") }}
-                        {{ form.tg_username(class="form-control") }}
+                        {{ form.tg_username(class="form-control" + (" is-invalid" if form.tg_username.errors else "")) }}
+                        {% for error in form.tg_username.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
                         <div class="form-text">Optional display username. Delivery uses linked Telegram chat, not username alone.</div>
                     </div>
 
                     <div class="mb-3">
                         {{ form.discord_username.label(class="form-label") }}
-                        {{ form.discord_username(class="form-control") }}
-                        <div class="form-text">Optional Discord display name. Delivery uses linked Discord user ID, not display name alone.</div>
+                        {{ form.discord_username(class="form-control" + (" is-invalid" if form.discord_username.errors else "")) }}
+                        {% for error in form.discord_username.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
+                        <div class="form-text">Optional unique Discord username, rather than a server nickname. Delivery uses the linked Discord user ID.</div>
                     </div>
 
                     {% if telegram_enabled %}

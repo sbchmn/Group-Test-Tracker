@@ -66,6 +66,17 @@ Only an unambiguous assigned rate is suitable as a default for later buyers.
     return result
 
 
+def explanation_costs(test, displayed_costs):
+    """A read-only worked example when the original breakdown was not recorded.
+
+    Keep reference arithmetic separate from assigned historical charges. Nothing
+    here creates a snapshot, reprices participants, or commits database changes.
+    """
+    if not displayed_costs.get('legacy'):
+        return displayed_costs
+    return {**test.calculate_live_costs(), 'inputs': _inputs(test)}
+
+
 def ensure_snapshot(test):
     if test.costs_locked and not test.cost_snapshot:
         test.cost_snapshot = legacy_snapshot(test)

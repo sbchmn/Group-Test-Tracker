@@ -30,6 +30,7 @@ import ipaddress
 import html
 import re
 
+from .branding import brand_text, bot_credit
 from . import db, csrf, limiter
 import os
 import json
@@ -56,7 +57,8 @@ from .models import (
 )
 from . import costs as cost_policy
 from .costs import CostPolicyError
-from .usernames import username_field
+from .usernames import username_field, unique_identity_field, identity_key
+from .notification_setup import clear_setup, resolve_setup
 from . import account_merge
 from .system_accounts import is_reserved_identity
 from .links import safe_http_url, validate_http_link
@@ -227,13 +229,20 @@ class LoginForm(FlaskForm):
     submit = SubmitField('Login')
 
 
-class RegisterForm(FlaskForm):
+class AccountIdentityForm(FlaskForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.identity_user_id = getattr(kwargs.get('obj'), 'id', None)
+
+
+class RegisterForm(AccountIdentityForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email(), Length(max=120)])
     password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
-    tg_username = StringField('Telegram Username (optional)', validators=[Optional(), Length(max=80)])
-    discord_username = StringField('Discord Username (optional)', validators=[Optional(), Length(max=80)])
+    tg_username = StringField('Telegram Username (optional)', validators=[Optional(), Length(max=80), unique_identity_field])
+    discord_username = StringField('Discord Username (optional)', validators=[Optional(), Length(max=80), unique_identity_field])
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     submit = SubmitField('Register')
 
 
@@ -357,12 +366,12 @@ class ParticipantStatusForm(FlaskForm):
     submit = SubmitField('Update My Status')
 
 
-class UserForm(FlaskForm):
+class UserForm(AccountIdentityForm):
     """Form for admins to create/edit users."""
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email()])
-    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
-    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80), unique_identity_field])
+    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80), unique_identity_field])
     is_admin = BooleanField('Administrator')
     is_active = BooleanField('Active', default=True)
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
@@ -374,12 +383,12 @@ class UserForm(FlaskForm):
     submit = SubmitField('Save User')
 
 
-class ProfileForm(FlaskForm):
+class ProfileForm(AccountIdentityForm):
     """Form for users to edit their own profile details."""
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email()])
-    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
-    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80), unique_identity_field])
+    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80), unique_identity_field])
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
     notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
@@ -777,7 +786,7 @@ def _telegram_testing_message(config_map):
     register_url = f"{base_url}{url_for('main.register')}"
     login_url = f"{base_url}{url_for('main.login')}"
     return (
-        "To join and view group testing, sign up or log in at Group Test Manager.\n"
+        f"To join and view group testing, sign up or log in at {brand_text('Group Test Manager')}.\n"
         f"Sign up: {register_url}\n"
         f"Log in: {login_url}"
     )
@@ -1484,6 +1493,11 @@ def register():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     form = RegisterForm()
+    _apply_available_channels(form)
+    form.notification_channel.choices = [
+        (name, label) for name, label in form.notification_channel.choices
+        if name == 'email' or channel_link_available(name, _config_values_map())
+    ]
     if form.validate_on_submit():
         if is_reserved_identity(form.username.data, form.email.data):
             flash('That username or email is reserved.', 'warning')
@@ -1502,8 +1516,16 @@ def register():
             discord_username=form.discord_username.data or None,
         )
         user.set_password(form.password.data)
+        if form.notification_channel.data != 'email':
+            user.pending_notification_channel = form.notification_channel.data
+            user.notification_setup_expires_at = datetime.utcnow() + timedelta(days=7)
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return render_template('register.html', form=form)
 
         base_url = str(
             NotificationConfig.query.filter_by(key='service_base_url').first().value if NotificationConfig.query.filter_by(key='service_base_url').first() else ''
@@ -1545,6 +1567,10 @@ def login():
         ):
             login_user(user, remember=form.remember.data)
             flash(f'Welcome back, {user.username}!', 'success')
+            pending = resolve_setup(user)
+            db.session.commit()
+            if pending:
+                return redirect(url_for('main.notification_setup', next=_safe_next_url(request.args.get('next'))))
             next_page = _safe_next_url(request.args.get('next'))
             return redirect(next_page or url_for('main.dashboard'))
         flash('Invalid username or password.', 'danger')
@@ -1612,6 +1638,54 @@ def password_reset():
     return render_template('password_reset.html', form=form)
 
 
+@main_bp.route('/notification-setup', methods=['GET', 'POST'])
+@login_required
+def notification_setup():
+    """A skippable, one-time linking step after normal authentication."""
+    destination = _safe_next_url(request.args.get('next')) or url_for('main.dashboard')
+    form = FlaskForm()
+    user = User.query.filter_by(id=current_user.id).with_for_update().populate_existing().one()
+    valid_post = form.validate_on_submit()
+    if valid_post and request.form.get('action') == 'skip':
+        # Honor an explicit choice even if the bot completed linking while this
+        # page was open in another tab.
+        user.notification_channel = 'email'
+        clear_setup(user)
+        db.session.commit()
+        flash('Your notification preference is Email. You can link another method in My Profile anytime.', 'success')
+        return redirect(destination)
+    channel = user.pending_notification_channel
+    pending = resolve_setup(user)
+    if not pending:
+        db.session.commit()
+        label = dict(notification_channel_choices()).get(user.notification_channel, 'Email')
+        flash(f'Your notification preference is {label}. You can change it in My Profile anytime.', 'success' if label != 'Email' else 'info')
+        return redirect(destination)
+    if not channel_link_available(channel, _config_values_map()):
+        clear_setup(user)
+        db.session.commit()
+        flash('That messaging integration is no longer available. Your notification preference remains Email.', 'info')
+        return redirect(destination)
+    if valid_post:
+        action = request.form.get('action')
+        if action == 'generate':
+            token = issue_link_token(channel, user)
+            # Registration tokens cannot outlive the setup window.
+            token.expires_at = min(token.expires_at, user.notification_setup_expires_at)
+            db.session.commit()
+            return redirect(url_for('main.notification_setup', next=_safe_next_url(request.args.get('next'))))
+        if action == 'check':
+            flash('Your account is not linked yet. Complete the steps below, then check again, or use Email instead.', 'info')
+    token = active_link_token(channel, user)
+    return render_template(
+        'notification_setup.html', form=form, channel=channel,
+        channel_label=dict(notification_channel_choices())[channel],
+        token=token,
+        link_url=_build_telegram_deep_link(token.token) if token and channel == 'telegram' else None,
+        expires_at=user.notification_setup_expires_at,
+    )
+
+
 @main_bp.route('/admin/users/<int:user_id>/send-password-reset', methods=['POST'])
 @login_required
 @admin_required
@@ -1637,6 +1711,7 @@ def send_password_reset_admin(user_id):
 def profile():
     """Allow users to update their own profile info and password."""
     form = ProfileForm(obj=current_user)
+    form.identity_user_id = current_user.id
     _apply_available_channels(form, current=current_user.notification_channel)
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
@@ -1671,6 +1746,7 @@ def profile():
         current_user.discord_username = form.discord_username.data or None
         current_user.receive_group_test_notifications = form.receive_group_test_notifications.data
         current_user.notification_channel = form.notification_channel.data or 'email'
+        clear_setup(current_user)
         current_user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
         current_user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
         current_user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
@@ -1682,7 +1758,12 @@ def profile():
             current_user.session_epoch += 1
             flash('Password updated.', 'success')
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return redirect(url_for('main.profile'))
         if changing_password:
             # The epoch rotation already killed other sessions; end this one cleanly
             # rather than depending on the stale cookie being rejected downstream.
@@ -2333,16 +2414,25 @@ def _telegram_help_custom_commands_block():
 
 
 def _telegram_help_message():
-    return (
-        "Group Test Manager bot commands:\n"
+    body = (
+        brand_text("Group Test Manager bot commands:\n"
         "/tests - list tests you can see\n"
         "/mytests - list tests you are interacting with\n"
         "/testing - get signup/login links for group testing\n"
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/submitcoa <public link> - submit a COA for administrator review (or attach a PDF/image)\n"
-        "/help - show this help message"
+        "/help - show this help message")
     ) + _telegram_help_custom_commands_block()
+    credit = bot_credit(format='html')
+    return html.escape(body) + credit if credit else body
+
+
+def _send_telegram_help(chat_id):
+    from .branding import effective_settings
+    if effective_settings()['enabled']:
+        return send_telegram_chat_message(chat_id, _telegram_help_message(), parse_mode='HTML')
+    return send_telegram_chat_message(chat_id, _telegram_help_message())
 
 
 def _public_results_telegram_tag_keyboard(tags, page, total_pages):
@@ -2921,7 +3011,7 @@ def telegram_webhook():
                     send_telegram_chat_message(chat_id, 'We found a possible profile match by username. For security, generate a link token from your profile and use /start <token> to confirm.')
                     db.session.commit()
                     return jsonify({'ok': True})
-            send_telegram_chat_message(chat_id, 'Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.')
+            send_telegram_chat_message(chat_id, brand_text('Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.'))
             db.session.commit()
             return jsonify({'ok': True})
 
@@ -2937,6 +3027,7 @@ def telegram_webhook():
                 'inactive-user': 'This account is deactivated. Contact an administrator for account support.',
                 'external-owned': 'This Telegram account is already linked to a different user. Contact an admin for relink support.',
                 'user-owned': 'This account is already linked to a different Telegram user. Contact an admin for relink support.',
+                'username-owned': 'That Telegram username is already recorded on another account. Contact an administrator to resolve it before linking.',
             }
             send_telegram_chat_message(
                 chat_id,
@@ -2945,7 +3036,12 @@ def telegram_webhook():
             db.session.commit()
             return jsonify({'ok': True})
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            send_telegram_chat_message(chat_id, 'That account identity is already in use. Contact an administrator for linking support.')
+            return jsonify({'ok': True})
         send_telegram_chat_message(chat_id, 'Your Telegram account is now linked. Use /help to see available commands.')
         return jsonify({'ok': True})
 
@@ -2955,7 +3051,7 @@ def telegram_webhook():
     if linked_user is None:
         linked_user = User.query.filter_by(telegram_chat_id=chat_id).first()
     if linked_user is None:
-        send_telegram_chat_message(chat_id, 'Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.')
+        send_telegram_chat_message(chat_id, brand_text('Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.'))
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -2967,13 +3063,18 @@ def telegram_webhook():
     if telegram_user_id and not linked_user.telegram_user_id:
         linked_user.telegram_user_id = telegram_user_id
     if incoming_username and incoming_username != (linked_user.tg_username or '').strip().lstrip('@'):
-        linked_user.tg_username = incoming_username
+        handle_owner = User.query.filter(
+            User.tg_username_key == identity_key(incoming_username, handle=True),
+            User.id != linked_user.id,
+        ).first()
+        if handle_owner is None:
+            linked_user.tg_username = incoming_username
     if chat_id != (linked_user.telegram_chat_id or '').strip():
         linked_user.telegram_chat_id = chat_id
     db.session.commit()
 
     if lower == '/help':
-        send_telegram_chat_message(chat_id, _telegram_help_message())
+        _send_telegram_help(chat_id)
         return jsonify({'ok': True})
 
     if lower == '/tests':
@@ -3055,7 +3156,7 @@ def telegram_webhook():
     ):
         return jsonify({'ok': True})
 
-    send_telegram_chat_message(chat_id, _telegram_help_message())
+    _send_telegram_help(chat_id)
     return jsonify({'ok': True})
 
 
@@ -3171,6 +3272,7 @@ def test_detail(test_id):
         my_part=my_part,
         show_participant_list=show_participant_list,
         reimbursed_by_user=reimbursed_by_user,
+        cost_explanation=cost_policy.explanation_costs(test, costs),
         notify_form=form,
         notification_templates=templates,
         payment_options=payment_option_contexts,
@@ -3802,7 +3904,8 @@ def manage_participants(test_id):
     for p in parts:
         p.current_fair_share = p.amount_owed if test.costs_locked or p.is_late_buy_in else costs.get('donor_pays' if p.vial_donor else 'non_donor_pays', 0)
 
-    return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
+    return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs,
+                           cost_explanation=cost_policy.explanation_costs(test, costs))
 
 
 def _recalculate_approved_amounts_for_test(test):
@@ -4573,7 +4676,7 @@ def _builtin_testing_scope_allowed(chat_id, chat_type, message_thread_id=None):
 
 def _telegram_command_menu_entries(include_groups=False):
     descriptions = {
-        'start': 'Link your Group Test Manager account',
+        'start': brand_text('Link your Group Test Manager account'),
         'help': 'Show available bot commands',
         'tests': 'List tests you can see',
         'mytests': 'List your test requests and approvals',
@@ -4795,7 +4898,7 @@ def send_root_test_message():
     if not entitlement_enabled(entitlement_for('root')):
         abort(404)
 
-    if send_root_message('Test message from Group Test Manager.'):
+    if send_root_message(brand_text('Test message from Group Test Manager.')):
         flash('Root test message queued. It appears once the bridge polls for it.', 'success')
     else:
         flash('Could not queue the Root test message. Save a Root status channel ID first.', 'danger')
@@ -5950,7 +6053,12 @@ def create_user():
             flash('A temporary password was generated for the new user. Share it securely through a trusted channel.', 'warning')
 
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return render_template('admin/create_user.html', form=form)
         flash(f'User "{user.username}" created successfully.', 'success')
         return redirect(url_for('main.manage_users'))
 
@@ -5967,6 +6075,7 @@ def edit_user(user_id):
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.manage_users'))
     form = UserForm(obj=user)
+    form.identity_user_id = user.id
     _apply_available_channels(form, current=user.notification_channel)
     form.password.validators = [Optional(), Length(min=6)]
 
@@ -6000,6 +6109,7 @@ def edit_user(user_id):
             user.session_epoch += 1
         user.receive_group_test_notifications = form.receive_group_test_notifications.data
         user.notification_channel = form.notification_channel.data or 'email'
+        clear_setup(user)
         user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
         user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
         user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
@@ -6008,7 +6118,12 @@ def edit_user(user_id):
             user.set_password(form.password.data)
             flash('Password updated.', 'success')
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return render_template('admin/edit_user.html', form=form, user=user)
         flash(f'User "{user.username}" updated.', 'success')
         return redirect(url_for('main.manage_users'))
 

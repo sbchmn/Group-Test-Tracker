@@ -13,7 +13,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
 - **Current branch baseline:** `Test-Updates` including Discord custom-command media parity.
-- **Application version:** `4.0` from `app/version.py`.
+- **Application version:** `4.1` from `app/version.py`.
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and a Root-hosted bridge that polls this app for outbound messages and posts inbound events to it.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
 - **Deployment entry points:** `run.py` and `Procfile`, including a dedicated result-analysis worker process.
@@ -27,7 +27,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Completed payment-review workflow (2026-09-17):** Participants can no longer self-certify lab-fee payment. Reporting payment stores a claim, notifies administrators through the new default Payment Review notification template, and raises an item in the existing single Action Queue list with Confirm Payment/Reject Report buttons; Manage Participants gained clearly labelled Confirm Payment/Mark Paid/Unmark Paid/Reject Payment Report/Unapprove controls with verifier and timestamp audit fields. Only administrator confirmation sets `paid_lab`, which remains the results-access gate. Covered by the 23-revision migration chain and the full 215-test suite.
 - **Completed deactivation-revocation fix (2026-09-17):** Deactivating an account now takes effect immediately everywhere: `load_user` rejects inactive users so existing web session and remember-me cookies stop authenticating, the deactivation paths bump the session epoch as a second revocation layer, linked Telegram/Discord commands, link-token claims, admin reply updates, and password resets all deny inactive accounts, and administrators cannot deactivate themselves. Account-free public group bot behavior is intentionally unchanged. Covered by ten new security/notifications tests plus a fixed test-environment leak; the full suite passed 225 tests in 238.176s.
 - **License and attribution status:** The repository now uses a proprietary commercial license naming Solomon N. Bachman as copyright holder. Deployment, operation, copying, modification, and redistribution require prior written commercial authorization, subject to Third-Party Component licenses. The Version page shows only the license and attribution list; `THIRD_PARTY_NOTICES.md` records the 2026-09-17 direct/transitive installed-environment review. PyMuPDF requires an explicit AGPL-or-commercial licensing decision before redistribution.
-- **Release notes:** Added `CHANGELOG.md`, covering the undated initial schema baseline, dated 2026 feature waves, the current 4.0 managed SaaS release, schema history, and validation milestones.
+- **Release notes:** `CHANGELOG.md` covers the undated initial schema baseline, dated 2026 feature waves, the current 4.1 registration notification release, the prior 4.0 managed SaaS release, schema history, and validation milestones.
 
 ## Current Implementation Map — Group-Test Edit Regression
 

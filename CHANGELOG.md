@@ -62,6 +62,10 @@ identified explicitly below.
 - Added license and third-party attribution information to the Version page.
 - Identified PyMuPDF's AGPL/commercial licensing choice as a distribution gate.
 
+## 4.1 - 2026-10-24
+
+`3422a53` — Added notification preferences during registration and guided Telegram or Discord account linking after login. Email stays active until linking is completed, and reminders stop after completion, skipping, or seven days. New accounts cannot reuse existing usernames, Telegram usernames, or Discord usernames. Existing duplicate accounts and notification fallback behavior are preserved. Updated screens were checked across desktop, tablet, and mobile.
+
 ## 4.0 - 2026-09-16
 
 ### Managed SaaS and control-plane parity

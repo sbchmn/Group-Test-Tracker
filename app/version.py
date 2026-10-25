@@ -1,8 +1,8 @@
 """Application version metadata."""
 
 APP_NAME = "Group Test Manager"
-APP_VERSION = "4.0"
-APP_RELEASE = "Initial multi-bot administration and public-results release"
+APP_VERSION = "4.1"
+APP_RELEASE = "Registration notification preferences and account linking"
 PROJECT_LICENSE = "Proprietary Commercial License"
 PROJECT_LICENSE_NOTICE = (
 	"Deployment, operation, copying, modification, or redistribution requires a "

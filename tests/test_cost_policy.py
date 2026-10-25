@@ -1,4 +1,5 @@
 import json
+import html
 import re
 import tempfile
 import unittest
@@ -85,6 +86,70 @@ class CostPolicyTests(unittest.TestCase):
             self.assertTrue(test.costs_frozen)
             self.assertIsNotNone(test.costs_frozen_at)
             self.assertEqual(test.costs_frozen_by_id, self.users['admin'])
+
+    def explanation(self, path):
+        response = self.client.get(path)
+        self.assertEqual(response.status_code, 200)
+        match = re.search(r'<details\b([^>]*)>\s*<summary>How the split works</summary>(.*?)</details>', response.get_data(as_text=True), re.S)
+        self.assertIsNotNone(match)
+        self.assertNotRegex(match.group(1), r'\bopen\b')
+        return ' '.join(html.unescape(re.sub(r'<[^>]+>', ' ', match.group(2))).split())
+
+    def test_detailed_explanation_uses_frozen_inputs_and_shipping_credit_on_both_pages(self):
+        with self.app.app_context():
+            test = db.session.get(GroupTest, self.test_id)
+            test.total_lab_cost = 100
+            test.shipping_cost = 20
+            test.donor_shipping_cost = 15
+            test.donor_shipping_reimbursement = 'credit'
+            db.session.commit()
+        self.approve('donor')
+        self.approve('member')
+        with self.app.app_context():
+            test = db.session.get(GroupTest, self.test_id)
+            costs.freeze(test, self.users['admin'])
+            test.status = 'ready_for_payment'
+            db.session.commit()
+            test.total_lab_cost = 9999
+            test.donor_shipping_cost = 999
+            test.refund_per_donor = 99
+            test.donor_shipping_reimbursement = 'participant'
+            db.session.commit()
+        for path in (f'/test/{self.test_id}', f'/admin/manage-participants/{self.test_id}'):
+            with self.subTest(path=path):
+                text = self.explanation(path)
+                self.assertIn('lab cost + shipping + donor shipping = $100.00 + $20.00 + $15.00 = $135.00', text)
+                self.assertIn('$135.00 ÷ 2 cost-sharing participants = $67.50 each', text)
+                self.assertIn('1 donor × $20.00 credit per donor = $20.00', text)
+                self.assertIn('$20.00 ÷ 1 non-donor = $20.00', text)
+                self.assertIn('$67.50 base share + $20.00 uplift = $87.50', text)
+                self.assertIn('$67.50 base share − $20.00 donor credit − $15.00 donor-shipping credit = $32.50', text)
+                self.assertIn('Reimbursement policy: credit to the donor.', text)
+                self.assertNotIn('$9999.00', text)
+                self.assertNotIn('$999.00', text)
+        self.assertEqual(self.charges(), {'donor': 32.5, 'member': 87.5})
+
+    def test_explanation_handles_no_participants_no_donors_and_all_donors(self):
+        text = self.explanation(f'/test/{self.test_id}')
+        self.assertIn('no approved cost-sharing participants yet', text)
+        self.assertNotIn('÷ 0', text)
+        with self.app.app_context():
+            db.session.get(GroupTest, self.test_id).total_lab_cost = 883
+            db.session.commit()
+        self.approve('member')
+        text = self.explanation(f'/test/{self.test_id}')
+        self.assertIn('$883.00 ÷ 1 cost-sharing participant = $883.00 each', text)
+        self.assertIn('no vial donors', text)
+        self.assertNotIn('$20.00', text)
+        self.assertNotIn('÷ 0', text)
+        with self.app.app_context():
+            db.session.get(Participation, self.ids['member']).approved = False
+            db.session.commit()
+        self.approve('donor')
+        text = self.explanation(f'/test/{self.test_id}')
+        self.assertIn('no non-donors to fund an uplift', text)
+        self.assertIn('$883.00 base share − $20.00 donor credit = $863.00', text)
+        self.assertNotIn('÷ 0', text)
 
     def test_manage_and_queue_approval_reprice_entire_recruiting_cohort_quietly(self):
         with patch('app.routes.send_notification_message') as notify:

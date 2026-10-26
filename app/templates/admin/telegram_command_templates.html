@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_actions.html" import more_menu %}
 
 {% block title %}Bot Command Templates{% endblock %}
 
@@ -96,7 +97,7 @@
             <div class="form-check mb-3">
                 {{ form.allow_admin_bot_updates(class="form-check-input") }}
                 {{ form.allow_admin_bot_updates.label(class="form-check-label") }}
-                <div class="form-text">A linked Group Test Tracker admin can reply to a bot-generated command message in Telegram to replace the command response exactly.</div>
+                <div class="form-text">A linked {{ brand_name }} admin can reply to a bot-generated command message in Telegram to replace the command response exactly.</div>
             </div>
             <div class="form-check mb-3">
                 {{ form.is_active(class="form-check-input") }}
@@ -114,10 +115,10 @@
 
 <div class="card">
     <div class="card-header">Saved Telegram Command Templates</div>
-    <div class="card-body p-0">
+    <div class="card-body p-0 record-container">
         {% if templates %}
-            <div class="table-responsive">
-                <table class="table table-striped mb-0 align-middle">
+            <div class="table-responsive record-container">
+                <table class="table table-striped mb-0 align-middle record-table ">
                     <thead>
                         <tr>
                             <th>Command</th>
@@ -128,29 +129,29 @@
                             <th>Scope</th>
                             <th>Status</th>
                             <th>Reply Preview</th>
-                            <th class="text-end">Actions</th>
+                            <th class="text-end record-actions-heading">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for template in templates %}
                             <tr>
-                                <td><code>{{ template.command }}</code></td>
-                                <td>{{ template.category or '-' }}</td>
-                                <td>{{ template.description or '-' }}</td>
-                                <td>
+                                <td data-label="Command" class="record-title"><code>{{ template.command }}</code></td>
+                                <td data-label="Category">{{ template.category or '-' }}</td>
+                                <td data-label="Description" class="record-wide">{{ template.description or '-' }}</td>
+                                <td data-label="Args Policy">
                                     {{ template.args_policy or 'any' }}
                                     {% if template.args_policy == 'regex' and template.args_regex %}
                                         <div class="small text-muted">{{ template.args_regex }}</div>
                                     {% endif %}
                                 </td>
-                                <td>
+                                <td data-label="Rate Limit">
                                     {% if template.rate_limit_window_seconds and template.rate_limit_max_calls %}
                                         {{ template.rate_limit_max_calls }} / {{ template.rate_limit_window_seconds }}s
                                     {% else %}
                                         -
                                     {% endif %}
                                 </td>
-                                <td>
+                                <td data-label="Scope" class="record-wide">
                                     {% if template.allow_non_private %}
                                         <span class="badge bg-info text-dark">Groups/Channels Allowed</span>
                                     {% else %}
@@ -159,21 +160,20 @@
                                     <div class="small text-muted mt-1">Chats: {{ template.allowed_chat_ids or 'any' }}</div>
                                     <div class="small text-muted">Threads: {{ template.allowed_thread_ids or 'any' }}</div>
                                 </td>
-                                <td>
+                                <td data-label="Status">
                                     {% if template.is_active %}
                                         <span class="badge bg-success">Active</span>
                                     {% else %}
                                         <span class="badge bg-secondary">Inactive</span>
                                     {% endif %}
                                 </td>
-                                <td class="small text-muted" style="max-width: 360px; white-space: pre-wrap;">{{ (template.reply_text or '')[:240] }}{% if (template.reply_text or '')|length > 240 %}...{% endif %}</td>
-                                <td class="text-end">
-                                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.edit_telegram_command_template', template_id=template.id) }}">Edit</a>
-                                    <form method="POST" action="{{ url_for('main.delete_telegram_command_template', template_id=template.id) }}" class="d-inline" onsubmit="return confirm('Delete this command template?');">
+                                <td class="small text-muted record-wide"  data-label="Reply Preview"><details><summary>View reply</summary><div class="reply-preview">{{ (template.reply_text or '')[:240] }}{% if (template.reply_text or '')|length > 240 %}...{% endif %}</div></details></td>
+                                <td class="text-end record-actions" data-label="Actions"><div class="action-row"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.edit_telegram_command_template', template_id=template.id) }}">Edit</a>{% call more_menu('commandMore' ~ template.id) %}
+<li><form method="POST" action="{{ url_for('main.delete_telegram_command_template', template_id=template.id) }}" class="d-inline" onsubmit="return confirm('Delete this command template?');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                    </form>
-                                </td>
+                                        <button type="submit" class="dropdown-item text-danger">Delete</button>
+                                    </form></li>
+{% endcall %}</div></td>
                             </tr>
                         {% endfor %}
                     </tbody>

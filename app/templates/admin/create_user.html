@@ -13,7 +13,9 @@
             <div class="row">
                 <div class="col-md-6 mb-3">
                     {{ form.username.label(class="form-label") }}
-                    {{ form.username(class="form-control") }}
+                    {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else "")) }}
+                    {% for error in form.username.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
+                    <div class="form-text">No spaces or other whitespace, including before or after the username.</div>
                 </div>
                 <div class="col-md-6 mb-3">
                     {{ form.email.label(class="form-label") }}
@@ -23,13 +25,15 @@
 
             <div class="mb-3">
                 {{ form.tg_username.label(class="form-label") }}
-                {{ form.tg_username(class="form-control") }}
+                {{ form.tg_username(class="form-control" + (" is-invalid" if form.tg_username.errors else "")) }}
+                {% for error in form.tg_username.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
             </div>
 
             <div class="mb-3">
                 {{ form.discord_username.label(class="form-label") }}
-                {{ form.discord_username(class="form-control") }}
-                <div class="form-text">Display name only. Discord delivery uses the linked Discord user ID.</div>
+                {{ form.discord_username(class="form-control" + (" is-invalid" if form.discord_username.errors else "")) }}
+                {% for error in form.discord_username.errors %}<div class="invalid-feedback">{{ error }}</div>{% endfor %}
+                <div class="form-text">Use the unique Discord username, rather than a server nickname. Discord delivery uses the linked Discord user ID.</div>
             </div>
 
             <div class="row">

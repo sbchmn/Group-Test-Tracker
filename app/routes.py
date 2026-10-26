@@ -16,7 +16,7 @@ from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
     FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField, FileField
 )
-from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL, Regexp
+from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL, Regexp, ValidationError
 from datetime import datetime, date
 from datetime import timedelta, timezone
 from functools import wraps
@@ -24,11 +24,13 @@ from itertools import zip_longest
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm.exc import StaleDataError
 import secrets
 import ipaddress
 import html
 import re
 
+from .branding import brand_text, bot_credit
 from . import db, csrf, limiter
 import os
 import json
@@ -53,6 +55,11 @@ from .models import (
     group_test_tags,
     public_result_tags,
 )
+from . import costs as cost_policy
+from .costs import CostPolicyError
+from .usernames import username_field, unique_identity_field, identity_key
+from .notification_setup import clear_setup, resolve_setup
+from . import account_merge
 from .system_accounts import is_reserved_identity
 from .links import safe_http_url, validate_http_link
 from .saas import (
@@ -162,6 +169,26 @@ def enforce_managed_tenant_contract():
     return None
 
 
+@main_bp.errorhandler(CostPolicyError)
+def handle_cost_policy_error(error):
+    db.session.rollback()
+    flash(str(error), 'warning')
+    test_id = (request.view_args or {}).get('test_id')
+    if not test_id and (request.view_args or {}).get('part_id'):
+        part = db.session.get(Participation, request.view_args['part_id'])
+        test_id = part.group_test_id if part else None
+    if test_id:
+        return redirect(url_for('main.manage_participants', test_id=test_id))
+    return redirect(url_for('main.action_queue', **_queue_redirect_params()))
+
+
+@main_bp.errorhandler(StaleDataError)
+def handle_concurrent_record_change(error):
+    db.session.rollback()
+    flash('This record changed while you were editing it. Reload and review the latest values before retrying.', 'warning')
+    return redirect(url_for('main.dashboard'))
+
+
 @main_bp.route('/version')
 def version_info():
     return render_template(
@@ -202,13 +229,20 @@ class LoginForm(FlaskForm):
     submit = SubmitField('Login')
 
 
-class RegisterForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+class AccountIdentityForm(FlaskForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.identity_user_id = getattr(kwargs.get('obj'), 'id', None)
+
+
+class RegisterForm(AccountIdentityForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email(), Length(max=120)])
     password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
-    tg_username = StringField('Telegram Username (optional)', validators=[Optional(), Length(max=80)])
-    discord_username = StringField('Discord Username (optional)', validators=[Optional(), Length(max=80)])
+    tg_username = StringField('Telegram Username (optional)', validators=[Optional(), Length(max=80), unique_identity_field])
+    discord_username = StringField('Discord Username (optional)', validators=[Optional(), Length(max=80), unique_identity_field])
+    notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     submit = SubmitField('Register')
 
 
@@ -328,19 +362,16 @@ class ParticipantStatusForm(FlaskForm):
         ('received_from_vendor', 'Received from Vendor'),
         ('ready_to_ship', 'Ready to Ship to Lab')
     ])
-    payment_claim = BooleanField('I have paid my lab fees (submits for administrator verification)')
-    amount_paid = FloatField('Amount I have paid ($)', validators=[Optional(), NumberRange(min=0)])
-    preferred_payment_option_id = SelectField('Preferred Payment Method', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes / Comments', validators=[Optional()])
     submit = SubmitField('Update My Status')
 
 
-class UserForm(FlaskForm):
+class UserForm(AccountIdentityForm):
     """Form for admins to create/edit users."""
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email()])
-    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
-    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80), unique_identity_field])
+    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80), unique_identity_field])
     is_admin = BooleanField('Administrator')
     is_active = BooleanField('Active', default=True)
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
@@ -352,12 +383,12 @@ class UserForm(FlaskForm):
     submit = SubmitField('Save User')
 
 
-class ProfileForm(FlaskForm):
+class ProfileForm(AccountIdentityForm):
     """Form for users to edit their own profile details."""
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80), username_field])
     email = StringField('Email', validators=[DataRequired(), Email()])
-    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80)])
-    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80)])
+    tg_username = StringField('Telegram Username', validators=[Optional(), Length(max=80), unique_identity_field])
+    discord_username = StringField('Discord Username', validators=[Optional(), Length(max=80), unique_identity_field])
     receive_group_test_notifications = BooleanField('Receive Group Test Notifications?', default=True)
     notification_channel = SelectField('Notify via', choices=notification_channel_choices(), default='email')
     digest_frequency = SelectField('Digest Email Frequency', choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')], default='off')
@@ -548,6 +579,16 @@ class PaymentOptionForm(FlaskForm):
     details = TextAreaField('Details / Notes', validators=[Optional()])
     qr_payload_override = StringField('QR Payload Override', validators=[Optional(), Length(max=500)])
     is_active = BooleanField('Active', default=True)
+    proof_image_enabled = BooleanField('Accept image proof')
+    proof_transaction_enabled = BooleanField('Accept transaction ID')
+    proof_requirement = SelectField('Proof requirement', choices=[
+        ('optional', 'Optional'), ('either', 'At least one accepted proof'), ('all', 'All accepted proofs'),
+    ], default='optional', validators=[DataRequired()])
+
+    def validate_proof_requirement(self, field):
+        if field.data != 'optional' and not (self.proof_image_enabled.data or self.proof_transaction_enabled.data):
+            raise ValidationError('Enable at least one proof type before requiring proof.')
+
     submit = SubmitField('Save Payment Option')
 
 
@@ -606,20 +647,6 @@ def populate_payment_option_choices(form, include_ids=None):
     ]
 
 
-def _serialize_payment_option_snapshot(option):
-    if option is None:
-        return ''
-
-    parts = [option.display_title()]
-    if option.account_handle:
-        parts.append(f"Handle: {option.account_handle}")
-    if option.wallet_address:
-        parts.append(f"Wallet: {option.wallet_address}")
-    if option.network:
-        parts.append(f"Network: {option.network}")
-    return ' | '.join(parts)
-
-
 def _result_file_kind(result_key):
     value = (result_key or '').strip().lower()
     if value.endswith('.pdf'):
@@ -637,6 +664,7 @@ def _build_payment_option_context(option):
         'label': option.label,
         'title': option.display_title(),
         'method_type': option.method_type,
+        'proof_summary': (' + '.join(filter(None, ['Image' if option.proof_image_enabled else '', 'Transaction ID' if option.proof_transaction_enabled else ''])) or 'None') + ' / ' + {'optional': 'optional', 'either': 'at least one required', 'all': 'all required'}.get(option.proof_requirement, 'optional'),
         'is_active': bool(option.is_active),
         'provider_name': profile.get('provider_name') or option.method_type,
         'icon_class': profile.get('icon_class') or 'bi bi-credit-card-2-front',
@@ -758,7 +786,7 @@ def _telegram_testing_message(config_map):
     register_url = f"{base_url}{url_for('main.register')}"
     login_url = f"{base_url}{url_for('main.login')}"
     return (
-        "To join and view group testing, sign up or log in at Group Test Manager.\n"
+        f"To join and view group testing, sign up or log in at {brand_text('Group Test Manager')}.\n"
         f"Sign up: {register_url}\n"
         f"Log in: {login_url}"
     )
@@ -1190,7 +1218,13 @@ _STORAGE_CONFIG_KEYS = {
 
 
 def _config_values_map():
-    return {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+    configs = {cfg.key: cfg.value for cfg in NotificationConfig.query.all()}
+    from .managed_integrations import managed_integration_value
+    for key in _STORAGE_CONFIG_KEYS:
+        configured, value = managed_integration_value(key)
+        if configured:
+            configs[key] = value
+    return configs
 
 
 def _save_config_value(key, value):
@@ -1459,6 +1493,11 @@ def register():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     form = RegisterForm()
+    _apply_available_channels(form)
+    form.notification_channel.choices = [
+        (name, label) for name, label in form.notification_channel.choices
+        if name == 'email' or channel_link_available(name, _config_values_map())
+    ]
     if form.validate_on_submit():
         if is_reserved_identity(form.username.data, form.email.data):
             flash('That username or email is reserved.', 'warning')
@@ -1477,8 +1516,16 @@ def register():
             discord_username=form.discord_username.data or None,
         )
         user.set_password(form.password.data)
+        if form.notification_channel.data != 'email':
+            user.pending_notification_channel = form.notification_channel.data
+            user.notification_setup_expires_at = datetime.utcnow() + timedelta(days=7)
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return render_template('register.html', form=form)
 
         base_url = str(
             NotificationConfig.query.filter_by(key='service_base_url').first().value if NotificationConfig.query.filter_by(key='service_base_url').first() else ''
@@ -1520,6 +1567,10 @@ def login():
         ):
             login_user(user, remember=form.remember.data)
             flash(f'Welcome back, {user.username}!', 'success')
+            pending = resolve_setup(user)
+            db.session.commit()
+            if pending:
+                return redirect(url_for('main.notification_setup', next=_safe_next_url(request.args.get('next'))))
             next_page = _safe_next_url(request.args.get('next'))
             return redirect(next_page or url_for('main.dashboard'))
         flash('Invalid username or password.', 'danger')
@@ -1587,6 +1638,54 @@ def password_reset():
     return render_template('password_reset.html', form=form)
 
 
+@main_bp.route('/notification-setup', methods=['GET', 'POST'])
+@login_required
+def notification_setup():
+    """A skippable, one-time linking step after normal authentication."""
+    destination = _safe_next_url(request.args.get('next')) or url_for('main.dashboard')
+    form = FlaskForm()
+    user = User.query.filter_by(id=current_user.id).with_for_update().populate_existing().one()
+    valid_post = form.validate_on_submit()
+    if valid_post and request.form.get('action') == 'skip':
+        # Honor an explicit choice even if the bot completed linking while this
+        # page was open in another tab.
+        user.notification_channel = 'email'
+        clear_setup(user)
+        db.session.commit()
+        flash('Your notification preference is Email. You can link another method in My Profile anytime.', 'success')
+        return redirect(destination)
+    channel = user.pending_notification_channel
+    pending = resolve_setup(user)
+    if not pending:
+        db.session.commit()
+        label = dict(notification_channel_choices()).get(user.notification_channel, 'Email')
+        flash(f'Your notification preference is {label}. You can change it in My Profile anytime.', 'success' if label != 'Email' else 'info')
+        return redirect(destination)
+    if not channel_link_available(channel, _config_values_map()):
+        clear_setup(user)
+        db.session.commit()
+        flash('That messaging integration is no longer available. Your notification preference remains Email.', 'info')
+        return redirect(destination)
+    if valid_post:
+        action = request.form.get('action')
+        if action == 'generate':
+            token = issue_link_token(channel, user)
+            # Registration tokens cannot outlive the setup window.
+            token.expires_at = min(token.expires_at, user.notification_setup_expires_at)
+            db.session.commit()
+            return redirect(url_for('main.notification_setup', next=_safe_next_url(request.args.get('next'))))
+        if action == 'check':
+            flash('Your account is not linked yet. Complete the steps below, then check again, or use Email instead.', 'info')
+    token = active_link_token(channel, user)
+    return render_template(
+        'notification_setup.html', form=form, channel=channel,
+        channel_label=dict(notification_channel_choices())[channel],
+        token=token,
+        link_url=_build_telegram_deep_link(token.token) if token and channel == 'telegram' else None,
+        expires_at=user.notification_setup_expires_at,
+    )
+
+
 @main_bp.route('/admin/users/<int:user_id>/send-password-reset', methods=['POST'])
 @login_required
 @admin_required
@@ -1612,6 +1711,7 @@ def send_password_reset_admin(user_id):
 def profile():
     """Allow users to update their own profile info and password."""
     form = ProfileForm(obj=current_user)
+    form.identity_user_id = current_user.id
     _apply_available_channels(form, current=current_user.notification_channel)
     if current_user.is_reserved_support_account:
         flash('This is a managed support account and cannot be edited here.', 'danger')
@@ -1646,6 +1746,7 @@ def profile():
         current_user.discord_username = form.discord_username.data or None
         current_user.receive_group_test_notifications = form.receive_group_test_notifications.data
         current_user.notification_channel = form.notification_channel.data or 'email'
+        clear_setup(current_user)
         current_user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
         current_user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
         current_user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
@@ -1657,7 +1758,12 @@ def profile():
             current_user.session_epoch += 1
             flash('Password updated.', 'success')
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return redirect(url_for('main.profile'))
         if changing_password:
             # The epoch rotation already killed other sessions; end this one cleanly
             # rather than depending on the stale cookie being rejected downstream.
@@ -2308,16 +2414,25 @@ def _telegram_help_custom_commands_block():
 
 
 def _telegram_help_message():
-    return (
-        "Group Test Manager bot commands:\n"
+    body = (
+        brand_text("Group Test Manager bot commands:\n"
         "/tests - list tests you can see\n"
         "/mytests - list tests you are interacting with\n"
         "/testing - get signup/login links for group testing\n"
         "/status <test_id> - view your request/approval status\n"
         "/join <test_id> - submit a join request for recruiting tests\n"
         "/submitcoa <public link> - submit a COA for administrator review (or attach a PDF/image)\n"
-        "/help - show this help message"
+        "/help - show this help message")
     ) + _telegram_help_custom_commands_block()
+    credit = bot_credit(format='html')
+    return html.escape(body) + credit if credit else body
+
+
+def _send_telegram_help(chat_id):
+    from .branding import effective_settings
+    if effective_settings()['enabled']:
+        return send_telegram_chat_message(chat_id, _telegram_help_message(), parse_mode='HTML')
+    return send_telegram_chat_message(chat_id, _telegram_help_message())
 
 
 def _public_results_telegram_tag_keyboard(tags, page, total_pages):
@@ -2896,7 +3011,7 @@ def telegram_webhook():
                     send_telegram_chat_message(chat_id, 'We found a possible profile match by username. For security, generate a link token from your profile and use /start <token> to confirm.')
                     db.session.commit()
                     return jsonify({'ok': True})
-            send_telegram_chat_message(chat_id, 'Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.')
+            send_telegram_chat_message(chat_id, brand_text('Welcome. To link this Telegram chat, open your profile in Group Test Manager and generate a link token.'))
             db.session.commit()
             return jsonify({'ok': True})
 
@@ -2912,6 +3027,7 @@ def telegram_webhook():
                 'inactive-user': 'This account is deactivated. Contact an administrator for account support.',
                 'external-owned': 'This Telegram account is already linked to a different user. Contact an admin for relink support.',
                 'user-owned': 'This account is already linked to a different Telegram user. Contact an admin for relink support.',
+                'username-owned': 'That Telegram username is already recorded on another account. Contact an administrator to resolve it before linking.',
             }
             send_telegram_chat_message(
                 chat_id,
@@ -2920,7 +3036,12 @@ def telegram_webhook():
             db.session.commit()
             return jsonify({'ok': True})
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            send_telegram_chat_message(chat_id, 'That account identity is already in use. Contact an administrator for linking support.')
+            return jsonify({'ok': True})
         send_telegram_chat_message(chat_id, 'Your Telegram account is now linked. Use /help to see available commands.')
         return jsonify({'ok': True})
 
@@ -2930,7 +3051,7 @@ def telegram_webhook():
     if linked_user is None:
         linked_user = User.query.filter_by(telegram_chat_id=chat_id).first()
     if linked_user is None:
-        send_telegram_chat_message(chat_id, 'Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.')
+        send_telegram_chat_message(chat_id, brand_text('Your Telegram chat is not linked yet. Open Group Test Manager profile and generate a bot link token first.'))
         db.session.commit()
         return jsonify({'ok': True})
 
@@ -2942,13 +3063,18 @@ def telegram_webhook():
     if telegram_user_id and not linked_user.telegram_user_id:
         linked_user.telegram_user_id = telegram_user_id
     if incoming_username and incoming_username != (linked_user.tg_username or '').strip().lstrip('@'):
-        linked_user.tg_username = incoming_username
+        handle_owner = User.query.filter(
+            User.tg_username_key == identity_key(incoming_username, handle=True),
+            User.id != linked_user.id,
+        ).first()
+        if handle_owner is None:
+            linked_user.tg_username = incoming_username
     if chat_id != (linked_user.telegram_chat_id or '').strip():
         linked_user.telegram_chat_id = chat_id
     db.session.commit()
 
     if lower == '/help':
-        send_telegram_chat_message(chat_id, _telegram_help_message())
+        _send_telegram_help(chat_id)
         return jsonify({'ok': True})
 
     if lower == '/tests':
@@ -3030,7 +3156,7 @@ def telegram_webhook():
     ):
         return jsonify({'ok': True})
 
-    send_telegram_chat_message(chat_id, _telegram_help_message())
+    _send_telegram_help(chat_id)
     return jsonify({'ok': True})
 
 
@@ -3125,7 +3251,7 @@ def test_detail(test_id):
             if part.user_id and part.user and part.approved and part.user.receive_group_test_notifications:
                 amount_owed = part.amount_owed
                 if amount_owed is None:
-                    amount_owed = costs.get('donor_pays' if part.vial_donor else 'non_donor_pays', 0)
+                    amount_owed = 0
                 send_group_test_notification(test, part.user, template, amount_owed=amount_owed)
                 sent += 1
         flash(f'Sent notifications to {sent} participant(s).', 'success')
@@ -3146,6 +3272,7 @@ def test_detail(test_id):
         my_part=my_part,
         show_participant_list=show_participant_list,
         reimbursed_by_user=reimbursed_by_user,
+        cost_explanation=cost_policy.explanation_costs(test, costs),
         notify_form=form,
         notification_templates=templates,
         payment_options=payment_option_contexts,
@@ -3343,54 +3470,14 @@ def update_my_participant_status(test_id):
         return redirect(url_for('main.test_detail', test_id=test_id))
 
     form = ParticipantStatusForm(obj=part)
-    available_options = [option for option in test.payment_options if option.is_active]
-    form.preferred_payment_option_id.choices = [(0, 'No preference selected')] + [
-        (option.id, option.display_title()) for option in available_options
-    ]
-    if not form.is_submitted():
-        form.preferred_payment_option_id.data = part.preferred_payment_option_id or 0
-        form.payment_claim.data = part.payment_claimed_at is not None
-
-    first_claim = False
     if form.validate_on_submit():
         part.order_status = form.order_status.data
-        if form.amount_paid.data is not None:
-            part.amount_paid = form.amount_paid.data
         part.notes = form.notes.data or part.notes
-        if part.paid_lab:
-            part.payment_claimed_at = None
-        elif form.payment_claim.data:
-            first_claim = part.payment_claimed_at is None
-            part.payment_claimed_at = datetime.utcnow()
-        else:
-            part.payment_claimed_at = None
-
-        selected_id = int(form.preferred_payment_option_id.data or 0)
-        if test.status in ('testing', 'ready_for_payment') and selected_id > 0:
-            selected_option = next((opt for opt in available_options if opt.id == selected_id), None)
-            if selected_option:
-                part.preferred_payment_option_id = selected_option.id
-                part.preferred_payment_snapshot = _serialize_payment_option_snapshot(selected_option)
-        elif selected_id == 0:
-            part.preferred_payment_option_id = None
-            part.preferred_payment_snapshot = None
-
         db.session.commit()
-        if first_claim:
-            _notify_payment_claim(test, part)
-            db.session.commit()
         flash("Your status has been updated.", "success")
         return redirect(url_for('main.test_detail', test_id=test_id))
 
-    selected_option = next((opt for opt in available_options if opt.id == (form.preferred_payment_option_id.data or 0)), None)
-    return render_template(
-        'participant_update_status.html',
-        form=form,
-        test=test,
-        part=part,
-        available_payment_options=[_build_payment_option_context(option) for option in available_options],
-        selected_payment_option=_build_payment_option_context(selected_option),
-    )
+    return render_template('participant_update_status.html', form=form, test=test, part=part)
 
 
 @main_bp.route('/test/<int:test_id>/request', methods=['GET', 'POST'])
@@ -3567,7 +3654,7 @@ def create_test():
             donor_shipping_cost=form.donor_shipping_cost.data or 0.0,
             donor_shipping_reimbursement=form.donor_shipping_reimbursement.data or 'credit',
             donor_shipping_reimbursed_by_id=form.donor_shipping_reimbursed_by_id.data or None,
-            refund_per_donor=form.refund_per_donor.data or 20.0,
+            refund_per_donor=form.refund_per_donor.data if form.refund_per_donor.data is not None else 20.0,
             order_number=form.order_number.data,
             quote_number=form.quote_number.data,
             results_link=form.results_link.data if form.status.data == 'closed' else None,
@@ -3581,6 +3668,8 @@ def create_test():
         db.session.add(test)
         db.session.flush()
         apply_tags_to_record(test, form.tag_text.data)
+        if test.status != 'recruiting':
+            cost_policy.freeze(test, current_user.id)
         db.session.commit()
         if uploaded_image_key:
             _queue_uploaded_result_analysis(test, current_user.id)
@@ -3615,6 +3704,8 @@ def edit_test(test_id):
     
     if form.validate_on_submit():
         previous_status = test.status
+        was_unlocked = not test.costs_locked
+        cost_policy.ensure_snapshot(test)
         form.populate_obj(test)
         lab_items = []
         names = request.form.getlist('lab_item_name')
@@ -3692,6 +3783,10 @@ def edit_test(test_id):
         elif test.results_link and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
 
+        if was_unlocked and test.status != 'recruiting':
+            cost_policy.freeze(test, current_user.id)
+        else:
+            _recalculate_approved_amounts_for_test(test)
         db.session.commit()
 
         for obsolete_key in obsolete_image_keys:
@@ -3805,24 +3900,20 @@ def manage_participants(test_id):
     parts = test.participations.order_by(Participation.approved.desc(), Participation.requested_at).all()
     costs = test.calculate_costs()
 
-    # Calculate live "Current Fair Share" for display (always accurate)
+    # Frozen and individually priced participants display their assigned charge.
     for p in parts:
-        if p.vial_donor:
-            p.current_fair_share = costs.get('donor_pays', 0)
-        else:
-            p.current_fair_share = costs.get('non_donor_pays', 0)
+        p.current_fair_share = p.amount_owed if test.costs_locked or p.is_late_buy_in else costs.get('donor_pays' if p.vial_donor else 'non_donor_pays', 0)
 
-    return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs)
+    return render_template('admin/manage_participants.html', test=test, participations=parts, costs=costs,
+                           cost_explanation=cost_policy.explanation_costs(test, costs))
 
 
 def _recalculate_approved_amounts_for_test(test):
-    """Keep approved participant balances consistent after approval changes."""
-    costs = test.calculate_costs()
-    for approved_part in test.participations.filter_by(approved=True).all():
-        approved_part.update_amount_owed(costs)
+    cost_policy.recalculate(test)
 
 
-def _approve_participation_record(part):
+def _approve_participation_record(part, buy_in_amount=None):
+    cost_policy.price_approval(part, buy_in_amount)
     part.approved = True
     part.approved_at = datetime.utcnow()
     part.denied = False
@@ -3970,7 +4061,7 @@ def approve_from_queue(part_id):
         flash('Participant is already approved.', 'info')
         return redirect(url_for('main.action_queue', **_queue_redirect_params()))
 
-    _approve_participation_record(part)
+    _approve_participation_record(part, request.form.get('buy_in_amount'))
     _recalculate_approved_amounts_for_test(part.group_test)
     db.session.commit()
     flash(f'Approved {part.name or part.user.username}.', 'success')
@@ -4131,7 +4222,19 @@ def update_participant(part_id):
     
     if form.validate_on_submit():
         previous_paid = bool(part.paid_lab)
+        if part.payment_submissions and (
+            bool(form.paid_lab.data) != previous_paid or form.amount_paid.data != part.amount_paid
+        ):
+            flash('Use Review Payment to change a submitted payment. Participants can update their reported amount in the payment modal.', 'warning')
+            return redirect(url_for('main.manage_participants', test_id=test.id))
+        cost_policy.ensure_snapshot(test)
+        previously_approved = bool(part.approved)
+        becoming_approved = bool(form.approved.data and not previously_approved)
+        if becoming_approved:
+            cost_policy.price_approval(part, request.form.get('buy_in_amount'))
         form.populate_obj(part)
+        if part.is_late_buy_in and not becoming_approved and request.form.get('buy_in_amount', '').strip():
+            part.amount_owed = float(cost_policy.money(request.form['buy_in_amount']))
         if part.paid_lab:
             part.payment_claimed_at = None
             if not previous_paid or part.payment_verified_at is None:
@@ -4140,16 +4243,17 @@ def update_participant(part_id):
         else:
             part.payment_verified_at = None
             part.payment_verified_by_id = None
-        if form.approved.data and not part.approved:
-            _approve_participation_record(part)
-            # Auto-calculate owed on approval
-            costs = test.calculate_costs()
-            part.update_amount_owed(costs)
+        if becoming_approved:
+            part.approved_at = datetime.utcnow()
+            part.denied = False
+            part.denied_at = None
+            part.denied_reason = None
         elif not form.approved.data:
             part.approved = False
             part.approved_at = None
             part.payment_claimed_at = None
 
+        _recalculate_approved_amounts_for_test(test)
         db.session.commit()
         flash('Participant updated successfully.', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -4164,9 +4268,8 @@ def approve_request(part_id):
     """Quick approve endpoint (can be called from manage page)."""
     part = Participation.query.get_or_404(part_id)
     if not part.approved:
-        _approve_participation_record(part)
-        costs = part.group_test.calculate_costs()
-        part.update_amount_owed(costs)
+        _approve_participation_record(part, request.form.get('buy_in_amount'))
+        _recalculate_approved_amounts_for_test(part.group_test)
         db.session.commit()
         flash(f'Approved {part.name or part.user.username} for test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=part.group_test_id))
@@ -4228,6 +4331,7 @@ def unapprove_participant_from_manage(test_id, part_id):
         flash('This participant is not currently approved.', 'info')
         return redirect(url_for('main.manage_participants', test_id=test.id))
 
+    cost_policy.ensure_snapshot(test)
     part.approved = False
     part.approved_at = None
     part.payment_claimed_at = None
@@ -4253,15 +4357,9 @@ def _payment_action_redirect():
 def confirm_participant_payment(part_id):
     """Administrator confirmation of lab fees; the only path that sets paid_lab."""
     part = Participation.query.get_or_404(part_id)
-    if not part.approved or part.denied:
-        flash('Only approved participants can be marked paid.', 'warning')
-    else:
-        part.paid_lab = True
-        part.payment_claimed_at = None
-        part.payment_verified_at = datetime.utcnow()
-        part.payment_verified_by_id = current_user.id
-        db.session.commit()
-        flash(f'Lab fees marked paid for {part.name or part.user.username}.', 'success')
+    from .payments import review_payment
+    message, status = review_payment(part, True)
+    flash(message, 'success' if status == 200 else 'warning')
     return _payment_action_redirect()
 
 
@@ -4286,12 +4384,9 @@ def unmark_participant_payment(part_id):
 @admin_required
 def reject_participant_payment_claim(part_id):
     part = Participation.query.get_or_404(part_id)
-    if part.payment_claimed_at is None:
-        flash('There is no pending payment claim for this participant.', 'info')
-    else:
-        part.payment_claimed_at = None
-        db.session.commit()
-        flash(f'Payment claim from {part.name or part.user.username} rejected. They can report payment again.', 'info')
+    from .payments import review_payment
+    message, status = review_payment(part, False)
+    flash(message, 'info' if status == 200 else 'warning')
     return _payment_action_redirect()
 
 
@@ -4302,31 +4397,39 @@ def remove_participant(part_id):
     """Remove a participant from a test when they should not be included."""
     part = Participation.query.get_or_404(part_id)
     test = part.group_test
+    cost_policy.ensure_snapshot(test)
     db.session.delete(part)
+    _recalculate_approved_amounts_for_test(test)
     db.session.commit()
     flash(f'Removed {part.name or part.user.username} from the test.', 'success')
     return redirect(url_for('main.manage_participants', test_id=test.id))
 
 
-@main_bp.route('/admin/recalculate-costs/<int:test_id>', methods=['POST'])
+@main_bp.route('/admin/recalculate-costs/<int:test_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def recalculate_all_costs(test_id):
-    """Recalculate and update amount_owed for all approved participants."""
     test = GroupTest.query.get_or_404(test_id)
-    costs = test.calculate_costs()
+    changes, token = cost_policy.preview(test)
+    if request.method == 'POST' and request.form.get('preview_token'):
+        cost_policy.confirm_recalculation(test, request.form['preview_token'], current_user.id)
+        db.session.commit()
+        flash('Costs recalculated. ' + ('Automatic recruiting updates are enabled.' if not test.costs_locked else 'Costs remain frozen.'), 'success')
+        return redirect(url_for('main.manage_participants', test_id=test.id))
+    return render_template('admin/review_cost_changes.html', test=test, changes=changes, preview_token=token,
+                           proposed_costs=test.calculate_live_costs())
 
-    updated_count = 0
-    for part in test.participations.filter_by(approved=True):
-        if part.vial_donor:
-            part.amount_owed = costs.get('donor_pays', 0)
-        else:
-            part.amount_owed = costs.get('non_donor_pays', 0)
-        updated_count += 1
 
+@main_bp.route('/admin/test/<int:test_id>/buy-in-price', methods=['POST'])
+@login_required
+@admin_required
+def set_buy_in_price(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    cost_policy.ensure_snapshot(test)
+    test.late_buy_in_amount = cost_policy.money(request.form.get('buy_in_amount'))
     db.session.commit()
-    flash(f'Recalculated costs for {updated_count} approved participants.', 'success')
-    return redirect(url_for('main.manage_participants', test_id=test_id))
+    flash('Default price saved for future late buy-ins. Existing assigned charges are unchanged.', 'success')
+    return redirect(url_for('main.manage_participants', test_id=test.id))
 
 
 @main_bp.route('/admin/add-participant/<int:test_id>', methods=['GET', 'POST'])
@@ -4353,14 +4456,14 @@ def add_participant_to_test(test_id):
             flash('User not found.', 'danger')
             return redirect(url_for('main.add_participant_to_test', test_id=test_id))
 
+        cost_policy.ensure_snapshot(test)
         part = Participation.query.filter_by(group_test_id=test.id, user_id=user.id).first()
         if part:
             # Reuse prior denied row to preserve request history while restoring access.
             part.name = user.username
             part.tg_username = user.tg_username
             part.active = True
-            part.approved = True
-            part.approved_at = datetime.utcnow()
+
             part.denied = False
             part.denied_at = None
             part.denied_reason = None
@@ -4371,16 +4474,15 @@ def add_participant_to_test(test_id):
                 user_id=user.id,
                 name=user.username,
                 tg_username=user.tg_username,
-                approved=True,
-                approved_at=datetime.utcnow(),
+                approved=False,
                 denied=False,
                 active=True
             )
             db.session.add(part)
 
-        # Calculate initial owed amount
-        costs = test.calculate_costs()
-        part.update_amount_owed(costs)
+        db.session.flush()
+        _approve_participation_record(part, request.form.get('buy_in_amount'))
+        _recalculate_approved_amounts_for_test(test)
         db.session.commit()
         flash(f'Added {user.username} to the test (auto-approved).', 'success')
         return redirect(url_for('main.manage_participants', test_id=test.id))
@@ -4574,7 +4676,7 @@ def _builtin_testing_scope_allowed(chat_id, chat_type, message_thread_id=None):
 
 def _telegram_command_menu_entries(include_groups=False):
     descriptions = {
-        'start': 'Link your Group Test Manager account',
+        'start': brand_text('Link your Group Test Manager account'),
         'help': 'Show available bot commands',
         'tests': 'List tests you can see',
         'mytests': 'List your test requests and approvals',
@@ -4796,7 +4898,7 @@ def send_root_test_message():
     if not entitlement_enabled(entitlement_for('root')):
         abort(404)
 
-    if send_root_message('Test message from Group Test Manager.'):
+    if send_root_message(brand_text('Test message from Group Test Manager.')):
         flash('Root test message queued. It appears once the bridge polls for it.', 'success')
     else:
         flash('Could not queue the Root test message. Save a Root status channel ID first.', 'danger')
@@ -5358,6 +5460,9 @@ def payment_options():
             details=form.details.data or None,
             qr_payload_override=form.qr_payload_override.data or None,
             is_active=bool(form.is_active.data),
+            proof_image_enabled=bool(form.proof_image_enabled.data),
+            proof_transaction_enabled=bool(form.proof_transaction_enabled.data),
+            proof_requirement=form.proof_requirement.data,
         )
         db.session.add(option)
         db.session.commit()
@@ -5403,6 +5508,9 @@ def edit_payment_option(option_id):
         option.network = form.network.data or None
         option.details = form.details.data or None
         option.qr_payload_override = form.qr_payload_override.data or None
+        option.proof_image_enabled = bool(form.proof_image_enabled.data)
+        option.proof_transaction_enabled = bool(form.proof_transaction_enabled.data)
+        option.proof_requirement = form.proof_requirement.data
         option.is_active = bool(form.is_active.data)
         db.session.commit()
         flash('Payment option updated.', 'success')
@@ -5710,6 +5818,26 @@ def toggle_tag_bots_visibility(tag_id):
 def storage_config():
     form = StorageConfigForm()
     configs = _config_values_map()
+    from .managed_integrations import managed_integration_value
+    managed_storage_keys = set()
+    for key in _STORAGE_CONFIG_KEYS:
+        configured, value = managed_integration_value(key)
+        if configured:
+            managed_storage_keys.add(key)
+            configs[key] = value
+            field = form[key]
+            field_value = value
+            if key in {'storage_enabled', 'storage_make_public', 'storage_force_path_style'}:
+                field_value = value.lower() in {'true', '1', 'yes', 'on'}
+            elif key in {'storage_signed_url_ttl_seconds', 'storage_max_upload_size_mb'}:
+                try:
+                    field_value = float(value)
+                except (ValueError, TypeError):
+                    field_value = 60 if key == 'storage_signed_url_ttl_seconds' else 8
+            elif key == 'storage_secret_access_key':
+                field_value = ''
+            field.process(formdata=None, data=field_value)
+            field.render_kw = {**(field.render_kw or {}), 'disabled': True}
 
     existing_secret = str(configs.get('storage_secret_access_key') or '').strip()
 
@@ -5754,9 +5882,10 @@ def storage_config():
                 'storage_allowed_formats': (form.storage_allowed_formats.data or 'JPEG,PNG,WEBP,GIF,PDF').strip(),
             }
             for key, value in updates.items():
-                _save_config_value(key, value)
+                if key not in managed_storage_keys:
+                    _save_config_value(key, value)
 
-            if secret_access_key:
+            if secret_access_key and 'storage_secret_access_key' not in managed_storage_keys:
                 _save_config_value('storage_secret_access_key', secret_access_key)
 
             db.session.commit()
@@ -5764,7 +5893,7 @@ def storage_config():
             return redirect(url_for('main.storage_config'))
 
     if not form.is_submitted():
-        form.storage_enabled.data = str(configs.get('storage_enabled', 'false')).lower() == 'true'
+        form.storage_enabled.data = str(configs.get('storage_enabled', 'false')).lower() in {'true', '1', 'yes', 'on'}
         form.storage_provider.data = (configs.get('storage_provider') or 'aws').lower()
         form.storage_bucket.data = configs.get('storage_bucket')
         form.storage_region.data = configs.get('storage_region')
@@ -5773,8 +5902,8 @@ def storage_config():
         form.storage_secret_access_key.data = ''
         form.storage_path_prefix.data = configs.get('storage_path_prefix') or 'result-images'
         form.storage_public_base_url.data = configs.get('storage_public_base_url')
-        form.storage_make_public.data = str(configs.get('storage_make_public', 'false')).lower() == 'true'
-        form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() == 'true'
+        form.storage_make_public.data = str(configs.get('storage_make_public', 'false')).lower() in {'true', '1', 'yes', 'on'}
+        form.storage_force_path_style.data = str(configs.get('storage_force_path_style', 'false')).lower() in {'true', '1', 'yes', 'on'}
         try:
             form.storage_signed_url_ttl_seconds.data = float(configs.get('storage_signed_url_ttl_seconds') or 60)
         except (TypeError, ValueError):
@@ -5792,6 +5921,7 @@ def storage_config():
         form=form,
         secret_mask=secret_mask,
         storage_enabled=effective_settings.get('enabled', False),
+        managed_storage_keys=sorted(managed_storage_keys),
     )
 
 
@@ -5811,6 +5941,31 @@ def manage_users():
         else:
             support_status = 'disabled'
     return render_template('admin/manage_users.html', users=users, support_user=support_user, support_status=support_status)
+
+
+@main_bp.route('/admin/users/merge', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def merge_users():
+    users = User.query.filter(User.system_account_key.is_(None)).order_by(User.username).all()
+    primary = db.session.get(User, request.values.get('primary_id', type=int)) if request.values.get('primary_id', type=int) else None
+    duplicate = db.session.get(User, request.values.get('duplicate_id', type=int)) if request.values.get('duplicate_id', type=int) else None
+    plan = None
+    try:
+        if primary and duplicate:
+            if request.method == 'POST':
+                account_merge.merge(primary, duplicate, current_user.id, request.form)
+                db.session.commit()
+                flash('Accounts merged. Existing sessions were signed out; use the primary account to sign in again.', 'success')
+                return redirect(url_for('main.manage_users'))
+            plan = account_merge.preview(primary, duplicate, current_user.id)
+        elif request.method == 'POST':
+            raise account_merge.MergeError('Choose a primary account and a duplicate account.')
+    except (account_merge.MergeError, IntegrityError, StaleDataError) as error:
+        db.session.rollback()
+        message = str(error) if isinstance(error, account_merge.MergeError) else 'A related record changed. Reload the preview and try again.'
+        flash(message, 'warning')
+    return render_template('admin/merge_users.html', users=users, primary=primary, duplicate=duplicate, plan=plan)
 
 
 @main_bp.route('/admin/managed-support/request', methods=['POST'])
@@ -5898,7 +6053,12 @@ def create_user():
             flash('A temporary password was generated for the new user. Share it securely through a trusted channel.', 'warning')
 
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return render_template('admin/create_user.html', form=form)
         flash(f'User "{user.username}" created successfully.', 'success')
         return redirect(url_for('main.manage_users'))
 
@@ -5915,6 +6075,7 @@ def edit_user(user_id):
         flash('This is a managed support account and cannot be edited here.', 'danger')
         return redirect(url_for('main.manage_users'))
     form = UserForm(obj=user)
+    form.identity_user_id = user.id
     _apply_available_channels(form, current=user.notification_channel)
     form.password.validators = [Optional(), Length(min=6)]
 
@@ -5948,6 +6109,7 @@ def edit_user(user_id):
             user.session_epoch += 1
         user.receive_group_test_notifications = form.receive_group_test_notifications.data
         user.notification_channel = form.notification_channel.data or 'email'
+        clear_setup(user)
         user.digest_frequency = (form.digest_frequency.data or 'off').strip().lower()
         user.digest_hourly_minute_utc = _clamp_int(form.digest_hourly_minute_utc.data, 0, 0, 59)
         user.digest_daily_hour_utc = _clamp_int(form.digest_daily_hour_utc.data, 9, 0, 23)
@@ -5956,7 +6118,12 @@ def edit_user(user_id):
             user.set_password(form.password.data)
             flash('Password updated.', 'success')
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account already uses one of those usernames or that email. Please review your details.', 'warning')
+            return render_template('admin/edit_user.html', form=form, user=user)
         flash(f'User "{user.username}" updated.', 'success')
         return redirect(url_for('main.manage_users'))
 
@@ -5996,12 +6163,16 @@ def set_results_link(test_id):
     if link and safe_http_url(link) is None:
         flash('Results link must be a full http:// or https:// URL.', 'danger')
         return redirect(url_for('main.test_detail', test_id=test_id))
+    was_unlocked = not test.costs_locked
+    cost_policy.ensure_snapshot(test)
     test.results_link = link if link else None
     if test.status != 'closed':
         test.status = 'closed'
     if test.results_link and not test.results_posted_at:
         test.results_posted_at = datetime.utcnow()
 
+    if was_unlocked:
+        cost_policy.freeze(test, current_user.id)
     db.session.commit()
     _notify_status_change_after_commit(test, previous_status)
     flash('Results link updated and test marked closed (if needed). Visible only to approved members.', 'success')

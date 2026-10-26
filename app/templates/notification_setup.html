@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Set Up Notifications{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card mt-4">
+            <div class="card-header bg-white"><h4 class="mb-0">Link {{ channel_label }} notifications</h4></div>
+            <div class="card-body">
+                <p>You selected {{ channel_label }} when you registered. Link your account to receive notifications there.</p>
+                <div class="alert alert-info">
+                    Email is your active notification method until linking succeeds. If you skip or don’t finish within seven days of registration, your preference will remain Email and we’ll stop prompting.
+                    <div class="small mt-2">Complete setup by {{ expires_at.strftime('%B %d, %Y at %H:%M') }} UTC. You can also link your account later in My Profile.</div>
+                </div>
+                <form method="post" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="border rounded p-3 mb-3">
+                        <h5>{{ channel_label }} account linking</h5>
+                        {% if token %}
+                            {% if channel == 'telegram' %}
+                                {% if link_url %}
+                                    <p>Open the bot link and press <strong>Start</strong> in Telegram. Then return here to check your connection.</p>
+                                    <div class="mb-3"><a href="{{ link_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Open Telegram bot</a></div>
+                                {% else %}
+                                    <p>Open this site’s Telegram bot and send the command below. If you don’t know the bot’s name, ask your administrator.</p>
+                                {% endif %}
+                            {% else %}
+                                <p>Open Discord and send the command below to this site’s bot in a direct message. Then return here to check your connection.</p>
+                            {% endif %}
+                            <label for="link-command" class="form-label">Start command</label>
+                            <input id="link-command" class="form-control mb-2" type="text" value="/start {{ token.token }}" readonly onclick="this.select()">
+                            <p class="form-text mb-3">This command works once and expires within 24 hours. Keep it private.</p>
+                            <button type="submit" name="action" value="generate" class="btn btn-outline-secondary">Generate a new command</button>
+                        {% else %}
+                            <p>Generate a private linking command to connect your {{ channel_label }} account.</p>
+                            <button type="submit" name="action" value="generate" class="btn btn-primary">Generate {{ channel_label }} link</button>
+                        {% endif %}
+                    </div>
+                    <div class="d-grid gap-2 d-sm-flex flex-sm-wrap">
+                        <button type="submit" name="action" value="check" class="btn btn-success">Check connection</button>
+                        <button type="submit" name="action" value="skip" class="btn btn-outline-secondary">Use email instead</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

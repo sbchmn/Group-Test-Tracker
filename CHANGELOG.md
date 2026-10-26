@@ -7,6 +7,32 @@ identified explicitly below.
 
 ## Unreleased
 
+### Account merge participant names
+
+- Fixed participant lists showing the removed account's name after a merge, including when only that account had joined the test. Transferred rows now show the primary account's name and retained Telegram handle.
+- Added a repair for earlier merges that preserves payment status, amounts, proof histories and later manual name edits.
+
+### October 24, 2026 — commit summary
+
+#### `17c1da8` — Automatic costs, account merging, and username rules
+
+- Participant costs now update automatically while a group is Recruiting, then stay fixed when payment collection begins. Late buyers have a separate price that admins can adjust.
+- Admins can preview cost changes before applying them. Amounts shown to participants, in notifications, and in exports stay consistent with their assigned charges.
+- Added a preview for merging duplicate accounts, with choices for conflicting records and chat links while preserving payment proof histories.
+- New or changed usernames cannot contain spaces or other whitespace, including before or after the name.
+
+#### `ad2d0c3` — Cleaner layouts across screen sizes
+
+- Improved buttons, menus, forms, and tables across participant and admin pages, including the Action Queue.
+- Fixed cramped buttons and hidden table content on phones and tablets. Lists switch to readable cards where space is limited.
+- Added browser checks and screenshots covering desktop, tablet, and phone layouts.
+
+#### `46dc2b0` — Payment proof submission and review
+
+- Participants can report or update a payment in a popup, attaching an image, a transaction ID, or both. Admins choose which proof each payment method accepts and requires.
+- Admins can review proof from Manage Participants or the Action Queue, then approve or deny the payment. Denials require a reason and notify the participant so they can correct and resubmit.
+- Crypto transaction IDs link to the correct blockchain explorer. Payment images stay private, even when result images are public.
+
 ### Telegram user-support retorts
 
 - Added opt-in AI retorts when another bot directly replies to a human command
@@ -35,6 +61,14 @@ identified explicitly below.
   `THIRD_PARTY_NOTICES.md`.
 - Added license and third-party attribution information to the Version page.
 - Identified PyMuPDF's AGPL/commercial licensing choice as a distribution gate.
+
+## 4.2 - 2026-10-24
+
+Added optional customer branding that any administrator can configure, including the app name, logos, browser icon, colors, fonts, help links, and operator details on the built-in legal pages. Administrators can save a private draft, preview phone/tablet/desktop layouts, publish it, and restore earlier revisions. Members can choose light, dark, or their device’s appearance. Published branding also appears in email presentation and default bot wording, while preserving existing message templates, delivery settings, and a small “Powered by GTM” credit. Customers keep their existing website addresses.
+
+## 4.1 - 2026-10-24
+
+`3422a53` — Added notification preferences during registration and guided Telegram or Discord account linking after login. Email stays active until linking is completed, and reminders stop after completion, skipping, or seven days. New accounts cannot reuse existing usernames, Telegram usernames, or Discord usernames. Existing duplicate accounts and notification fallback behavior are preserved. Updated screens were checked across desktop, tablet, and mobile.
 
 ## 4.0 - 2026-09-16
 

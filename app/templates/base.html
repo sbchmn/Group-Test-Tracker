@@ -1,12 +1,26 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Group Test Manager{% endblock %}</title>
+    <title>{% block title %}{{ brand_name }}{% endblock %}</title>
+    <script>
+        window.gtmAppearance = {preference: {{ branding_theme_preference|tojson }}, defaultTheme: {{ branding.default_theme|tojson }}};
+        (function () {
+            const settings = window.gtmAppearance;
+            const choice = settings.preference === 'site' ? settings.defaultTheme : settings.preference;
+            const media = window.matchMedia('(prefers-color-scheme: dark)');
+            const apply = () => document.documentElement.setAttribute('data-bs-theme', choice === 'system' ? (media.matches ? 'dark' : 'light') : choice);
+            apply();
+            media.addEventListener('change', apply);
+        })();
+    </script>
+    {% if branding.favicon or branding.logo %}<link rel="icon" type="image/png" href="{{ branding_asset_url(branding.favicon or branding.logo, icon=True) }}">{% endif %}
     <!-- Bootstrap 5 CDN - lightweight, responsive, professional -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/payments.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
     <style>
         body { background-color: #f8f9fa; }
         .navbar { box-shadow: 0 2px 4px rgba(0,0,0,.1); }
@@ -22,20 +36,39 @@
         .legal-document h3 { margin-top: 1.35rem; font-size: 1.1rem; }
         .legal-document li { margin-bottom: .4rem; }
     </style>
+    <style>
+        :root { --gtm-font: {{ branding_font|safe }}; }
+        {% for mode, colors in branding_colors.items() %}
+        [data-bs-theme="{{ mode }}"] {
+            --gtm-accent: {{ colors.accent }}; --gtm-accent-text: {{ colors.accent_text }};
+            --gtm-accent-hover: {{ colors.accent_hover }};
+            --gtm-nav: {{ colors.nav }}; --gtm-nav-text: {{ colors.nav_text }};
+            --gtm-surface: {{ colors.surface }}; --gtm-link: {{ colors.link }};
+            --gtm-logo-primary: {{ 'none' if colors.nav_text == '#ffffff' and branding.dark_logo else 'inline' }};
+            --gtm-logo-alternative: {{ 'inline' if colors.nav_text == '#ffffff' and branding.dark_logo else 'none' }};
+        }
+        {% endfor %}
+    </style>
     {% block extra_head %}{% endblock %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/branding.css') }}">
 </head>
-<body>
+<body{% if branding_preview %} inert{% endif %}>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('main.index') }}">
-                <i class="bi bi-flask"></i> Group Test Manager
+            <a class="navbar-brand" href="{{ url_for('main.dashboard') if current_user.is_authenticated and not branding_preview_public else url_for('main.index') }}">
+                {% if branding.logo %}
+                <img class="brand-logo brand-logo-light" src="{{ branding_asset_url(branding.logo) }}" alt="" onerror="this.hidden=true">
+                <img class="brand-logo brand-logo-dark" src="{{ branding_asset_url(branding.dark_logo or branding.logo) }}" alt="" onerror="this.hidden=true">
+                {% else %}<i class="bi bi-flask"></i>{% endif %}
+                <span class="brand-full-name">{{ brand_name }}</span>
+                <span class="brand-short-name">{{ branding.short_name or brand_name }}</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    {% if current_user.is_authenticated %}
+                    {% if current_user.is_authenticated and not branding_preview_public %}
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
                         </li>
@@ -79,7 +112,8 @@
         </div>
     </nav>
 
-    <div class="container mt-4">
+    <div class="container mt-4" id="main-content">
+        {% if branding_preview %}<div class="alert alert-secondary small">Private draft preview · sample content · interactions disabled</div><div inert>{% endif %}
         <!-- Flash messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -93,28 +127,52 @@
         {% endwith %}
 
         {% block content %}{% endblock %}
+        {% if branding_preview %}</div>{% endif %}
     </div>
 
     <footer class="container mt-5 text-center text-muted small">
-        <p>Group Test Manager • Replaces manual spreadsheets • Built for DigitalOcean</p>
+        {% if branding.enabled %}
+        <p>{{ brand_name }}{% if branding.tagline %} · {{ branding.tagline }}{% endif %}</p>
+        <p class="branding-attribution"><a class="text-muted" href="https://grouptest.online">Powered by GTM</a></p>
+        {% else %}<p>Group Test Manager • Replaces manual spreadsheets • Built for DigitalOcean</p>{% endif %}
         <p>
             <a class="text-muted" href="{{ url_for('main.terms_of_service') }}">Terms of Service</a>
             <span aria-hidden="true"> • </span>
             <a class="text-muted" href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a>
-            {% if managed_user_docs_url %}
-            <span aria-hidden="true"> • </span>
-            <a class="text-muted" href="{{ managed_user_docs_url }}" target="_blank" rel="noopener">User Docs</a>
+            {% if branding.support_email %}
+            <span aria-hidden="true"> · </span><a class="text-muted" href="mailto:{{ branding.support_email }}">Support</a>
             {% endif %}
-            {% if managed_admin_docs_url and current_user.is_authenticated and current_user.is_admin %}
+            {% if branding.user_help_url or managed_user_docs_url %}
             <span aria-hidden="true"> • </span>
-            <a class="text-muted" href="{{ managed_admin_docs_url }}" target="_blank" rel="noopener">Admin Docs</a>
+            <a class="text-muted" href="{{ branding.user_help_url or managed_user_docs_url }}" target="_blank" rel="noopener">User Docs</a>
+            {% endif %}
+            {% if (branding.admin_help_url or managed_admin_docs_url) and current_user.is_authenticated and current_user.is_admin and not branding_preview_public %}
+            <span aria-hidden="true"> • </span>
+            <a class="text-muted" href="{{ branding.admin_help_url or managed_admin_docs_url }}" target="_blank" rel="noopener">Admin Docs</a>
             {% endif %}
             <span aria-hidden="true"> • </span>
             <a class="text-muted" href="{{ url_for('main.version_info') }}">Version {{ app_version }}</a>
         </p>
+        {% if not branding_preview %}
+        <form method="post" action="{{ url_for('branding.theme') }}" class="appearance-control">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+            <label for="site-appearance">Appearance</label>
+            <select id="site-appearance" name="theme" class="form-select form-select-sm">
+                {% for value, label in [('site', 'Site default'), ('light', 'Light'), ('dark', 'Dark'), ('system', 'Device preference')] %}
+                <option value="{{ value }}"{% if branding_theme_preference == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" type="submit">Apply</button>
+        </form>
+        {% endif %}
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    {% if current_user.is_authenticated and not branding_preview %}
+        {% include '_payment_modal.html' %}
+        <script src="{{ url_for('static', filename='js/payments.js') }}" defer></script>
+    {% endif %}
     {% block scripts %}{% endblock %}
     <script>
         document.addEventListener('click', function (event) {

@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}{{ brand_name }} Preview{% endblock %}
+{% block content %}
+{% if email_body %}
+<h1 class="h4 mb-3">Sample email</h1>
+{{ email_body|safe }}
+{% else %}
+<h1 class="h3">Your dashboard</h1>
+<p class="text-muted">Sample group tests and participant data.</p>
+<div class="row g-3 mb-4">
+    <div class="col-sm-6"><div class="card"><div class="card-body"><h2 class="h5">Active group tests</h2><div class="display-6">3</div><a class="btn btn-primary mt-3" href="#">View group tests</a></div></div></div>
+    <div class="col-sm-6"><div class="card"><div class="card-body"><h2 class="h5">Your balance</h2><div class="display-6">$42.00</div><span class="badge text-bg-warning mt-3">Payment pending</span></div></div></div>
+</div>
+<div class="record-container"><table class="table record-table"><thead><tr><th>Group test</th><th>Status</th><th>Balance</th><th>Actions</th></tr></thead><tbody>
+<tr><td class="record-title" data-label="Group test">Community sample test</td><td data-label="Status"><span class="badge text-bg-success">Recruiting</span></td><td data-label="Balance">$42.00</td><td class="record-actions"><button class="btn btn-outline-primary">View details</button></td></tr>
+<tr><td class="record-title" data-label="Group test">Completed sample test</td><td data-label="Status"><span class="badge text-bg-secondary">Completed</span></td><td data-label="Balance">Paid</td><td class="record-actions"><button class="btn btn-outline-secondary">View results</button></td></tr>
+</tbody></table></div>
+<div class="alert alert-info">Notifications and payment actions appear here as your tests progress.</div>
+{% endif %}
+{% endblock %}

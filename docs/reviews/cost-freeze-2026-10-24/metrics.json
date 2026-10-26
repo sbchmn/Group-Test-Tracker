@@ -1,0 +1,1202 @@
+[
+  {
+    "label": "recruiting",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 2687,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Current Fair Share",
+          "Actions"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "recruiting",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 2539,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Current Fair Share",
+          "Actions"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "recruiting",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 805,
+    "innerWidth": 820,
+    "pageWidth": 805,
+    "pageHeight": 1800,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Current Fair Share",
+          "Actions"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "recruiting",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 1009,
+    "innerWidth": 1024,
+    "pageWidth": 1009,
+    "pageHeight": 1744,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Current Fair Share",
+          "Actions"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "recruiting",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 1425,
+    "innerWidth": 1440,
+    "pageWidth": 1425,
+    "pageHeight": 1169,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Current Fair Share",
+          "Actions"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "frozen-manage",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 3201,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Pricing Basis",
+          "Actions"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "frozen-manage",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 3033,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Pricing Basis",
+          "Actions"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "frozen-manage",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 805,
+    "innerWidth": 820,
+    "pageWidth": 805,
+    "pageHeight": 2099,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Pricing Basis",
+          "Actions"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "frozen-manage",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 1009,
+    "innerWidth": 1024,
+    "pageWidth": 1009,
+    "pageHeight": 2043,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Pricing Basis",
+          "Actions"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "frozen-manage",
+    "title": "Manage Participants - Cost Freeze Browser Review",
+    "url": "/admin/manage-participants/1",
+    "clientWidth": 1425,
+    "innerWidth": 1440,
+    "pageWidth": 1425,
+    "pageHeight": 1444,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "#",
+          "Name / TG",
+          "US / State",
+          "Vial Donor",
+          "Request State",
+          "Order Status",
+          "Paid Lab?",
+          "Assigned Charge",
+          "Pricing Basis",
+          "Actions"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Participants for \"Cost Freeze Browser Review\"\n\nApprove, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recr",
+    "modal": null
+  },
+  {
+    "label": "frozen-queue",
+    "title": "Admin Action Queue",
+    "url": "/admin/action-queue",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 1695,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Select request",
+          "Participant",
+          "Group Test",
+          "Item / Status",
+          "Requested / Reported",
+          "Actions"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": true,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Admin Action Queue\n\nReview every item that currently requires administrator approval or attention.\n\nBack to Dashboard\nResult Analysis\n0 requiring attention\nNo result analyses curre",
+    "modal": null
+  },
+  {
+    "label": "frozen-queue",
+    "title": "Admin Action Queue",
+    "url": "/admin/action-queue",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1662,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Select request",
+          "Participant",
+          "Group Test",
+          "Item / Status",
+          "Requested / Reported",
+          "Actions"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": true,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Admin Action Queue\n\nReview every item that currently requires administrator approval or attention.\n\nBack to Dashboard\nResult Analysis\n0 requiring attention\nNo result analyses curre",
+    "modal": null
+  },
+  {
+    "label": "frozen-queue",
+    "title": "Admin Action Queue",
+    "url": "/admin/action-queue",
+    "clientWidth": 805,
+    "innerWidth": 820,
+    "pageWidth": 805,
+    "pageHeight": 1352,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Select request",
+          "Participant",
+          "Group Test",
+          "Item / Status",
+          "Requested / Reported",
+          "Actions"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": true,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Admin Action Queue\n\nReview every item that currently requires administrator approval or attention.\n\nBack to Dashboard\nResult Analysis\n0 requiring attention\nNo result analyses curre",
+    "modal": null
+  },
+  {
+    "label": "frozen-queue",
+    "title": "Admin Action Queue",
+    "url": "/admin/action-queue",
+    "clientWidth": 1009,
+    "innerWidth": 1024,
+    "pageWidth": 1009,
+    "pageHeight": 1275,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Select request",
+          "Participant",
+          "Group Test",
+          "Item / Status",
+          "Requested / Reported",
+          "Actions"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": true,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Admin Action Queue\n\nReview every item that currently requires administrator approval or attention.\n\nBack to Dashboard\nResult Analysis\n0 requiring attention\nNo result analyses curre",
+    "modal": null
+  },
+  {
+    "label": "frozen-queue",
+    "title": "Admin Action Queue",
+    "url": "/admin/action-queue",
+    "clientWidth": 1425,
+    "innerWidth": 1440,
+    "pageWidth": 1425,
+    "pageHeight": 1027,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Select request",
+          "Participant",
+          "Group Test",
+          "Item / Status",
+          "Requested / Reported",
+          "Actions"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": true,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Admin Action Queue\n\nReview every item that currently requires administrator approval or attention.\n\nBack to Dashboard\nResult Analysis\n0 requiring attention\nNo result analyses curre",
+    "modal": null
+  },
+  {
+    "label": "group-detail",
+    "title": "Cost Freeze Browser Review",
+    "url": "/test/1",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 3511,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Name / TG",
+          "Role",
+          "Request State",
+          "Vendor Order",
+          "Amount Owed",
+          "Lab Fee Paid"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Dashboard\nCost Freeze Browser Review\nCost Freeze Browser Review\nReady For Payment\nEdit Test\nManage Participants\nTest Parameters\nVendor / Batch\n\u2014 / \u2014\nCompound / Size\n\u2014 \u2022 \u2014\nOrder / Q",
+    "modal": null
+  },
+  {
+    "label": "group-detail",
+    "title": "Cost Freeze Browser Review",
+    "url": "/test/1",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 3291,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Name / TG",
+          "Role",
+          "Request State",
+          "Vendor Order",
+          "Amount Owed",
+          "Lab Fee Paid"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Dashboard\nCost Freeze Browser Review\nCost Freeze Browser Review\nReady For Payment\nEdit Test\nManage Participants\nTest Parameters\nVendor / Batch\n\u2014 / \u2014\nCompound / Size\n\u2014 \u2022 \u2014\nOrder / Q",
+    "modal": null
+  },
+  {
+    "label": "group-detail",
+    "title": "Cost Freeze Browser Review",
+    "url": "/test/1",
+    "clientWidth": 805,
+    "innerWidth": 820,
+    "pageWidth": 805,
+    "pageHeight": 2409,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Name / TG",
+          "Role",
+          "Request State",
+          "Vendor Order",
+          "Amount Owed",
+          "Lab Fee Paid"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Dashboard\nCost Freeze Browser Review\nCost Freeze Browser Review\nReady For Payment\nEdit Test\nManage Participants\nTest Parameters\nVendor / Batch\n\u2014 / \u2014\nCompound / Size\n\u2014 \u2022 \u2014\nOrder / Q",
+    "modal": null
+  },
+  {
+    "label": "group-detail",
+    "title": "Cost Freeze Browser Review",
+    "url": "/test/1",
+    "clientWidth": 1009,
+    "innerWidth": 1024,
+    "pageWidth": 1009,
+    "pageHeight": 1867,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Name / TG",
+          "Role",
+          "Request State",
+          "Vendor Order",
+          "Amount Owed",
+          "Lab Fee Paid"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Dashboard\nCost Freeze Browser Review\nCost Freeze Browser Review\nReady For Payment\nEdit Test\nManage Participants\nTest Parameters\nVendor / Batch\n\u2014 / \u2014\nCompound / Size\n\u2014 \u2022 \u2014\nOrder / Q",
+    "modal": null
+  },
+  {
+    "label": "group-detail",
+    "title": "Cost Freeze Browser Review",
+    "url": "/test/1",
+    "clientWidth": 1425,
+    "innerWidth": 1440,
+    "pageWidth": 1425,
+    "pageHeight": 1484,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Name / TG",
+          "Role",
+          "Request State",
+          "Vendor Order",
+          "Amount Owed",
+          "Lab Fee Paid"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Dashboard\nCost Freeze Browser Review\nCost Freeze Browser Review\nReady For Payment\nEdit Test\nManage Participants\nTest Parameters\nVendor / Batch\n\u2014 / \u2014\nCompound / Size\n\u2014 \u2022 \u2014\nOrder / Q",
+    "modal": null
+  },
+  {
+    "label": "add-participant",
+    "title": "Add User to Cost Freeze Browser Review",
+    "url": "/admin/add-participant/1",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 900,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Add Existing User to \"Cost Freeze Browser Review\"\n\nThe user will be automatically approved.\n\nSelect User\nbrowser-admin (admin@example.test)\nBuy-in amount ($)\nLeave blank to use the",
+    "modal": null
+  },
+  {
+    "label": "add-participant",
+    "title": "Add User to Cost Freeze Browser Review",
+    "url": "/admin/add-participant/1",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1000,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Add Existing User to \"Cost Freeze Browser Review\"\n\nThe user will be automatically approved.\n\nSelect User\nbrowser-admin (admin@example.test)\nBuy-in amount ($)\nLeave blank to use the",
+    "modal": null
+  },
+  {
+    "label": "add-participant",
+    "title": "Add User to Cost Freeze Browser Review",
+    "url": "/admin/add-participant/1",
+    "clientWidth": 820,
+    "innerWidth": 820,
+    "pageWidth": 820,
+    "pageHeight": 1180,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Add Existing User to \"Cost Freeze Browser Review\"\n\nThe user will be automatically approved.\n\nSelect User\nbrowser-admin (admin@example.test)\nBuy-in amount ($)\nLeave blank to use the",
+    "modal": null
+  },
+  {
+    "label": "add-participant",
+    "title": "Add User to Cost Freeze Browser Review",
+    "url": "/admin/add-participant/1",
+    "clientWidth": 1024,
+    "innerWidth": 1024,
+    "pageWidth": 1024,
+    "pageHeight": 1100,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Add Existing User to \"Cost Freeze Browser Review\"\n\nThe user will be automatically approved.\n\nSelect User\nbrowser-admin (admin@example.test)\nBuy-in amount ($)\nLeave blank to use the",
+    "modal": null
+  },
+  {
+    "label": "add-participant",
+    "title": "Add User to Cost Freeze Browser Review",
+    "url": "/admin/add-participant/1",
+    "clientWidth": 1440,
+    "innerWidth": 1440,
+    "pageWidth": 1440,
+    "pageHeight": 1000,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Add Existing User to \"Cost Freeze Browser Review\"\n\nThe user will be automatically approved.\n\nSelect User\nbrowser-admin (admin@example.test)\nBuy-in amount ($)\nLeave blank to use the",
+    "modal": null
+  },
+  {
+    "label": "edit-late-buyer",
+    "title": "Edit Participant",
+    "url": "/admin/update-participant/3",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 1442,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Edit Participant: Late access buyer for Cost Freeze Browser Review\nName\nTG Username\nIdentity Verified\nActive\nVial Donor\nUS Based\nState\nOrder Status\nPending\nOrdered\nShipped to Lab\nR",
+    "modal": null
+  },
+  {
+    "label": "edit-late-buyer",
+    "title": "Edit Participant",
+    "url": "/admin/update-participant/3",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1417,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Edit Participant: Late access buyer for Cost Freeze Browser Review\nName\nTG Username\nIdentity Verified\nActive\nVial Donor\nUS Based\nState\nOrder Status\nPending\nOrdered\nShipped to Lab\nR",
+    "modal": null
+  },
+  {
+    "label": "edit-late-buyer",
+    "title": "Edit Participant",
+    "url": "/admin/update-participant/3",
+    "clientWidth": 820,
+    "innerWidth": 820,
+    "pageWidth": 820,
+    "pageHeight": 1180,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Edit Participant: Late access buyer for Cost Freeze Browser Review\nName\nTG Username\nIdentity Verified\nActive\nVial Donor\nUS Based\nState\nOrder Status\nPending\nOrdered\nShipped to Lab\nR",
+    "modal": null
+  },
+  {
+    "label": "edit-late-buyer",
+    "title": "Edit Participant",
+    "url": "/admin/update-participant/3",
+    "clientWidth": 1024,
+    "innerWidth": 1024,
+    "pageWidth": 1024,
+    "pageHeight": 1100,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Edit Participant: Late access buyer for Cost Freeze Browser Review\nName\nTG Username\nIdentity Verified\nActive\nVial Donor\nUS Based\nState\nOrder Status\nPending\nOrdered\nShipped to Lab\nR",
+    "modal": null
+  },
+  {
+    "label": "edit-late-buyer",
+    "title": "Edit Participant",
+    "url": "/admin/update-participant/3",
+    "clientWidth": 1440,
+    "innerWidth": 1440,
+    "pageWidth": 1440,
+    "pageHeight": 1000,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Edit Participant: Late access buyer for Cost Freeze Browser Review\nName\nTG Username\nIdentity Verified\nActive\nVial Donor\nUS Based\nState\nOrder Status\nPending\nOrdered\nShipped to Lab\nR",
+    "modal": null
+  },
+  {
+    "label": "reprice-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 1335,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming applies this recalculation once and keeps costs frozen. Late buy-ins retain their assigned charges ",
+    "modal": null
+  },
+  {
+    "label": "reprice-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1238,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming applies this recalculation once and keeps costs frozen. Late buy-ins retain their assigned charges ",
+    "modal": null
+  },
+  {
+    "label": "reprice-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 820,
+    "innerWidth": 820,
+    "pageWidth": 820,
+    "pageHeight": 1180,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming applies this recalculation once and keeps costs frozen. Late buy-ins retain their assigned charges ",
+    "modal": null
+  },
+  {
+    "label": "reprice-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 1024,
+    "innerWidth": 1024,
+    "pageWidth": 1024,
+    "pageHeight": 1100,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming applies this recalculation once and keeps costs frozen. Late buy-ins retain their assigned charges ",
+    "modal": null
+  },
+  {
+    "label": "reprice-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 1440,
+    "innerWidth": 1440,
+    "pageWidth": 1440,
+    "pageHeight": 1000,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming applies this recalculation once and keeps costs frozen. Late buy-ins retain their assigned charges ",
+    "modal": null
+  },
+  {
+    "label": "unlock-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 1317,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming unlocks costs and resumes automatic updates during Recruiting. Late buy-ins retain their assigned c",
+    "modal": null
+  },
+  {
+    "label": "unlock-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1217,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming unlocks costs and resumes automatic updates during Recruiting. Late buy-ins retain their assigned c",
+    "modal": null
+  },
+  {
+    "label": "unlock-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 820,
+    "innerWidth": 820,
+    "pageWidth": 820,
+    "pageHeight": 1180,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming unlocks costs and resumes automatic updates during Recruiting. Late buy-ins retain their assigned c",
+    "modal": null
+  },
+  {
+    "label": "unlock-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 1024,
+    "innerWidth": 1024,
+    "pageWidth": 1024,
+    "pageHeight": 1100,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming unlocks costs and resumes automatic updates during Recruiting. Late buy-ins retain their assigned c",
+    "modal": null
+  },
+  {
+    "label": "unlock-preview",
+    "title": "Review Cost Changes",
+    "url": "/admin/recalculate-costs/1",
+    "clientWidth": 1440,
+    "innerWidth": 1440,
+    "pageWidth": 1440,
+    "pageHeight": 1000,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Participant",
+          "Current charge",
+          "Proposed charge",
+          "Change"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Review Cost Changes\n\nCost Freeze Browser Review\n\nBack to Participants\nConfirming unlocks costs and resumes automatic updates during Recruiting. Late buy-ins retain their assigned c",
+    "modal": null
+  }
+]

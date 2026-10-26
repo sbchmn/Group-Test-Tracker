@@ -49,6 +49,7 @@ CLAIM_MISSING_USER = "missing-user"
 CLAIM_EXTERNAL_OWNED = "external-owned"
 CLAIM_USER_OWNED = "user-owned"
 CLAIM_UNKNOWN_PROVIDER = "unknown-provider"
+CLAIM_USERNAME_OWNED = "username-owned"
 
 
 def supports_provider(provider):
@@ -117,6 +118,16 @@ def claim_link_token(provider, token_value, external_id=None, chat_id=None, user
     if not user.is_active:
         return None, CLAIM_INACTIVE_USER
 
+    username_column = fields.get("username")
+    if username_column and username:
+        from .usernames import identity_key
+        owner = User.query.filter(
+            getattr(User, username_column + '_key') == identity_key(username, handle=True),
+            User.id != user.id,
+        ).first()
+        if owner is not None and identity_key(getattr(user, username_column), handle=True) != identity_key(username, handle=True):
+            return None, CLAIM_USERNAME_OWNED
+
     external_column = fields.get("external_id")
     if external_column and external_id:
         normalized = str(external_id).strip()
@@ -137,4 +148,6 @@ def claim_link_token(provider, token_value, external_id=None, chat_id=None, user
         setattr(user, username_column, str(username).strip()[:80])
 
     token.used_at = datetime.utcnow()
+    from .notification_setup import resolve_setup
+    resolve_setup(user)
     return user, CLAIM_OK

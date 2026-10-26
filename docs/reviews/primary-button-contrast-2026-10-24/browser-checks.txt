@@ -1,0 +1,24 @@
+light 390px normal: rgb(255, 255, 255) on rgb(13, 110, 253), 4.50:1 passed
+light 390px hover: rgb(255, 255, 255) on rgb(11, 97, 223), 5.54:1 passed
+light 390px active: rgb(255, 255, 255) on rgb(11, 97, 223), 5.54:1 passed
+light 390px disabled colors: rgb(255, 255, 255) on rgb(13, 110, 253), 4.50:1 passed
+light 820px normal: rgb(255, 255, 255) on rgb(13, 110, 253), 4.50:1 passed
+light 820px hover: rgb(255, 255, 255) on rgb(11, 97, 223), 5.54:1 passed
+light 820px active: rgb(255, 255, 255) on rgb(11, 97, 223), 5.54:1 passed
+light 820px disabled colors: rgb(255, 255, 255) on rgb(13, 110, 253), 4.50:1 passed
+light 1440px normal: rgb(255, 255, 255) on rgb(13, 110, 253), 4.50:1 passed
+light 1440px hover: rgb(255, 255, 255) on rgb(11, 97, 223), 5.54:1 passed
+light 1440px active: rgb(255, 255, 255) on rgb(11, 97, 223), 5.54:1 passed
+light 1440px disabled colors: rgb(255, 255, 255) on rgb(13, 110, 253), 4.50:1 passed
+dark 390px normal: rgb(0, 0, 0) on rgb(110, 168, 254), 8.70:1 passed
+dark 390px hover: rgb(0, 0, 0) on rgb(127, 178, 254), 9.70:1 passed
+dark 390px active: rgb(0, 0, 0) on rgb(127, 178, 254), 9.70:1 passed
+dark 390px disabled colors: rgb(0, 0, 0) on rgb(110, 168, 254), 8.70:1 passed
+dark 820px normal: rgb(0, 0, 0) on rgb(110, 168, 254), 8.70:1 passed
+dark 820px hover: rgb(0, 0, 0) on rgb(127, 178, 254), 9.70:1 passed
+dark 820px active: rgb(0, 0, 0) on rgb(127, 178, 254), 9.70:1 passed
+dark 820px disabled colors: rgb(0, 0, 0) on rgb(110, 168, 254), 8.70:1 passed
+dark 1440px normal: rgb(0, 0, 0) on rgb(110, 168, 254), 8.70:1 passed
+dark 1440px hover: rgb(0, 0, 0) on rgb(127, 178, 254), 9.70:1 passed
+dark 1440px active: rgb(0, 0, 0) on rgb(127, 178, 254), 9.70:1 passed
+dark 1440px disabled colors: rgb(0, 0, 0) on rgb(110, 168, 254), 8.70:1 passed

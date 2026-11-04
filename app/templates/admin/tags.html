@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "admin/_actions.html" import more_menu %}
 
 {% block title %}Tags{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-3">
+<div class="page-header mb-3">
     <div>
         <h3 class="mb-1">Tags</h3>
         <p class="text-muted mb-0">Tags are created automatically the moment anyone types one on a group test or public result, so you never have to add one in advance. Use this page to repair the ones that go wrong: rename a misspelling, merge two tags that mean the same thing, retire a spelling you want out of the picker, or remove one that is attached to nothing.</p>
@@ -14,22 +15,22 @@
 {% if duplicate_pairs %}
     <div class="card mb-4 border-warning">
         <div class="card-header">Possible duplicates</div>
-        <div class="card-body p-0">
+        <div class="card-body p-0 record-container">
             <p class="text-muted small px-3 pt-3 mb-2">These names are very similar. The suggestions below keep the more widely used spelling and absorb the other; they are only suggestions, so merge anything that really is the same thing.</p>
-            <table class="table table-sm mb-0 align-middle">
+            <table class="table table-sm mb-0 align-middle record-table record-table-single">
                 <thead class="table-light">
                     <tr>
                         <th>Keep</th>
                         <th>Absorb</th>
-                        <th class="text-end">Merge</th>
+                        <th class="text-end record-actions-heading">Merge</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for pair in duplicate_pairs %}
                         <tr>
-                            <td>{{ pair.target.name }}</td>
-                            <td class="text-muted"><s>{{ pair.source.name }}</s></td>
-                            <td class="text-end">
+                            <td data-label="Keep" class="record-title">{{ pair.target.name }}</td>
+                            <td class="text-muted" data-label="Absorb"><s>{{ pair.source.name }}</s></td>
+                            <td class="text-end record-actions" data-label="Actions">
                                 <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.tags', merge_source=pair.source.id, merge_target=pair.target.id) }}#merge">Merge these</a>
                             </td>
                         </tr>
@@ -77,65 +78,64 @@
         <span>All tags</span>
         <small class="text-muted">{{ tag_rows|length }} total{% if unused_count %} &middot; {{ unused_count }} unused{% endif %}</small>
     </div>
-    <div class="card-body p-0">
+    <div class="card-body p-0 record-container">
         {% if tag_rows %}
-            <table class="table mb-0 align-middle">
+            <table class="table mb-0 align-middle record-table ">
                 <thead class="table-light">
                     <tr>
                         <th>Tag</th>
                         <th>Used in</th>
                         <th style="width: 34%">Rename</th>
-                        <th class="text-end">Actions</th>
+                        <th class="text-end record-actions-heading">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in tag_rows %}
                         <tr>
-                            <td>
+                            <td data-label="Tag" class="record-title">
                                 {{ row.tag.name }}
                                 {% if row.tag.hidden_from_bots %}
                                     <span class="badge bg-secondary" title="Kept out of the Telegram and Discord public-results menus. The results themselves are still published.">Hidden from bot menus</span>
                                 {% endif %}
                             </td>
-                            <td class="text-nowrap">
+                            <td class="text-nowrap" data-label="Used in">
                                 {% if row.total %}
                                     {{ row.tests }} test{{ 's' if row.tests != 1 }} &middot; {{ row.results }} result{{ 's' if row.results != 1 }}
                                 {% else %}
                                     <span class="badge bg-secondary">Unused</span>
                                 {% endif %}
                             </td>
-                            <td>
-                                <form method="POST" action="{{ url_for('main.rename_tag', tag_id=row.tag.id) }}" class="d-flex gap-1">
+                            <td data-label="Rename" class="record-rename">
+                                <form method="POST" action="{{ url_for('main.rename_tag', tag_id=row.tag.id) }}" class="rename-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="text" name="name" class="form-control form-control-sm" value="{{ row.tag.name }}" maxlength="120" aria-label="New name for the tag {{ row.tag.name }}">
                                     <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
                                 </form>
                             </td>
-                            <td class="text-end text-nowrap">
-                                <a href="{{ url_for('main.tags', merge_source=row.tag.id) }}#merge" class="btn btn-sm btn-outline-primary">Merge</a>
+                            <td class="text-end text-nowrap record-actions" data-label="Actions"><div class="action-row"><a href="{{ url_for('main.tags', merge_source=row.tag.id) }}#merge" class="btn btn-sm btn-outline-primary">Merge</a>{% call more_menu('tagMore' ~ row.tag.id) %}
                                 {% if row.results %}
-                                    <form method="POST" action="{{ url_for('main.toggle_tag_bots_visibility', tag_id=row.tag.id) }}" class="d-inline">
+                                    <li><form method="POST" action="{{ url_for('main.toggle_tag_bots_visibility', tag_id=row.tag.id) }}" class="d-inline">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         {% if row.tag.hidden_from_bots %}
-                                            <button type="submit" class="btn btn-sm btn-outline-success" title="Show this tag in the Telegram and Discord public-results menus again.">Show in bots</button>
+                                            <button type="submit" class="dropdown-item" title="Show this tag in the Telegram and Discord public-results menus again.">Show in bots</button>
                                         {% else %}
-                                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Keep this tag out of the bot menus to control how long that list is. Its published results stay readable by direct link and in the Public Results list.">Hide from bots</button>
+                                            <button type="submit" class="dropdown-item" title="Keep this tag out of the bot menus to control how long that list is. Its published results stay readable by direct link and in the Public Results list.">Hide from bots</button>
                                         {% endif %}
-                                    </form>
+                                    </form></li>
                                 {% endif %}
-                                <form method="POST" action="{{ url_for('main.toggle_tag_active', tag_id=row.tag.id) }}" class="d-inline">
+                                <li><form method="POST" action="{{ url_for('main.toggle_tag_active', tag_id=row.tag.id) }}" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="Keep it out of the tag picker without untagging anything. Public tag pages still work.">Retire</button>
-                                </form>
+                                    <button type="submit" class="dropdown-item" title="Keep it out of the tag picker without untagging anything. Public tag pages still work.">Retire</button>
+                                </form></li>
                                 {% if row.total %}
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="This tag is in use. Rename it, or merge it into another tag, instead.">Delete</button>
+                                    <li><button type="button" class="dropdown-item" disabled title="This tag is in use. Rename it, or merge it into another tag, instead.">Delete</button></li>
                                 {% else %}
-                                    <form method="POST" action="{{ url_for('main.delete_tag', tag_id=row.tag.id) }}" class="d-inline" onsubmit="return confirm('Delete this unused tag? It is not attached to anything, so nothing else changes.');">
+                                    <li><form method="POST" action="{{ url_for('main.delete_tag', tag_id=row.tag.id) }}" class="d-inline" onsubmit="return confirm('Delete this unused tag? It is not attached to anything, so nothing else changes.');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                    </form>
+                                        <button type="submit" class="dropdown-item text-danger">Delete</button>
+                                    </form></li>
                                 {% endif %}
-                            </td>
+                            {% endcall %}</div></td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -155,36 +155,36 @@
             <span>Retired and merged spellings</span>
             <small class="text-muted">{{ retired_rows|length }} total</small>
         </div>
-        <div class="card-body p-0">
+        <div class="card-body p-0 record-container">
             <p class="text-muted small px-3 pt-3 mb-2">These stay out of the tag picker but are kept in the database on purpose: public-results tag pages and bot buttons address tags by id, so removing them would break old links. Anything still attached to a record keeps showing under its tag as usual.</p>
-            <table class="table table-sm mb-0 align-middle">
+            <table class="table table-sm mb-0 align-middle record-table ">
                 <thead class="table-light">
                     <tr>
                         <th>Spelling</th>
                         <th>Status</th>
                         <th>Used in</th>
-                        <th class="text-end">Actions</th>
+                        <th class="text-end record-actions-heading">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in retired_rows %}
                         <tr>
-                            <td>{{ row.tag.name }}</td>
-                            <td>
+                            <td data-label="Spelling" class="record-title">{{ row.tag.name }}</td>
+                            <td data-label="Status">
                                 {% if row.merged_into %}
                                     <span class="badge bg-info text-dark">merged into {{ row.merged_into.name }}</span>
                                 {% else %}
                                     <span class="badge bg-secondary">retired</span>
                                 {% endif %}
                             </td>
-                            <td class="text-nowrap">
+                            <td class="text-nowrap" data-label="Used in">
                                 {% if row.total %}
                                     {{ row.tests }} test{{ 's' if row.tests != 1 }} &middot; {{ row.results }} result{{ 's' if row.results != 1 }}
                                 {% else %}
                                     <span class="text-muted">nothing</span>
                                 {% endif %}
                             </td>
-                            <td class="text-end text-nowrap">
+                            <td class="text-end text-nowrap record-actions" data-label="Actions">
                                 {% if row.merged_into %}
                                     <a href="{{ url_for('main.tags', merge_source=row.merged_into.id) }}#merge" class="btn btn-sm btn-outline-primary">Merge {{ row.merged_into.name }}</a>
                                 {% else %}

@@ -1,8 +1,8 @@
 """Application version metadata."""
 
 APP_NAME = "Group Test Manager"
-APP_VERSION = "4.0"
-APP_RELEASE = "Initial multi-bot administration and public-results release"
+APP_VERSION = "4.2"
+APP_RELEASE = "Optional customer branding and light/dark appearance"
 PROJECT_LICENSE = "Proprietary Commercial License"
 PROJECT_LICENSE_NOTICE = (
 	"Deployment, operation, copying, modification, or redistribution requires a "
@@ -11,6 +11,7 @@ PROJECT_LICENSE_NOTICE = (
 )
 
 THIRD_PARTY_ATTRIBUTIONS = (
+    ("Figtree and Lora fonts", "SIL Open Font License 1.1"),
 	("Flask, Flask-SQLAlchemy, Flask-WTF, WTForms, Werkzeug", "BSD-3-Clause"),
 	("Flask-Login", "MIT"),
 	("Flask-Limiter", "MIT"),

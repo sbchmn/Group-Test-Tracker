@@ -12,6 +12,7 @@ from urllib.error import URLError, HTTPError
 from flask import current_app
 from sqlalchemy.exc import SQLAlchemyError
 
+from .branding import brand_text
 from . import db
 from .models import NotificationConfig, NotificationTemplate, RootOutbox, User, UserDigestEvent
 from .bot_dispatch import post_json
@@ -157,6 +158,8 @@ def read_notification_log():
 def render_notification_template(template_text, context):
     if not template_text:
         return ""
+    from .branding import template_variables
+    context = {**template_variables(), **context}
     pattern = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
     return pattern.sub(lambda m: str(context.get(m.group(1), "")), template_text)
 
@@ -214,14 +217,18 @@ def send_mailjet_message(user, subject, body):
     if not recipient_email:
         return False
 
+    from .branding import effective_settings, email_parts
+    branding = effective_settings()
+    text_body, html_body = email_parts(body, settings=branding)
+
     payload = {
         "Messages": [
             {
-                "From": {"Email": sender_email, "Name": "Group Test Tracker"},
+                "From": {"Email": sender_email, "Name": branding['name'] if branding['enabled'] else "Group Test Tracker"},
                 "To": [{"Email": recipient_email, "Name": recipient_name or recipient_email}],
                 "Subject": subject,
-                "TextPart": body,
-                "HTMLPart": body,
+                "TextPart": text_body,
+                "HTMLPart": html_body,
             }
         ]
     }
@@ -742,7 +749,7 @@ def _queue_bot_webhook_message(provider_name, webhook_url, payload):
 
 def _send_discord_webhook_message(body):
     webhook_url = _get_config("discord_webhook_url")
-    username = str(_get_config("discord_webhook_username") or "Group Test Manager").strip() or "Group Test Manager"
+    username = str(_get_config("discord_webhook_username") or brand_text("Group Test Manager")).strip() or brand_text("Group Test Manager")
     payloads = [
         {**payload, "username": username}
         for payload in _build_discord_message_payloads(body)
@@ -1044,7 +1051,7 @@ def _render_user_digest_email(user, events):
         lines.append(f"- #{event.test_id} {event.test_title}: {old_status} -> {new_status}")
     lines.extend([
         "",
-        "You can review details by logging into Group Test Tracker.",
+        brand_text("You can review details by logging into Group Test Tracker."),
     ])
     return "\n".join(lines)
 

@@ -1,13 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}Welcome - Group Test Manager{% endblock %}
+{% block title %}Welcome - {{ brand_name }}{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-8 text-center">
-        <h1 class="display-5 mt-5"><i class="bi bi-flask-fill text-primary"></i> Group Test Manager</h1>
-        <p class="lead mt-3">Professional web tool to manage group lab testing for purity, mass, endotoxin, sterility, and more.</p>
-        <p class="text-muted">Replaces spreadsheets. Tracks participants, costs, vial donors, payments, and securely shares results.</p>
+        {% if branding.logo %}
+        <img class="landing-logo landing-logo-light" src="{{ branding_asset_url(branding.logo) }}" alt="{{ brand_name }} logo">
+        <img class="landing-logo landing-logo-dark" src="{{ branding_asset_url(branding.dark_logo or branding.logo) }}" alt="{{ brand_name }} logo">
+        {% endif %}
+        <h1 class="display-5 mt-5">{% if not branding.logo %}<i class="bi bi-flask-fill text-primary"></i> {% endif %}{{ brand_name }}</h1>
+        <p class="lead mt-3">{{ branding.intro }}</p>
+        <p class="text-muted">{% if branding.enabled %}{{ branding.tagline }}{% else %}Replaces spreadsheets. Tracks participants, costs, vial donors, payments, and securely shares results.{% endif %}</p>
         
         <div class="mt-4">
             <a href="{{ url_for('main.register') }}" class="btn btn-primary btn-lg me-2">Get Started - Register</a>

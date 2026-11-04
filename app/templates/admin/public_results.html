@@ -73,7 +73,7 @@ window.addEventListener('DOMContentLoaded', function() {
 {% endblock scripts %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-3">
+<div class="page-header mb-3">
     <div>
         <h3 class="mb-1">Public Results</h3>
         <p class="text-muted mb-0">Create and edit results entries that appear on every user's My Results page.</p>
@@ -110,7 +110,7 @@ window.addEventListener('DOMContentLoaded', function() {
                         {% if editing_result_image_url %}
                             <div class="mt-2 d-flex align-items-center gap-3">
                                 {% if editing_result and editing_result.results_image_key and (editing_result.results_image_key|lower)[-4:] == '.pdf' %}
-                                    <div class="d-flex align-items-center justify-content-center" style="width: 88px; height: 88px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
+                                    <div class="d-flex align-items-center justify-content-center" style="width: 88px; height: 88px; border-radius: 8px; border: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg);">
                                         <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
                                     </div>
                                 {% else %}
@@ -211,7 +211,7 @@ window.addEventListener('DOMContentLoaded', function() {
                                                         data-file-kind="{{ 'pdf' if result.results_image_key and (result.results_image_key|lower)[-4:] == '.pdf' else 'image' }}"
                                                         data-image-title="{{ result.title }}">
                                                     {% if result.results_image_key and (result.results_image_key|lower)[-4:] == '.pdf' %}
-                                                        <div class="d-flex align-items-center justify-content-center" style="width: 84px; height: 84px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa;">
+                                                        <div class="d-flex align-items-center justify-content-center" style="width: 84px; height: 84px; border-radius: 8px; border: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg);">
                                                             <i class="bi bi-file-earmark-pdf text-danger fs-2" aria-hidden="true"></i>
                                                         </div>
                                                     {% else %}
@@ -242,7 +242,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </div>
 
 <div class="modal fade" id="resultImageModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="resultImageModalTitle">Result File</h5>

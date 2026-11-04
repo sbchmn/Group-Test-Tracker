@@ -4,38 +4,36 @@
 
 {% block content %}
 <h3>Manage Participants for "{{ test.title }}"</h3>
-<p class="text-muted">Approve, deny, or reopen requests and update participant status from one page. Costs recalculate live.</p>
+<p class="text-muted">Approve, deny, or reopen requests and update participant status from one page. Costs update automatically during unlocked Recruiting and stay fixed after freezing.</p>
 
-<div class="mb-3 d-flex justify-content-between align-items-center">
-    <div>
+<div class="mb-3 d-flex flex-wrap gap-3 justify-content-between align-items-center">
+    <div class="participant-toolbar">
         <a href="{{ url_for('main.test_detail', test_id=test.id) }}" class="btn btn-sm btn-outline-secondary">← Back to Test</a>
-        <a href="{{ url_for('main.export_test', test_id=test.id) }}" class="btn btn-sm btn-success ms-2">
-            <i class="bi bi-download"></i> Export to Excel (Original Format)
+        <a href="{{ url_for('main.export_test', test_id=test.id) }}" class="btn btn-sm btn-success">
+            <i class="bi bi-download"></i> Export Excel
         </a>
-        <a href="{{ url_for('main.add_participant_to_test', test_id=test.id) }}" class="btn btn-sm btn-primary ms-2">
+        <a href="{{ url_for('main.add_participant_to_test', test_id=test.id) }}" class="btn btn-sm btn-primary">
             <i class="bi bi-person-plus"></i> Add Existing User
         </a>
-        <form method="POST" action="{{ url_for('main.recalculate_all_costs', test_id=test.id) }}" class="d-inline ms-2">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('Recalculate current fair share for ALL approved participants?')">
-                <i class="bi bi-arrow-repeat"></i> Recalculate All Costs
-            </button>
-        </form>
+
     </div>
-    <span>
-        Approved: <strong>{{ participations|selectattr('approved')|list|length }}</strong>
-        | Pending: <strong>{{ participations|rejectattr('approved')|rejectattr('denied')|list|length }}</strong>
-        | Denied: <strong>{{ participations|selectattr('denied')|list|length }}</strong>
-        | Payment reports: <strong>{{ participations|selectattr('payment_claim_pending')|list|length }}</strong>
-        | Donors: <strong>{{ test.num_donors }}</strong>
-    </span>
+    <div class="participant-counts small text-muted">
+        <span>Approved: <strong>{{ participations|selectattr('approved')|list|length }}</strong>
+        </span><span>Pending: <strong>{{ participations|rejectattr('approved')|rejectattr('denied')|list|length }}</strong>
+        </span><span>Denied: <strong>{{ participations|selectattr('denied')|list|length }}</strong>
+        </span><span>Payment reports: <strong>{{ participations|selectattr('payment_claim_pending')|list|length }}</strong>
+        </span><span>Donors: <strong>{{ test.num_donors }}</strong>
+        </span>
+    </div>
 </div>
+
+{% include 'admin/_cost_policy_controls.html' %}
 
 {% if not participations %}
     <div class="alert alert-info">No participation requests yet.</div>
 {% else %}
-    <div class="table-responsive">
-        <table class="table table-hover align-middle">
+    <div class="participants-table-wrap">
+        <table class="table align-middle participants-table">
             <thead class="table-light">
                 <tr>
                     <th>#</th>
@@ -45,26 +43,27 @@
                     <th>Request State</th>
                     <th>Order Status</th>
                     <th>Paid Lab?</th>
-                    <th>Stored Owed</th>
-                    <th>Current Fair Share</th>
-                    <th>Actions</th>
+                    <th>Assigned Charge</th>
+                    <th>{{ 'Pricing Basis' if test.costs_locked else 'Current Fair Share' }}</th>
+                    <th class="participant-actions-heading">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for p in participations %}
-                <tr class="{% if p.approved %}table-success{% elif p.denied %}table-danger{% else %}table-warning{% endif %}">
-                    <td>{{ loop.index }}</td>
-                    <td>
+                <tr class="participant-row">
+                    <td data-label="#">{{ loop.index }}</td>
+                    <td data-label="Name / TG">
                         <strong>{{ p.name or p.user.username }}</strong><br>
+                        {% if p.is_late_buy_in %}<span class="badge text-bg-info mb-1">Additional member</span><br>{% endif %}
                         <small class="text-muted">@{{ p.tg_username or p.user.tg_username or '—' }}</small>
                     </td>
-                    <td>{{ 'US' if p.us_based else 'INTL' }} {{ p.state or '' }}</td>
-                    <td>
-                        {% if p.vial_donor %}<span class="badge bg-info">Yes - gets credit</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}
+                    <td data-label="US / State">{{ 'US' if p.us_based else 'INTL' }} {{ p.state or '' }}</td>
+                    <td data-label="Vial Donor">
+                        {% if p.vial_donor %}<span class="badge bg-info">Yes{% if not p.is_late_buy_in %} - gets credit{% endif %}</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}
                     </td>
-                    <td>
+                    <td data-label="Request State">
                         {% if p.approved %}
-                            <span class="badge bg-success">Yes • {{ p.approved_at.strftime('%m/%d') if p.approved_at else '' }}</span>
+                            <span class="badge bg-success">Approved{% if p.approved_at %} • {{ p.approved_at.strftime('%m/%d') }}{% endif %}</span>
                         {% elif p.denied %}
                             <span class="badge bg-danger">Denied{% if p.denied_at %} • {{ p.denied_at.strftime('%m/%d') }}{% endif %}</span>
                             {% if p.denied_reason %}
@@ -74,76 +73,73 @@
                             <span class="badge bg-warning text-dark">Pending Review</span>
                         {% endif %}
                     </td>
-                    <td><span class="badge bg-light text-dark">{{ p.order_status }}</span></td>
-                    <td>
+                    <td data-label="Order Status"><span class="badge bg-light text-dark">{{ {'pending': 'Not ordered', 'ordered_from_vendor': 'Ordered from vendor', 'received_from_vendor': 'Received from vendor', 'ready_to_ship': 'Ready to ship to lab'}.get(p.order_status, (p.order_status or 'Unknown')|replace('_', ' ')|capitalize) }}</span></td>
+                    <td data-label="Paid Lab?">
                         {% if p.paid_lab %}
                             <i class="bi bi-check-circle-fill text-success"></i> <span class="badge text-bg-success">Paid • verified</span>
                         {% elif p.payment_claimed_at %}
                             <span class="badge text-bg-info">Payment reported {{ p.payment_claimed_at.strftime('%m/%d') }} • review</span>
                         {% else %}
-                            <i class="bi bi-x-circle text-muted"></i>
+                            <span class="text-muted small"><i class="bi bi-x-circle me-1"></i>Unpaid</span>
                         {% endif %}
                     </td>
-                    <td class="small">
+                    <td data-label="Assigned Charge" class="small">
                         ${{ '%.2f'|format(p.amount_owed) }}<br>
                         <small class="text-muted">Paid: ${{ '%.2f'|format(p.amount_paid) }}</small>
                     </td>
-                    <td class="small text-success fw-bold">
-                        ${{ '%.2f'|format(p.current_fair_share) }}
+                    <td data-label="{{ 'Pricing Basis' if test.costs_locked else 'Current Fair Share' }}" class="small text-success fw-bold">
+                        {% if not p.approved %}<span class="text-muted">Awaiting approval</span>{% elif p.is_late_buy_in %}Separate buy-in{% elif test.costs_locked %}Frozen share{% else %}${{ '%.2f'|format(p.current_fair_share) }}{% endif %}
                     </td>
-                    <td>
-                        {% if not p.approved %}
-                            <form method="POST" action="{{ url_for('main.approve_request', part_id=p.id) }}" class="d-inline">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-success">Approve</button>
-                            </form>
-                        {% endif %}
-
-                        {% if not p.approved and not p.denied %}
-                            <form method="POST" action="{{ url_for('main.deny_participant_from_manage', test_id=test.id, part_id=p.id) }}" class="d-inline manage-deny-form">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="deny_reason" class="deny-reason-input" value="">
-                                <button type="submit" class="btn btn-sm btn-outline-danger ms-1">Deny</button>
-                            </form>
-                        {% elif p.denied %}
-                            <form method="POST" action="{{ url_for('main.reopen_participant_from_manage', test_id=test.id, part_id=p.id) }}" class="d-inline">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-outline-secondary ms-1">Reopen</button>
-                            </form>
-                        {% endif %}
-
-                        {% if p.approved and not p.denied %}
-                            {% if p.paid_lab %}
-                                <form method="POST" action="{{ url_for('main.unmark_participant_payment', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Unmark this participant as paid? They will lose paid access to the results.')">
+                    <td data-label="Actions" class="participant-actions-cell">
+                        <div class="participant-actions">
+                            {% if not p.approved %}
+                                <form method="POST" action="{{ url_for('main.approve_request', part_id=p.id) }}" class="participant-primary-action">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="manage_test_id" value="{{ test.id }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-secondary ms-3"><i class="bi bi-cash"></i> Unmark Paid</button>
+                                    {% set pricing_test = test %}{% set pricing_id = p.id %}{% include 'admin/_buy_in_amount.html' %}
+                                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check2 me-1"></i> Approve</button>
                                 </form>
-                            {% else %}
-                                <form method="POST" action="{{ url_for('main.confirm_participant_payment', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('{% if p.payment_claimed_at %}Confirm this reported payment and mark lab fees as paid?{% else %}Mark lab fees as paid for this participant?{% endif %}')">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="manage_test_id" value="{{ test.id }}">
-                                    <button type="submit" class="btn btn-sm btn-success ms-3"><i class="bi bi-cash-coin"></i> {% if p.payment_claimed_at %}Confirm Payment{% else %}Mark Paid{% endif %}</button>
-                                </form>
-                                {% if p.payment_claimed_at %}
-                                    <form method="POST" action="{{ url_for('main.reject_participant_payment_claim', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Reject this payment report? The participant can report payment again.')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="manage_test_id" value="{{ test.id }}">
-                                        <button type="submit" class="btn btn-sm btn-outline-info ms-1">Reject Payment Report</button>
-                                    </form>
-                                {% endif %}
+                            {% elif not p.denied %}
+                                <button type="button" class="btn btn-sm btn-outline-primary participant-primary-action" data-payment-part="{{ p.id }}" data-payment-mode="review"><i class="bi bi-receipt me-1"></i> {{ 'View Payment' if p.paid_lab else ('Review Payment' if p.payment_claimed_at or p.payment_submissions else 'Mark Paid') }}</button>
                             {% endif %}
-                            <form method="POST" action="{{ url_for('main.unapprove_participant_from_manage', test_id=test.id, part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Remove approval for this participant? They would need to be approved again to participate.')">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-outline-dark ms-1"><i class="bi bi-person-dash"></i> Unapprove</button>
-                            </form>
-                        {% endif %}
-
-                        <a href="{{ url_for('main.update_participant', part_id=p.id) }}" class="btn btn-sm btn-outline-primary ms-1">Edit</a>
-                        <form method="POST" action="{{ url_for('main.remove_participant', part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Remove this participant from the test? This cannot be undone.')">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-danger ms-1">Remove</button>
-                        </form>
+                            <div class="participant-secondary-actions">
+                                <a href="{{ url_for('main.update_participant', part_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil me-1"></i> Edit</a>
+                                <div class="dropdown">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle w-100" id="participantMore{{ p.id }}" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions for {{ p.name or p.user.username }}"><i class="bi bi-three-dots me-1"></i> More</button>
+                                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="participantMore{{ p.id }}">
+                                        {% if not p.approved and not p.denied %}
+                                            <li><form method="POST" action="{{ url_for('main.deny_participant_from_manage', test_id=test.id, part_id=p.id) }}" class="manage-deny-form">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <input type="hidden" name="deny_reason" class="deny-reason-input" value="">
+                                                <button type="submit" class="dropdown-item text-danger">Deny Request</button>
+                                            </form></li>
+                                        {% elif p.denied %}
+                                            <li><form method="POST" action="{{ url_for('main.reopen_participant_from_manage', test_id=test.id, part_id=p.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="dropdown-item">Reopen Request</button>
+                                            </form></li>
+                                        {% endif %}
+                                        {% if p.approved and not p.denied %}
+                                            {% if p.paid_lab %}
+                                                <li><form method="POST" action="{{ url_for('main.unmark_participant_payment', part_id=p.id) }}" onsubmit="return confirm('Unmark this participant as paid? They will lose paid access to the results.')">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                    <input type="hidden" name="manage_test_id" value="{{ test.id }}">
+                                                    <button type="submit" class="dropdown-item">Unmark Paid</button>
+                                                </form></li>
+                                            {% endif %}
+                                            <li><form method="POST" action="{{ url_for('main.unapprove_participant_from_manage', test_id=test.id, part_id=p.id) }}" onsubmit="return confirm('Remove approval for this participant? They would need to be approved again to participate.')">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="dropdown-item">Unapprove</button>
+                                            </form></li>
+                                        {% endif %}
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><form method="POST" action="{{ url_for('main.remove_participant', part_id=p.id) }}" onsubmit="return confirm('Remove this participant from the test? This cannot be undone.')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash me-2"></i>Remove Participant</button>
+                                        </form></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -152,14 +148,7 @@
     </div>
 {% endif %}
 
-<div class="mt-4">
-    <h6>Cost Summary (live)</h6>
-    <div class="cost-highlight small">
-        Non-Donor: <strong>${{ costs.non_donor_pays }}</strong> &nbsp;|&nbsp; 
-        Donor: <strong>${{ costs.donor_pays }}</strong> &nbsp;|&nbsp; 
-        Refund per donor: <strong>${{ costs.effective_donor_refund }}</strong>
-    </div>
-</div>
+{% include '_cost_summary.html' %}
 {% endblock %}
 
 {% block scripts %}

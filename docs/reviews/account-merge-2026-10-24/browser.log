@@ -1,0 +1,17 @@
+WARNING: DATABASE_URL not found. Using SQLite fallback.
+manage-users 320px passed
+manage-users 390px passed
+manage-users 820px passed
+manage-users 1024px passed
+manage-users 1440px passed
+merge-select 320px passed
+merge-select 390px passed
+merge-select 820px passed
+merge-select 1024px passed
+merge-select 1440px passed
+merge-preview 320px passed
+merge-preview 390px passed
+merge-preview 820px passed
+merge-preview 1024px passed
+merge-preview 1440px passed
+PASS: merge, conflict resolution, archived evidence and username rejection; 15 responsive checks. Screenshots: C:\Users\sbachman\OneDrive - First Dallas Media, Inc\Documents\GitHub\Group-Test-Tracker\docs\reviews\account-merge-2026-10-24

@@ -17,57 +17,13 @@
                 <div class="form-text">This refers to your order status with the vendor/supplier.</div>
             </div>
 
-            <div class="mb-3 form-check">
-                {{ form.payment_claim(class="form-check-input") }}
-                {{ form.payment_claim.label(class="form-check-label") }}
-                <div class="form-text">An administrator must confirm the payment before results unlock after the test closes.</div>
+            <div class="payment-summary mb-4">
+                <div class="fw-semibold mb-1">Lab fee payment</div>
+                <p class="small text-muted">Report payment, provide proof, or check your review status in one place.</p>
+                <button type="button" class="btn btn-outline-primary" data-payment-part="{{ part.id }}" data-payment-mode="report">
+                    <i class="bi bi-receipt me-1"></i> {{ 'View Payment' if part.paid_lab else ('Update Payment' if part.payment_submissions or part.payment_claimed_at else 'Report Payment') }}
+                </button>
             </div>
-
-            {% if part.paid_lab %}
-                <div class="alert alert-success py-2 small">
-                    <i class="bi bi-check-circle-fill"></i>
-                    Payment verified{% if part.payment_verified_at %} on {{ part.payment_verified_at.strftime('%Y-%m-%d') }}{% endif %}.
-                </div>
-            {% elif part.payment_claimed_at %}
-                <div class="alert alert-info py-2 small">
-                    <i class="bi bi-hourglass-split"></i>
-                    Payment reported {{ part.payment_claimed_at.strftime('%Y-%m-%d %H:%M') }} — waiting for an administrator to confirm.
-                </div>
-            {% endif %}
-
-            <div class="mb-3">
-                {{ form.amount_paid.label(class="form-label") }}
-                {{ form.amount_paid(class="form-control", step="0.01") }}
-                <div class="form-text">Enter the total amount you have paid toward this test.</div>
-            </div>
-
-            {% if test.status in ['testing', 'ready_for_payment'] and available_payment_options %}
-                <div class="mb-3">
-                    {{ form.preferred_payment_option_id.label(class="form-label") }}
-                    {{ form.preferred_payment_option_id(class="form-select") }}
-                    <div class="form-text">Choose your preferred method so admins can reconcile payments faster.</div>
-                </div>
-
-                {% if selected_payment_option %}
-                    <div class="alert alert-light border small">
-                        <div class="d-flex align-items-center gap-2 mb-1">
-                            <span class="badge {{ selected_payment_option.badge_class }}"><i class="{{ selected_payment_option.icon_class }}"></i> {{ selected_payment_option.provider_name }}</span>
-                            <span class="fw-semibold">Selected Payment Details</span>
-                        </div>
-                        <div class="fw-semibold">{{ selected_payment_option.title }}</div>
-                        {% if selected_payment_option.destination_value %}<div>{{ selected_payment_option.destination_label }}: {{ selected_payment_option.destination_value }}</div>{% endif %}
-                        {% if selected_payment_option.network %}<div>Network: {{ selected_payment_option.network }}</div>{% endif %}
-                        {% if selected_payment_option.details %}<div>{{ selected_payment_option.details }}</div>{% endif %}
-                        {% if selected_payment_option.payment_link %}<div class="mt-2 d-flex flex-wrap gap-2"><a href="{{ selected_payment_option.payment_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><span class="d-md-none">{{ selected_payment_option.mobile_action_label }}</span><span class="d-none d-md-inline">{{ selected_payment_option.desktop_action_label }}</span></a>{% if selected_payment_option.copy_value %}<button type="button" class="btn btn-sm btn-outline-secondary" data-copy-value="{{ selected_payment_option.copy_value }}"><i class="bi bi-copy"></i> Copy</button>{% endif %}</div>{% endif %}
-                        {% if selected_payment_option.qr_payload %}
-                            <div class="mt-2">
-                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{ selected_payment_option.qr_payload|urlencode }}" alt="Payment QR code" class="border rounded payment-qr-thumb">
-                                <div class="text-muted mt-1">QR payload: {{ selected_payment_option.qr_payload }}</div>
-                            </div>
-                        {% endif %}
-                    </div>
-                {% endif %}
-            {% endif %}
 
             <div class="mb-3">
                 {{ form.notes.label(class="form-label") }}

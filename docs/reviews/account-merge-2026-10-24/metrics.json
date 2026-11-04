@@ -1,0 +1,432 @@
+[
+  {
+    "label": "manage-users",
+    "title": "Manage Users",
+    "url": "/admin/users",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 1994,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Username",
+          "Email",
+          "Telegram",
+          "Discord",
+          "Role",
+          "Status",
+          "Notify",
+          "Created",
+          "Actions"
+        ],
+        "width": 296,
+        "containerWidth": 296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Users\n Merge Duplicate Accounts\n Add New User\nBack to Dashboard\nlate-buyer\nlate@example.test\n\u2014\n\u2014\nUser\nActive\nEmail\n2026-10-24\nEdit\nMore\nbrowser-pending\npending@example.test\n",
+    "modal": null
+  },
+  {
+    "label": "manage-users",
+    "title": "Manage Users",
+    "url": "/admin/users",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1942,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Username",
+          "Email",
+          "Telegram",
+          "Discord",
+          "Role",
+          "Status",
+          "Notify",
+          "Created",
+          "Actions"
+        ],
+        "width": 366,
+        "containerWidth": 366,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Users\n Merge Duplicate Accounts\n Add New User\nBack to Dashboard\nlate-buyer\nlate@example.test\n\u2014\n\u2014\nUser\nActive\nEmail\n2026-10-24\nEdit\nMore\nbrowser-pending\npending@example.test\n",
+    "modal": null
+  },
+  {
+    "label": "manage-users",
+    "title": "Manage Users",
+    "url": "/admin/users",
+    "clientWidth": 820,
+    "innerWidth": 820,
+    "pageWidth": 820,
+    "pageHeight": 1180,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Username",
+          "Email",
+          "Telegram",
+          "Discord",
+          "Role",
+          "Status",
+          "Notify",
+          "Created",
+          "Actions"
+        ],
+        "width": 696,
+        "containerWidth": 696,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Users\n Merge Duplicate Accounts\n Add New User\nBack to Dashboard\nlate-buyer\nlate@example.test\n\u2014\n\u2014\nUser\nActive\nEmail\n2026-10-24\nEdit\nMore\nbrowser-pending\npending@example.test\n",
+    "modal": null
+  },
+  {
+    "label": "manage-users",
+    "title": "Manage Users",
+    "url": "/admin/users",
+    "clientWidth": 1024,
+    "innerWidth": 1024,
+    "pageWidth": 1024,
+    "pageHeight": 1100,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Username",
+          "Email",
+          "Telegram",
+          "Discord",
+          "Role",
+          "Status",
+          "Notify",
+          "Created",
+          "Actions"
+        ],
+        "width": 936,
+        "containerWidth": 936,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Users\n Merge Duplicate Accounts\n Add New User\nBack to Dashboard\nlate-buyer\nlate@example.test\n\u2014\n\u2014\nUser\nActive\nEmail\n2026-10-24\nEdit\nMore\nbrowser-pending\npending@example.test\n",
+    "modal": null
+  },
+  {
+    "label": "manage-users",
+    "title": "Manage Users",
+    "url": "/admin/users",
+    "clientWidth": 1440,
+    "innerWidth": 1440,
+    "pageWidth": 1440,
+    "pageHeight": 1000,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Username",
+          "Email",
+          "Telegram",
+          "Discord",
+          "Role",
+          "Status",
+          "Notify",
+          "Created",
+          "Actions"
+        ],
+        "width": 1296,
+        "containerWidth": 1296,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Manage Users\n Merge Duplicate Accounts\n Add New User\nBack to Dashboard\nUsername\tEmail\tTelegram\tDiscord\tRole\tStatus\tNotify\tCreated\tActions\nlate-buyer\tlate@example.test\t\u2014\t\u2014\tUser\tActi",
+    "modal": null
+  },
+  {
+    "label": "merge-select",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 900,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-select",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 1000,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-select",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 820,
+    "innerWidth": 820,
+    "pageWidth": 820,
+    "pageHeight": 1180,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-select",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 1024,
+    "innerWidth": 1024,
+    "pageWidth": 1024,
+    "pageHeight": 1100,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-select",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 1440,
+    "innerWidth": 1440,
+    "pageWidth": 1440,
+    "pageHeight": 1000,
+    "tables": [],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-preview",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 320,
+    "innerWidth": 320,
+    "pageWidth": 320,
+    "pageHeight": 2617,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Account",
+          "Membership",
+          "Assigned charge",
+          "Recorded payment",
+          "Proof history"
+        ],
+        "width": 264,
+        "containerWidth": 264,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-preview",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 390,
+    "innerWidth": 390,
+    "pageWidth": 390,
+    "pageHeight": 2419,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Account",
+          "Membership",
+          "Assigned charge",
+          "Recorded payment",
+          "Proof history"
+        ],
+        "width": 334,
+        "containerWidth": 334,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-preview",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 805,
+    "innerWidth": 820,
+    "pageWidth": 805,
+    "pageHeight": 1519,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Account",
+          "Membership",
+          "Assigned charge",
+          "Recorded payment",
+          "Proof history"
+        ],
+        "width": 664,
+        "containerWidth": 664,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-preview",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 1009,
+    "innerWidth": 1024,
+    "pageWidth": 1009,
+    "pageHeight": 1385,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Account",
+          "Membership",
+          "Assigned charge",
+          "Recorded payment",
+          "Proof history"
+        ],
+        "width": 904,
+        "containerWidth": 904,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  },
+  {
+    "label": "merge-preview",
+    "title": "Merge Duplicate Accounts",
+    "url": "/admin/users/merge",
+    "clientWidth": 1425,
+    "innerWidth": 1440,
+    "pageWidth": 1425,
+    "pageHeight": 1284,
+    "tables": [
+      {
+        "index": 1,
+        "headers": [
+          "Account",
+          "Membership",
+          "Assigned charge",
+          "Recorded payment",
+          "Proof history"
+        ],
+        "width": 1264,
+        "containerWidth": 1264,
+        "overflow": 0,
+        "hasScrollContainer": false,
+        "containerOverflow": "visible",
+        "offscreenCells": []
+      }
+    ],
+    "overlaps": [],
+    "clippedButtons": [],
+    "compressedControls": [],
+    "offscreen": [],
+    "mainText": "Merge Duplicate Accounts\n\nChoose the account to keep, review shared tests, and confirm once.\n\nBack to Users\nPrimary account to keep\nChoose primary account\nbrowser-admin \u00b7 admin@exa",
+    "modal": null
+  }
+]

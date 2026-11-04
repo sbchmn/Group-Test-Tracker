@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Terms of Service - Group Test Manager{% endblock %}
+{% block title %}Terms of Service - {{ brand_name }}{% endblock %}
 
 {% block content %}
 <article class="legal-document mx-auto bg-white rounded p-4 p-md-5 shadow-sm">
@@ -8,7 +8,7 @@
     <p class="text-muted"><strong>Effective date:</strong> {{ legal_effective_date }}</p>
 
     <p>
-        These Terms of Service ("Terms") govern your access to and use of Group Test Manager, including its
+        These Terms of Service ("Terms") govern your access to and use of {{ brand_name }}, including its
         website, accounts, group-test coordination tools, public-result features, notifications, automated
         report analysis, and Telegram and Discord bots (collectively, the "Service"). "Operator," "we," "us,"
         and "our" mean {{ legal_operator_name }}, the person or organization that deploys and administers this

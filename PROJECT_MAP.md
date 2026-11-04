@@ -2,11 +2,21 @@
 
 This document is the maintained current-state map for Group Test Tracker. Keep it concise and update it whenever implementation changes architecture, behavior, risks, priorities, or validation status. Historical implementation notes belong in [`docs/project-history.md`](docs/project-history.md).
 
+## Managed storage configuration consistency (2026-10-16)
+
+- Runtime storage and Mailjet readers already honor the control plane's secret `GTT_MANAGED_INTEGRATIONS` JSON in managed mode. The Storage Configuration form and general configuration summaries previously read only NotificationConfig rows and could appear empty despite working runtime overrides.
+- Configuration summaries now merge managed storage overrides. The storage form shows effective values, disables managed fields, masks the stored secret, and ignores attempts to change managed keys on POST. Unmanaged fields remain editable; removing overrides restores local values. Standalone behavior is preserved.
+- Storage settings remain runtime secrets delivered through the App spec during provisioning and later reconciliation. Bootstrap-only persistence would not cover subsequent credential rotation or override removal and is not introduced.
+- Validation: managed storage page, tampered POST, secret masking, local editing, override removal, standalone behavior, runtime storage, and integration contract tests are covered. The sibling control plane also checks its generated component environments against this repository's actual storage reader and a simulated upload. No live tenant configuration or bucket access was inspected.
+
 ## Snapshot
 
 - **Application:** Flask web application backed by SQLAlchemy and Alembic.
 - **Current branch baseline:** `Test-Updates` including Discord custom-command media parity.
-- **Application version:** `4.0` from `app/version.py`.
+- **Application version:** `4.2` from `app/version.py`.
+- **Customer branding:** Any ordinary customer admin can configure optional branding under Admin Settings. `app/branding.py` resolves published identity, colors, legal details, email wrappers, and template variables; `app/branding_routes.py` manages private drafts/previews, optimistic publication, revision restores, immutable database-backed PNG assets, and member themes. Models are `BrandingState`, `BrandingRevision`, and `BrandingAsset`, plus `User.theme_preference`. Migration `e7a9b1c3d5f6` is required before serving this code. No additional entitlement or domain provisioning is introduced.
+- **Appearance:** Locally hosted Figtree/Lora and System Sans; light/dark palettes retain the established responsive layouts. Member choices override the admin default and can follow device preference. Customer help links are separate from the managed contract; existing message templates, delivery credentials, Telegram username fallback, and bot profile settings remain in place. Published branding keeps a Powered by GTM credit.
+- **Branding validation (2026-10-24):** 386 regression tests passed; final focused branding/version/retort/control-plane/email checks also passed. Browser coverage includes 150 layout checks plus 24 follow-up long-name, badge-contrast, and landing-logo checks. Exact commands, earlier failures/resolutions, and screenshots are in [`docs/reviews/whitelabeling-2026-10-24/README.md`](docs/reviews/whitelabeling-2026-10-24/README.md).
 - **Primary interfaces:** authenticated web UI, admin UI, Telegram webhook/bot, Discord gateway bot, email, and a Root-hosted bridge that polls this app for outbound messages and posts inbound events to it.
 - **Validation framework:** Python `unittest`; seven top-level test modules cover schema, security, notifications, storage, participation, cost behavior, and automated result analysis.
 - **Deployment entry points:** `run.py` and `Procfile`, including a dedicated result-analysis worker process.
@@ -20,7 +30,7 @@ This document is the maintained current-state map for Group Test Tracker. Keep i
 - **Completed payment-review workflow (2026-09-17):** Participants can no longer self-certify lab-fee payment. Reporting payment stores a claim, notifies administrators through the new default Payment Review notification template, and raises an item in the existing single Action Queue list with Confirm Payment/Reject Report buttons; Manage Participants gained clearly labelled Confirm Payment/Mark Paid/Unmark Paid/Reject Payment Report/Unapprove controls with verifier and timestamp audit fields. Only administrator confirmation sets `paid_lab`, which remains the results-access gate. Covered by the 23-revision migration chain and the full 215-test suite.
 - **Completed deactivation-revocation fix (2026-09-17):** Deactivating an account now takes effect immediately everywhere: `load_user` rejects inactive users so existing web session and remember-me cookies stop authenticating, the deactivation paths bump the session epoch as a second revocation layer, linked Telegram/Discord commands, link-token claims, admin reply updates, and password resets all deny inactive accounts, and administrators cannot deactivate themselves. Account-free public group bot behavior is intentionally unchanged. Covered by ten new security/notifications tests plus a fixed test-environment leak; the full suite passed 225 tests in 238.176s.
 - **License and attribution status:** The repository now uses a proprietary commercial license naming Solomon N. Bachman as copyright holder. Deployment, operation, copying, modification, and redistribution require prior written commercial authorization, subject to Third-Party Component licenses. The Version page shows only the license and attribution list; `THIRD_PARTY_NOTICES.md` records the 2026-09-17 direct/transitive installed-environment review. PyMuPDF requires an explicit AGPL-or-commercial licensing decision before redistribution.
-- **Release notes:** Added `CHANGELOG.md`, covering the undated initial schema baseline, dated 2026 feature waves, the current 4.0 managed SaaS release, schema history, and validation milestones.
+- **Release notes:** `CHANGELOG.md` covers the current 4.2 optional branding release, the 4.1 registration notification release, the prior 4.0 managed SaaS release, schema history, and validation milestones.
 
 ## Current Implementation Map — Group-Test Edit Regression
 

@@ -16,11 +16,10 @@
         {% if result.results_link | http_link %}<a class="btn btn-primary" href="{{ result.results_link | http_link }}" rel="noopener noreferrer">Open Source</a>{% endif %}
     </div>
 </div>
-{% if result.results_image_key %}
+{% if result_file_url %}
 <div class="card mt-4">
     <div class="card-header">Attached Report</div>
     <div class="card-body">
-        {% set result_file_url = url_for('main.serve_public_result_image', result_id=result.id) %}
         {% if result_file_kind == 'pdf' %}
             <iframe src="{{ result_file_url }}" title="{{ result.title }} report" class="w-100 border rounded" style="height: 720px;"></iframe>
         {% else %}

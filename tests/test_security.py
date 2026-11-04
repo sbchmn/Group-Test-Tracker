@@ -645,6 +645,122 @@ class SecurityTests(unittest.TestCase):
         self.assertIn('data-file-kind="pdf"', body)
         self.assertIn('id="resultFileModalDownload"', body)
 
+    def test_file_only_group_results_visibility_and_open_links(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            member = User(username="member", email="member@example.com")
+            for user in (admin, member):
+                user.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.flush()
+            test = GroupTest(
+                title="File Only Result", status="closed", created_by=admin.id,
+                results_image_key="result-images/group-tests/report.pdf",
+                lab_test_details=[{'name': 'Purity', 'result': '99.7%'}],
+            )
+            db.session.add(test)
+            db.session.flush()
+            part = Participation(
+                group_test_id=test.id, user_id=member.id, name="Member",
+                approved=True, denied=False, paid_lab=True,
+            )
+            db.session.add(part)
+            db.session.commit()
+            test_id, part_id = test.id, part.id
+
+        file_url = f"/result-image/group-test/{test_id}"
+        detail_url = f"/test/{test_id}/results"
+        for username in ("admin", "member"):
+            self.client.post("/login", data={"username": username, "password": "secret"})
+            with self.subTest(username=username):
+                detail = self.client.get(f"/test/{test_id}")
+                self.assertEqual(detail.status_code, 200)
+                body = detail.get_data(as_text=True)
+                self.assertIn("Test Results Available", body)
+                self.assertIn('data-file-kind="pdf"', body)
+                self.assertIn('99.7%', body)
+                self.assertIn(f'href="{detail_url}"', body)
+                self.assertIn(f'data-image-src="{file_url}"', body)
+                self.assertNotIn("Set results link in Edit Test", body)
+                listing = self.client.get("/my-results")
+                self.assertEqual(listing.status_code, 200)
+                self.assertIn("File Only Result", listing.get_data(as_text=True))
+                self.assertIn(f'href="{detail_url}"', listing.get_data(as_text=True))
+                self.assertIn(f'data-image-src="{file_url}"', listing.get_data(as_text=True))
+                proof = self.client.get(detail_url)
+                self.assertEqual(proof.status_code, 200)
+                self.assertIn('99.7%', proof.get_data(as_text=True))
+                self.assertIn(f'<iframe src="{file_url}"', proof.get_data(as_text=True))
+                with patch("app.routes.generate_result_image_presigned_url", return_value="https://signed.example.com/report.pdf"):
+                    download = self.client.get(file_url)
+                self.assertEqual(download.status_code, 302)
+                self.assertEqual(download.headers["Location"], "https://signed.example.com/report.pdf")
+            self.client.get("/logout")
+
+        self.client.post("/login", data={"username": "member", "password": "secret"})
+        for changes in ({'paid_lab': False}, {'approved': False}, {'denied': True}):
+            with self.subTest(changes=changes):
+                with self.app.app_context():
+                    part = db.session.get(Participation, part_id)
+                    part.paid_lab, part.approved, part.denied = True, True, False
+                    for key, value in changes.items():
+                        setattr(part, key, value)
+                    db.session.commit()
+                body = self.client.get(f"/test/{test_id}").get_data(as_text=True)
+                self.assertNotIn("Test Results Available", body)
+                self.assertNotIn('99.7%', body)
+                self.assertNotIn(file_url, body)
+                self.assertNotIn("File Only Result", self.client.get("/my-results").get_data(as_text=True))
+                self.assertEqual(self.client.get(file_url).status_code, 403)
+                self.assertEqual(self.client.get(detail_url).status_code, 403)
+
+        self.client.get('/logout')
+        self.assertEqual(self.client.get(detail_url).status_code, 302)
+        self.client.post('/login', data={'username': 'admin', 'password': 'secret'})
+        with self.app.app_context():
+            test = db.session.get(GroupTest, test_id)
+            test.status = 'testing'
+            db.session.commit()
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        with self.app.app_context():
+            test = db.session.get(GroupTest, test_id)
+            test.status = 'closed'
+            test.results_image_key = None
+            db.session.commit()
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+
+    def test_edit_group_test_pdf_without_link_posts_results_and_queues_analysis(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Uploaded PDF Result", status="closed", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"})
+        with patch("app.routes.upload_result_image", return_value="group-tests/report.pdf"), \
+                patch("app.routes._queue_uploaded_result_analysis") as queue_analysis:
+            response = self.client.post(
+                f"/admin/edit-test/{test_id}",
+                data={"title": "Uploaded PDF Result", "status": "closed", "results_link": "",
+                      "results_image": (io.BytesIO(b"%PDF-test"), "report.pdf")},
+                follow_redirects=True,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Test Results Available", response.get_data(as_text=True))
+        self.assertIn('data-file-kind="pdf"', response.get_data(as_text=True))
+        queue_analysis.assert_called_once()
+        with self.app.app_context():
+            test = db.session.get(GroupTest, test_id)
+            self.assertIsNone(test.results_link)
+            self.assertEqual(test.results_image_key, "group-tests/report.pdf")
+            self.assertIsNotNone(test.results_posted_at)
+
     def test_admin_public_results_page_renders_pdf_result_without_template_error(self):
         with self.app.app_context():
             db.create_all()
@@ -1355,6 +1471,14 @@ class SecurityTests(unittest.TestCase):
         result_button = markup["inline_keyboard"][0][0]
         self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
         self.assertTrue(result_button["url"].startswith("https://"))
+
+        self.client.post('/login', data={'username': 'image-only-tg', 'password': 'secret'})
+        listing = self.client.get('/my-results')
+        self.assertIn(f'href="/public-results/{result_id}"', listing.get_data(as_text=True))
+        self.assertIn(f'data-image-src="/result-image/public/{result_id}"', listing.get_data(as_text=True))
+        proof = self.client.get(f'/public-results/{result_id}')
+        self.assertEqual(proof.status_code, 200)
+        self.assertIn(f'<iframe src="/result-image/public/{result_id}"', proof.get_data(as_text=True))
 
     def test_telegram_public_results_treats_hash_link_as_missing(self):
         with self.app.app_context():

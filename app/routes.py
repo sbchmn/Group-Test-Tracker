@@ -3199,9 +3199,31 @@ def public_result_detail(result_id):
     if result.publication_status != 'published' and not current_user.is_admin:
         abort(404)
     return render_template(
-        'public_result_detail.html',
+        'result_detail.html',
         result=result,
         result_file_kind=_result_file_kind(result.results_image_key),
+        result_file_url=url_for('main.serve_public_result_image', result_id=result.id) if result.results_image_key else None,
+    )
+
+
+@main_bp.route('/test/<int:test_id>/results')
+@login_required
+def group_test_result_detail(test_id):
+    test = GroupTest.query.get_or_404(test_id)
+    if not test.can_user_see(current_user) or not _can_user_view_group_test_results(test, current_user):
+        abort(403)
+    if test.status != 'closed' or not (test.results_link or test.results_image_key):
+        abort(404)
+    return render_template(
+        'result_detail.html',
+        result={
+            'title': test.title,
+            'summary': test.description,
+            'item_results': [item for item in (test.lab_test_details or []) if item.get('result')],
+            'results_link': test.results_link,
+        },
+        result_file_kind=_result_file_kind(test.results_image_key),
+        result_file_url=url_for('main.serve_group_test_result_image', test_id=test.id) if test.results_image_key else None,
     )
 
 
@@ -3294,7 +3316,7 @@ def my_results():
             GroupTest.query
             .filter(
                 GroupTest.status == 'closed',
-                GroupTest.results_link.isnot(None),
+                db.or_(GroupTest.results_link.isnot(None), GroupTest.results_image_key.isnot(None)),
             )
             .all()
         )
@@ -3308,7 +3330,7 @@ def my_results():
                 Participation.denied == False,
                 Participation.paid_lab == True,
                 GroupTest.status == 'closed',
-                GroupTest.results_link.isnot(None),
+                db.or_(GroupTest.results_link.isnot(None), GroupTest.results_image_key.isnot(None)),
             )
             .all()
         )
@@ -3318,6 +3340,7 @@ def my_results():
 
         group_results.append({
             'kind': 'group_test',
+            'detail_url': url_for('main.group_test_result_detail', test_id=test.id),
             'title': test.title,
             'summary': test.description or '',
             'results_link': test.results_link,
@@ -3351,6 +3374,7 @@ def my_results():
     for result in public_results:
         group_results.append({
             'kind': 'public_result',
+            'detail_url': url_for('main.public_result_detail', result_id=result.id),
             'title': result.title,
             'summary': result.summary or '',
             'results_link': result.results_link,
@@ -3659,7 +3683,7 @@ def create_test():
             quote_number=form.quote_number.data,
             results_link=form.results_link.data if form.status.data == 'closed' else None,
             results_image_key=uploaded_image_key,
-            results_posted_at=datetime.utcnow() if form.status.data == 'closed' and form.results_link.data else None,
+            results_posted_at=datetime.utcnow() if form.status.data == 'closed' and (form.results_link.data or uploaded_image_key) else None,
             created_by=current_user.id
         )
         selected_payment_ids = form.payment_option_ids.data or []
@@ -3780,7 +3804,7 @@ def edit_test(test_id):
                 obsolete_image_keys.append(test.results_image_key)
             test.results_image_key = None
             test.results_posted_at = None
-        elif test.results_link and not test.results_posted_at:
+        elif (test.results_link or test.results_image_key) and not test.results_posted_at:
             test.results_posted_at = datetime.utcnow()
 
         if was_unlocked and test.status != 'recruiting':

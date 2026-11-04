@@ -115,8 +115,12 @@ window.addEventListener('DOMContentLoaded', function() {
         </div>
         {% endif %}
 
-        <!-- Results Link (only for approved members when closed) -->
-        {% if test.status == 'closed' and test.results_link and can_view_results %}
+    </div>
+
+    <!-- Right: Results / Payment / Participation -->
+    <div class="col-lg-5">
+        <!-- Results (only for authorized viewers when closed) -->
+        {% if test.status == 'closed' and (test.results_link or test_results_image_url) and can_view_results %}
             <div class="alert alert-success">
                 <h6><i class="bi bi-link-45deg"></i> Test Results Available</h6>
                 {% set item_results = test.lab_test_details|selectattr('result')|list if test.lab_test_details else [] %}
@@ -153,8 +157,8 @@ window.addEventListener('DOMContentLoaded', function() {
                         </button>
                     </div>
                 {% endif %}
-                <a href="{{ test.results_link | http_link }}" target="_blank" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
-                <small class="d-block mt-1 text-muted">This link is only visible to approved participants.</small>
+                <a href="{{ (test.results_link | http_link) if test.results_link else url_for('main.group_test_result_detail', test_id=test.id) }}" target="_blank" rel="noopener" class="btn btn-success btn-sm">Open Results / COA / Report <i class="bi bi-box-arrow-up-right"></i></a>
+                <small class="d-block mt-1 text-muted">Results are only visible to approved participants who have paid their lab fee.</small>
                 {% if test.results_posted_at %}
                     <small class="d-block text-muted">Posted {{ test.results_posted_at }}</small>
                 {% endif %}
@@ -169,10 +173,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 </form>
             </div>
         {% endif %}
-    </div>
-    
-    <!-- Right: Participation / Request -->
-    <div class="col-lg-5">
+
         {% if (test.status in ['ready_for_payment', 'testing', 'closed'] and payment_options) or (my_part and (my_part.payment_submissions or my_part.payment_claimed_at or my_part.paid_lab)) %}
             <div class="card mb-3" id="payment-options">
                 <div class="card-header">Available Payment Methods</div>

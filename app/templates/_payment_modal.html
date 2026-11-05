@@ -1,0 +1,50 @@
+<div class="modal fade" id="paymentModal" tabindex="-1" aria-labelledby="paymentModalTitle" aria-hidden="true" data-base-url="{{ url_for('payments.detail', part_id=0) }}">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div><h5 class="modal-title" id="paymentModalTitle">Payment</h5><div class="small text-muted" id="paymentSubtitle"></div></div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="paymentError" class="alert alert-danger d-none" role="alert"></div>
+                <div id="paymentLoading" class="py-5 text-center text-muted" role="status"><span class="spinner-border spinner-border-sm me-2"></span>Loading payment details…</div>
+                <div id="paymentContent" class="d-none">
+                    <div id="paymentStatus" class="alert py-2"></div>
+                    <div class="payment-summary mb-3" id="paymentSummary"></div>
+                    <form id="paymentReportForm" enctype="multipart/form-data" novalidate>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="row g-3">
+                            <div class="col-md-7"><label for="paymentMethod" class="form-label">Payment method used</label><select id="paymentMethod" name="option_id" class="form-select" required aria-describedby="paymentMethodError"></select><div class="invalid-feedback" id="paymentMethodError" data-payment-error="option_id"></div></div>
+                            <div class="col-md-5"><label for="paymentAmount" class="form-label">Amount paid ($)</label><input type="number" inputmode="decimal" id="paymentAmount" name="amount" class="form-control" min="0.01" step="0.01" required aria-describedby="paymentAmountError"><div class="invalid-feedback" id="paymentAmountError" data-payment-error="amount"></div></div>
+                        </div>
+                        <div id="paymentDestination" class="payment-summary small mt-3"></div>
+                        <p id="paymentRequirement" class="small fw-semibold mt-3 mb-2"></p>
+                        <div class="text-danger small mb-2" data-payment-error="proof" role="alert"></div>
+                        <div id="paymentTransactionField" class="mb-3">
+                            <label for="paymentTransaction" class="form-label">Transaction number / ID <span id="paymentTransactionHint" class="small text-muted"></span></label>
+                            <input type="text" id="paymentTransaction" name="transaction_id" class="form-control font-monospace" maxlength="255" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="paymentTransactionError">
+                            <div class="invalid-feedback" id="paymentTransactionError" data-payment-error="transaction_id"></div>
+                        </div>
+                        <div id="paymentImageField" class="mb-3">
+                            <label for="paymentImage" class="form-label">Image proof <span id="paymentImageHint" class="small text-muted"></span></label>
+                            <label for="paymentImage" class="payment-dropzone" id="paymentDropzone"><i class="bi bi-cloud-arrow-up fs-3 text-primary"></i><span class="fw-semibold">Choose image</span><span class="small text-muted">or drop a screenshot here · JPEG, PNG, WebP · up to 8 MB</span></label>
+                            <input type="file" id="paymentImage" name="image" accept="image/jpeg,image/png,image/webp" class="form-control mt-2" aria-describedby="paymentImageError">
+                            <div class="invalid-feedback" id="paymentImageError" data-payment-error="image"></div>
+                            <div id="paymentUploadWarning" class="small text-danger mt-2 d-none">Image uploads are temporarily unavailable. Contact an administrator if an image is required.</div>
+                            <div id="paymentImagePreview" class="mt-2 d-none"><img id="paymentPreview" class="payment-receipt rounded border" alt="Selected payment proof"><button type="button" id="paymentRemoveImage" class="btn btn-sm btn-outline-secondary mt-2">Remove image</button></div>
+                        </div>
+                    </form>
+                    <div id="paymentEvidence"></div>
+                    <div id="paymentDenial" class="d-none mt-3"><label for="paymentReason" class="form-label">Reason for denial <span class="text-danger">(required)</span></label><textarea id="paymentReason" class="form-control" rows="3" maxlength="1000" placeholder="Explain what the participant needs to correct."></textarea><div class="form-text">The participant will see this reason and receive a notification.</div></div>
+                    <details id="paymentHistory" class="mt-3 d-none"><summary class="small fw-semibold">Previous submissions</summary><div id="paymentHistoryContent" class="mt-2"></div></details>
+                </div>
+            </div>
+            <div class="modal-footer flex-wrap">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-outline-danger d-none" id="paymentDeny">Deny Payment</button>
+                <button type="button" class="btn btn-success d-none" id="paymentApprove"><i class="bi bi-check2 me-1"></i>Approve Payment</button>
+                <button type="submit" form="paymentReportForm" class="btn btn-primary d-none" id="paymentSubmit">Submit Payment for Review</button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -15,6 +15,7 @@
                     {{ form.user_id.label(class="form-label") }}
                     {{ form.user_id(class="form-select") }}
                 </div>
+                {% set pricing_test = test %}{% set pricing_id = 'newParticipant' %}{% include 'admin/_buy_in_amount.html' %}
                 <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
                 <a href="{{ url_for('main.manage_participants', test_id=test.id) }}" class="btn btn-secondary">Cancel</a>
             </form>

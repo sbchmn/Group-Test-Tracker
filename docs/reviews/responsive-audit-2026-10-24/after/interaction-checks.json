@@ -1,0 +1,6 @@
+{
+  "cases": "full-width participant views and three review modal states at all six widths; affected menus and keyboard checks also completed in the preceding targeted pass",
+  "dropdowns_and_keyboard": "passed",
+  "modal_footer": "passed",
+  "browser_exceptions": []
+}

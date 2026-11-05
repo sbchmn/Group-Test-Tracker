@@ -2,6 +2,25 @@
 
 > Archived from the original `PROJECT_MAP.md` on 2026-09-10. This file preserves the chronological engineering record. For the maintained current-state map, see [`../PROJECT_MAP.md`](../PROJECT_MAP.md).
 
+## 2026-10-24 — Optional white-labeling and member themes (4.2)
+
+Implemented customer-admin branding with private drafts, responsive previews,
+optimistic publication, immutable image assets, and published revision restores.
+Settings cover identity, logos, colors, local fonts, help links, and built-in legal
+operator details. Shared branding services supply email wrappers/template variables
+and bot wording while preserving custom message bodies and delivery configuration.
+Added persistent member and anonymous-browser appearance choices and a full
+light/dark styling pass over existing responsive layouts. Branding assets live in
+the customer database and do not require optional result storage. Added migration
+`e7a9b1c3d5f6`; no live database migration was performed.
+
+Validation: 386 regression tests passed, followed by focused branding, retort,
+version, and control-plane checks after final adjustments. The browser review
+covers 150 six-width layout checks, with a final light/dark landing-logo follow-up.
+The early fixture failures, contrast defect, media-event timing correction, exact
+commands, counts, and screenshots are preserved in
+[`reviews/whitelabeling-2026-10-24/README.md`](reviews/whitelabeling-2026-10-24/README.md).
+
 ## 2026-09-16 - Managed SaaS Control-Plane Parity
 
 Implemented the GTM side of the managed control-plane contract: signed bootstrap/support endpoints with replay and idempotency protection, reserved support-account immutability with session epochs, entitlement and subscription gating, managed documentation/public URL handling, signed instance-to-control-plane events, worker startup status reporting, support request/emergency-disable actions, and sanitized recovery export behavior.

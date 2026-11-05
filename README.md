@@ -29,6 +29,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 	- [Update Your Participation Status](#update-your-participation-status)
 	- [View Results (My Results)](#view-results-my-results)
 - [Admin How-To](#admin-how-to)
+	- [Branding and Appearance](#branding-and-appearance)
 	- [Create Group Test](#create-group-test)
 	- [Edit Group Test](#edit-group-test)
 	- [Delete Group Test](#delete-group-test)
@@ -65,6 +66,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 ## What This App Includes
 
 - Account registration, login, logout, profile management, and password reset.
+- Optional customer branding with private drafts, responsive previews, publication history, and light/dark themes.
 - Group test lifecycle management (recruiting, ready_for_payment, testing, closed).
 - Participant request, approve, deny, reopen, and status management.
 - Cost split automation with donor-credit logic.
@@ -87,6 +89,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md)
 - Data models: [app/models.py](app/models.py)
 - Main routes/forms/business logic: [app/routes.py](app/routes.py)
 - Notification transport and templating: [app/notifications.py](app/notifications.py)
+- Branding settings and workflows: [app/branding.py](app/branding.py), [app/branding_routes.py](app/branding_routes.py)
 - Object storage and image validation: [app/storage.py](app/storage.py)
 - Templates: [app/templates](app/templates)
 - Migrations: [migrations/versions](migrations/versions)
@@ -193,6 +196,8 @@ The repository does not currently install a Google Analytics tag. The Privacy Po
 
 ### Register and Login
 
+New usernames and username changes reject whitespace anywhere, including leading/trailing spaces, tabs and Unicode whitespace. Existing usernames remain usable without being silently renamed. This policy applies to registration, admin creation, profile changes, CLI creation and managed provisioning.
+
 1. Open Register.
 2. Enter username, email, password, and optional Telegram username.
 3. Submit and log in from the Login page.
@@ -260,9 +265,10 @@ If approved:
 
 1. Open a test detail page.
 2. Click Update My Order and Payment Status.
-3. Update order progress, amount paid, and notes.
-4. To report your lab-fee payment, tick "I have paid my lab fees". This submits the report for administrator verification; it can be amended while pending.
-5. Save.
+3. Update order progress and notes, then save.
+4. To report payment, use **Report Payment** on the test's Available Payment Methods panel (or the payment button in Update My Status). A modal contains the full submission flow.
+5. Select the method used, enter the amount paid, and provide the proof requested for that method: one image, one transaction ID, either, or both.
+6. Submit for administrator review. The button becomes **Update Payment** and reopens saved details while pending or after denial. Verified payments use **View Payment** with read-only details.
 
 Payment verification behavior:
 
@@ -270,7 +276,7 @@ Payment verification behavior:
 
 Payment method behavior:
 
-- If the test is in ready_for_payment or testing and payment options are configured, you can choose your preferred payment method and view generated destination/link/QR details.
+- Payment methods and reporting are available in ready_for_payment, testing, and closed tests. A submitted method/destination/network and its proof requirements are preserved with the report, including after administrators edit or deactivate the option. Order-status updates do not change payment reports.
 
 ### View Results (My Results)
 
@@ -286,6 +292,58 @@ Note:
 - You must be an approved participant whose lab-fee payment an administrator has verified (or admin) to open group test result images.
 
 ## Admin How-To
+
+### Branding and Appearance
+
+Open **Admin → Settings → Branding & Appearance**. Any customer administrator can
+enable customer branding; no platform approval or separate feature entitlement is
+required. Your existing `customer.grouptest.online` address stays the same.
+
+Enter an app name, optional short name, tagline and welcome text. Upload a primary
+logo, optional logo for dark backgrounds, and browser icon. Images must be PNG,
+JPEG, or WebP, no larger than 2 MB or 16 megapixels. Images are resized and stored
+in GTM's database, so branding does not require result-file storage. Include the
+database in your backups to retain branding images and revision history.
+
+Choose System Sans, Figtree, or Lora, plus accent, navigation, and surface colors
+for light and dark themes. Fonts are served locally. Link and button text colors
+adjust for readability; invalid surface colors show a contrast error. Layouts and
+status colors remain consistent across customers.
+
+**Save draft**, review the private previews at phone/tablet/desktop sizes, then
+**Publish saved draft**. Draft changes do not affect members or outgoing messages.
+Preview pages use sample content with interactions disabled. Published history
+records the administrator, action, and timestamp; choose a revision to restore
+and publish it. Concurrent edits are rejected with a request to reload.
+
+**Discard draft changes** copies the published settings back into the editor.
+**Return to GTM branding** disables customer branding while keeping your custom
+draft. Legal operator details, integration credentials, and member preferences
+are not reset. A small “Powered by GTM” credit remains on branded sites and in
+branded email footers and bot help output.
+
+Optional support email and HTTPS user/admin help links replace the corresponding
+branding links. Administrator help remains restricted to admins. Built-in Terms
+and Privacy pages use your brand and operator/contact details; blank legal fields
+retain deployment-level defaults. Platform billing and support-access endpoints
+are unchanged.
+
+Published branding supplies the default email sender display name and a branded
+email wrapper, preserving the original message body. It also supplies default bot
+wording and the default Discord webhook name. Existing custom templates and
+explicit webhook names remain intact. Templates can use `{{ brand_name }}`,
+`{{ brand_short_name }}`, `{{ brand_tagline }}`, and `{{ brand_support_email }}`.
+Sender addresses, bot usernames/avatars, and credentials remain managed through
+their existing integrations. Email logos use the configured public service URL;
+when none is configured, the email still includes the brand name without a logo.
+
+Members can change **Appearance** in the footer to Light, Dark, Device preference,
+or Site default. Signed-in choices follow the account across devices; anonymous
+choices are remembered in that browser. Device preference reacts to device theme
+changes. Existing deployments default to the original light appearance.
+
+Apply migration `e7a9b1c3d5f6` with `flask --app run db upgrade` before deploying
+this code. No live database is changed by the automated review scripts.
 
 ### Create Group Test
 
@@ -318,8 +376,18 @@ Important behavior:
 3. Fill destination details by method (handle, link, wallet address, network, or custom fields).
 4. Use generated matrix preview to confirm destination label, payment link, and QR payload behavior.
 5. Toggle Active to hide/show options for new assignments.
-6. Edit existing options to refine details.
+6. Edit existing options to refine details. Configure accepted proof types (image and/or transaction ID) and require none, at least one, or all accepted types. Existing options default to optional proof. Crypto network suggestions distinguish chain-specific explorers; custom networks remain supported with copyable transaction IDs.
 7. Delete unused options. If an option is already assigned or selected, delete safely deactivates it.
+
+#### Payment proof storage
+
+Payment images use the existing S3/Spaces connection and bucket, under the separate `payment-proofs/receipts/YYYY/MM/DD/` prefix. No second bucket or new environment variable is needed. Result public-read ACL settings, public base URLs, and public cache settings are not applied to payment proofs. Proof responses are served by authenticated application routes with `private, no-store`; only the reporting participant and administrators can access them. Result analysis is never run on payment proofs.
+
+Configure any anonymous/public bucket policy or CDN access to cover only the result prefixes, excluding `payment-proofs/*`. A bucket-wide public-read policy overrides an object's default private ACL; putting a file into a separate folder alone does not make it private. The same restriction applies to Spaces/CDN policies. Existing private buckets or results made public individually through the existing upload ACL setting require no new bucket. See [AWS prefix-scoped public access guidance](https://repost.aws/knowledge-center/read-access-objects-s3-bucket).
+
+Images accept JPEG, PNG, and WebP up to 8 MB. The server validates and re-encodes them to strip metadata and honor phone orientation. Earlier submissions retain their evidence for review history; failed database saves clean up newly uploaded objects. Proof retention follows the application's existing database/object-storage retention procedures; automatic historical-proof expiry is not introduced here.
+
+Deploy this change with the normal database migration (`flask --app run.py db upgrade`) before serving the updated application. The migration defaults existing payment options to optional proof and leaves existing payment claims reviewable.
 
 ### Delete Group Test
 
@@ -334,13 +402,29 @@ Important behavior:
 3. Deny with required reason.
 4. Reopen denied requests.
 5. Remove participant if needed.
-6. Recalculate costs after major membership changes.
+6. Review the pricing status above the participant list. During unlocked **Recruiting**, approvals, removals, donor changes, and budget edits recalculate all approved cost-sharing participants automatically. These updates do not send payment notifications.
+
+Shares freeze when a test leaves Recruiting, before status notifications or digests are queued. Returning to Recruiting keeps them frozen until an administrator uses **Unlock and Recalculate**, reviews the proposed charges, and confirms. Outside Recruiting, **Review Cost Changes** provides a one-time recalculation with confirmation and keeps pricing frozen. A preview expires if the roster, payments, or cost inputs change.
+
+Participants approved after freezing are late buy-ins. They default to the frozen non-donor share, with an individual override on approval or the participant editor. Administrators can also change the default for future buy-ins without altering existing charges. Late buy-ins remain outside the original cost-sharing pool, including after an explicit unlock. Bulk approval uses the saved default; if no unambiguous default exists, set or confirm one first. No partial batch is approved on a pricing error.
+
+These participants are labeled **Additional member** in participant lists and
+their own dashboard/test status. The cost summary explains that additional members
+do not count toward the original participant base or donor refund calculation;
+their buy-in charges are separate. **How the split works** remains collapsible and
+is available on older tests too. If an older test has no original saved breakdown,
+the explanation uses its current cost-sharing details while preserving individual
+assigned charges.
+
+The group detail list retains one **Amount Owed** column: the assigned charge less the recorded payment, with a minimum of zero. Frozen summaries and exports use the saved cost basis. Payment forms, notification template `amount_owed`, bot status, and export participant charges use each participant's assigned charge, including individual overrides. Recalculation preserves recorded payments, payment evidence, and verification records.
+
+Apply `flask --app run.py db upgrade` before running this version. Existing tests outside Recruiting are frozen without changing historical charges. Historical non-donor charges provide the late buy-in default only when consistent; otherwise an administrator must confirm a default. Historical rates that cannot be established display as **Not recorded**.
 
 Payment controls on each approved row:
 
-- Confirm Payment appears when a participant has reported payment; it marks lab fees paid, records who verified, and clears the pending report.
+- **Review Payment** opens the shared review modal with amount, destination, network, image, transaction ID, explorer link, and submission history. **Approve Payment** marks fees paid and records the reviewer; stale report versions cannot be approved.
 - Mark Paid sets payment for participants who have not reported; Unmark Paid revokes a prior verification.
-- Reject Payment Report dismisses a report (the participant can report again); no reason is required.
+- **Deny Payment** requires a reason, preserves evidence, and notifies the participant through their configured channel (with the existing email fallback). The reason remains visible in the app if delivery fails. Participants can correct and resubmit.
 - Unapprove removes approval and any pending payment report; the participant returns to the request flow.
 
 ### Admin Action Queue (Cross-Test)
@@ -350,7 +434,7 @@ Use as the central inbox for anything requiring administrator approval or attent
 1. Open Admin -> Action Queue.
 2. Review completed result-analysis findings and inspect failed analysis runs.
 3. Filter participation requests and payment reports by status and keyword.
-4. Approve or deny single requests; Confirm Payment or Reject Report handles participant payment reports. Every non-results item shares the one queue list and shows the buttons for its type.
+4. Approve or deny single join requests. **View Proof** opens the same payment review modal used by Manage Participants, with Approve Payment and Deny Payment controls. Decisions return to the current queue filters and page.
 5. Select multiple join-request rows for bulk approve/deny.
 6. Use Approve All Filtered for large backlogs (it applies only to join requests; pending payment reports are never bulk-approved).
 7. Enter confirmation text when prompted for filtered bulk approval.
@@ -422,6 +506,14 @@ Supported sources and limits:
 2. Create users or edit existing users.
 3. Toggle active state.
 4. Trigger password reset delivery for selected user.
+
+**Merge Duplicate Accounts** lets an administrator choose a primary account, preview the duplicate's records and confirm the merge. The primary keeps its username, email, password, permissions, active state and notification preferences. Records unique to the duplicate transfer to the primary. For shared tests, explicitly choose the membership details, assigned charge and recorded payment/verification to retain; amounts are never automatically added. Both proof histories and notes survive, with the unselected payment history archived separately from the current report.
+
+Conflicting Telegram, Discord and Root links require a choice; otherwise missing links transfer. Recruiting funding shares recalculate quietly after the merge, while frozen shares stay fixed. Related ownership, reviewer references, hidden tests and digest records transfer. Existing sessions and unused bot-link tokens for both accounts are invalidated. The duplicate is removed and an audit record preserves the decisions and original participant values. System accounts cannot be merged; you cannot merge away your signed-in account or the last active administrator.
+
+Transferred and combined participant rows use the primary account's username and retained Telegram handle on participant lists, payment review and exports. The migration also repairs stale participant names from earlier merges using their audit records, while preserving subsequent manual identity edits, assigned charges, paid status and proof histories.
+
+Deploy with `flask --app run.py db upgrade`. The account-merge migration adds audit/history metadata and prevents SQLite from reusing deleted user IDs. No existing username is rewritten.
 
 Deactivation behavior:
 

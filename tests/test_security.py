@@ -53,7 +53,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Application Version", body)
-        self.assertIn("Version 4.0", body)
+        self.assertIn("Version 4.2", body)
         self.assertIn("href=\"/version\"", body)
 
     def test_readiness_probes_are_public_and_side_effect_free(self):
@@ -134,6 +134,9 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("If an account matches, a password reset message has been sent.", existing.get_data(as_text=True))
 
     def test_legal_pages_are_public_and_linked_from_footer_and_registration(self):
+        # Registration now reads configured notification methods.
+        with self.app.app_context():
+            db.create_all()
         terms_response = self.client.get("/terms")
         privacy_response = self.client.get("/privacy")
         register_response = self.client.get("/register")
@@ -641,6 +644,122 @@ class SecurityTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn('data-file-kind="pdf"', body)
         self.assertIn('id="resultFileModalDownload"', body)
+
+    def test_file_only_group_results_visibility_and_open_links(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            member = User(username="member", email="member@example.com")
+            for user in (admin, member):
+                user.set_password("secret")
+            db.session.add_all([admin, member])
+            db.session.flush()
+            test = GroupTest(
+                title="File Only Result", status="closed", created_by=admin.id,
+                results_image_key="result-images/group-tests/report.pdf",
+                lab_test_details=[{'name': 'Purity', 'result': '99.7%'}],
+            )
+            db.session.add(test)
+            db.session.flush()
+            part = Participation(
+                group_test_id=test.id, user_id=member.id, name="Member",
+                approved=True, denied=False, paid_lab=True,
+            )
+            db.session.add(part)
+            db.session.commit()
+            test_id, part_id = test.id, part.id
+
+        file_url = f"/result-image/group-test/{test_id}"
+        detail_url = f"/test/{test_id}/results"
+        for username in ("admin", "member"):
+            self.client.post("/login", data={"username": username, "password": "secret"})
+            with self.subTest(username=username):
+                detail = self.client.get(f"/test/{test_id}")
+                self.assertEqual(detail.status_code, 200)
+                body = detail.get_data(as_text=True)
+                self.assertIn("Test Results Available", body)
+                self.assertIn('data-file-kind="pdf"', body)
+                self.assertIn('99.7%', body)
+                self.assertIn(f'href="{detail_url}"', body)
+                self.assertIn(f'data-image-src="{file_url}"', body)
+                self.assertNotIn("Set results link in Edit Test", body)
+                listing = self.client.get("/my-results")
+                self.assertEqual(listing.status_code, 200)
+                self.assertIn("File Only Result", listing.get_data(as_text=True))
+                self.assertIn(f'href="{detail_url}"', listing.get_data(as_text=True))
+                self.assertIn(f'data-image-src="{file_url}"', listing.get_data(as_text=True))
+                proof = self.client.get(detail_url)
+                self.assertEqual(proof.status_code, 200)
+                self.assertIn('99.7%', proof.get_data(as_text=True))
+                self.assertIn(f'<iframe src="{file_url}"', proof.get_data(as_text=True))
+                with patch("app.routes.generate_result_image_presigned_url", return_value="https://signed.example.com/report.pdf"):
+                    download = self.client.get(file_url)
+                self.assertEqual(download.status_code, 302)
+                self.assertEqual(download.headers["Location"], "https://signed.example.com/report.pdf")
+            self.client.get("/logout")
+
+        self.client.post("/login", data={"username": "member", "password": "secret"})
+        for changes in ({'paid_lab': False}, {'approved': False}, {'denied': True}):
+            with self.subTest(changes=changes):
+                with self.app.app_context():
+                    part = db.session.get(Participation, part_id)
+                    part.paid_lab, part.approved, part.denied = True, True, False
+                    for key, value in changes.items():
+                        setattr(part, key, value)
+                    db.session.commit()
+                body = self.client.get(f"/test/{test_id}").get_data(as_text=True)
+                self.assertNotIn("Test Results Available", body)
+                self.assertNotIn('99.7%', body)
+                self.assertNotIn(file_url, body)
+                self.assertNotIn("File Only Result", self.client.get("/my-results").get_data(as_text=True))
+                self.assertEqual(self.client.get(file_url).status_code, 403)
+                self.assertEqual(self.client.get(detail_url).status_code, 403)
+
+        self.client.get('/logout')
+        self.assertEqual(self.client.get(detail_url).status_code, 302)
+        self.client.post('/login', data={'username': 'admin', 'password': 'secret'})
+        with self.app.app_context():
+            test = db.session.get(GroupTest, test_id)
+            test.status = 'testing'
+            db.session.commit()
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        with self.app.app_context():
+            test = db.session.get(GroupTest, test_id)
+            test.status = 'closed'
+            test.results_image_key = None
+            db.session.commit()
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+
+    def test_edit_group_test_pdf_without_link_posts_results_and_queues_analysis(self):
+        with self.app.app_context():
+            db.create_all()
+            admin = User(username="admin", email="admin@example.com", is_admin=True)
+            admin.set_password("secret")
+            db.session.add(admin)
+            db.session.flush()
+            test = GroupTest(title="Uploaded PDF Result", status="closed", created_by=admin.id)
+            db.session.add(test)
+            db.session.commit()
+            test_id = test.id
+
+        self.client.post("/login", data={"username": "admin", "password": "secret"})
+        with patch("app.routes.upload_result_image", return_value="group-tests/report.pdf"), \
+                patch("app.routes._queue_uploaded_result_analysis") as queue_analysis:
+            response = self.client.post(
+                f"/admin/edit-test/{test_id}",
+                data={"title": "Uploaded PDF Result", "status": "closed", "results_link": "",
+                      "results_image": (io.BytesIO(b"%PDF-test"), "report.pdf")},
+                follow_redirects=True,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Test Results Available", response.get_data(as_text=True))
+        self.assertIn('data-file-kind="pdf"', response.get_data(as_text=True))
+        queue_analysis.assert_called_once()
+        with self.app.app_context():
+            test = db.session.get(GroupTest, test_id)
+            self.assertIsNone(test.results_link)
+            self.assertEqual(test.results_image_key, "group-tests/report.pdf")
+            self.assertIsNotNone(test.results_posted_at)
 
     def test_admin_public_results_page_renders_pdf_result_without_template_error(self):
         with self.app.app_context():
@@ -1352,6 +1471,14 @@ class SecurityTests(unittest.TestCase):
         result_button = markup["inline_keyboard"][0][0]
         self.assertTrue(result_button["url"].endswith(f"/public-results/{result_id}"))
         self.assertTrue(result_button["url"].startswith("https://"))
+
+        self.client.post('/login', data={'username': 'image-only-tg', 'password': 'secret'})
+        listing = self.client.get('/my-results')
+        self.assertIn(f'href="/public-results/{result_id}"', listing.get_data(as_text=True))
+        self.assertIn(f'data-image-src="/result-image/public/{result_id}"', listing.get_data(as_text=True))
+        proof = self.client.get(f'/public-results/{result_id}')
+        self.assertEqual(proof.status_code, 200)
+        self.assertIn(f'<iframe src="/result-image/public/{result_id}"', proof.get_data(as_text=True))
 
     def test_telegram_public_results_treats_hash_link_as_missing(self):
         with self.app.app_context():
@@ -2169,7 +2296,7 @@ class SecurityTests(unittest.TestCase):
         with self.app.app_context():
             self.assertIsNone(PaymentOption.query.get(option_id))
 
-    def test_testing_status_page_shows_payment_option_selector_for_approved_participant(self):
+    def test_testing_status_page_opens_payment_modal_for_approved_participant(self):
         with self.app.app_context():
             db.create_all()
             admin = User(username="admin", email="admin@example.com", is_admin=True)
@@ -2194,8 +2321,9 @@ class SecurityTests(unittest.TestCase):
         response = self.client.get(f"/test/{test_id}/my-status")
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
-        self.assertIn("Preferred Payment Method", body)
-        self.assertIn("Venmo Main", body)
+        self.assertIn('data-payment-mode="report"', body)
+        self.assertIn("Report Payment", body)
+        self.assertIn("Payment method used", body)
 
     def test_ready_for_payment_shows_payment_methods_at_top_of_right_column(self):
         with self.app.app_context():
@@ -2680,7 +2808,11 @@ class SecurityTests(unittest.TestCase):
             outsider.set_password("secret")
             db.session.add_all([admin, member, outsider])
             db.session.flush()
+            option = PaymentOption(label="Lab payment", method_type="other", account_handle="collector", is_active=True)
+            db.session.add(option)
+            db.session.flush()
             test = GroupTest(
+                payment_options=[option],
                 title="Payment gate test",
                 status="closed",
                 created_by=admin.id,
@@ -2711,6 +2843,7 @@ class SecurityTests(unittest.TestCase):
             return {
                 "test_id": test.id,
                 "part_id": part.id,
+                "option_id": option.id,
                 "pending_part_id": pending_part.id,
                 "admin_id": admin.id,
             }
@@ -2723,10 +2856,10 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403)
 
         response = self.client.post(
-            f"/test/{ids['test_id']}/my-status",
-            data={"order_status": "pending", "payment_claim": "true", "amount_paid": "50"},
+            f"/payments/{ids['part_id']}/report",
+            data={"revision": self.client.get(f"/payments/{ids['part_id']}").json['revision'], "option_id": ids['option_id'], "amount": "50"},
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         with self.app.app_context():
             part = db.session.get(Participation, ids["part_id"])
             self.assertIsNotNone(part.payment_claimed_at)
@@ -2743,7 +2876,7 @@ class SecurityTests(unittest.TestCase):
         queue_page = self.client.get("/admin/action-queue").get_data(as_text=True)
         self.assertIn('<span class="badge text-bg-info">Payment Report</span>', queue_page)
         self.assertIn("Join Request", queue_page)
-        self.assertIn("Confirm Payment", queue_page)
+        self.assertIn("View Proof", queue_page)
         self.assertIn("pay-member", queue_page)
 
         response = self.client.post(f"/admin/payment/confirm/{ids['part_id']}", data={})
@@ -2770,7 +2903,7 @@ class SecurityTests(unittest.TestCase):
         ids = self._payment_review_fixture(claimed=True)
         self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
 
-        response = self.client.post(f"/admin/payment/reject-claim/{ids['part_id']}", data={})
+        response = self.client.post(f"/admin/payment/reject-claim/{ids['part_id']}", data={"reason": "Please correct your receipt."})
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
             part = db.session.get(Participation, ids["part_id"])
@@ -2861,16 +2994,16 @@ class SecurityTests(unittest.TestCase):
         self.client.post("/login", data={"username": "pay-member", "password": "secret"})
         with patch("app.routes.send_notification_message") as mock_send:
             self.client.post(
-                f"/test/{ids['test_id']}/my-status",
-                data={"order_status": "pending", "payment_claim": "true", "amount_paid": "50"},
+                f"/payments/{ids['part_id']}/report",
+                data={"revision": self.client.get(f"/payments/{ids['part_id']}").json['revision'], "option_id": ids['option_id'], "amount": "50"},
             )
         subjects = [call.args[2] for call in mock_send.call_args_list]
         self.assertIn("PAY REVIEW Payment gate test", subjects)
 
         with patch("app.routes.send_notification_message") as mock_amend:
             self.client.post(
-                f"/test/{ids['test_id']}/my-status",
-                data={"order_status": "pending", "payment_claim": "true", "amount_paid": "75"},
+                f"/payments/{ids['part_id']}/report",
+                data={"revision": self.client.get(f"/payments/{ids['part_id']}").json['revision'], "option_id": ids['option_id'], "amount": "75"},
             )
         mock_amend.assert_not_called()
         with self.app.app_context():
@@ -2882,8 +3015,8 @@ class SecurityTests(unittest.TestCase):
         ids = self._payment_review_fixture(claimed=True)
         self.client.post("/login", data={"username": "pay-admin", "password": "secret"})
         page = self.client.get(f"/admin/manage-participants/{ids['test_id']}").get_data(as_text=True)
-        self.assertIn("Confirm Payment", page)
-        self.assertIn("Reject Payment Report", page)
+        self.assertIn("Review Payment", page)
+        self.assertIn("Deny Payment", page)
         self.assertIn("Payment reported", page)
         self.assertNotIn(" Mark Paid</button>", page)
 

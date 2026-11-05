@@ -79,6 +79,13 @@ based, so this snapshot applies only to that environment and is not a lockfile.
 | wrapt | 2.4.1 | BSD-2-Clause |
 | yarl | 1.25.1 | Apache-2.0 |
 
+## Bundled fonts
+
+Figtree and Lora are bundled from the Google Fonts repository under the SIL Open
+Font License 1.1. Their copyright notices and complete license texts are retained
+in `app/static/fonts/figtree-OFL.txt` and `app/static/fonts/lora-OFL.txt`.
+Font files are served locally; choosing a font does not contact Google Fonts.
+
 ## Distribution review
 
 - The direct and transitive packages above were reviewed by installed version

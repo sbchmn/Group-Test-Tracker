@@ -11,6 +11,7 @@ from flask_login import UserMixin
 from . import db
 import json
 from urllib.parse import quote
+from sqlalchemy.orm import deferred
 
 # Immutable system-account marker for the control plane's reserved support identity.
 # Authorization is tied only to this key, never to username/email text matching.
@@ -41,6 +42,13 @@ group_test_payment_options = db.Table(
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
+    # A deleted duplicate's session ID must never identify a later SQLite user.
+    __table_args__ = (
+        db.UniqueConstraint('username_key', 'identity_uniqueness_scope', name='uq_users_username_key'),
+        db.UniqueConstraint('tg_username_key', 'identity_uniqueness_scope', name='uq_users_tg_username_key'),
+        db.UniqueConstraint('discord_username_key', 'identity_uniqueness_scope', name='uq_users_discord_username_key'),
+        {'sqlite_autoincrement': True},
+    )
     
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
@@ -48,6 +56,12 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     tg_username = db.Column(db.String(80), nullable=True, index=True)
     discord_username = db.Column(db.String(80), nullable=True, index=True)
+    username_key = db.Column(db.String(240), nullable=False, index=True)
+    tg_username_key = db.Column(db.String(240), nullable=True, index=True)
+    discord_username_key = db.Column(db.String(240), nullable=True, index=True)
+    # Migration assigns each existing account its own scope, preserving duplicates.
+    # New accounts all use zero, so concurrent creations cannot claim the same key.
+    identity_uniqueness_scope = db.Column(db.Integer, nullable=False, default=0, server_default='0')
     telegram_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
     telegram_chat_id = db.Column(db.String(80), nullable=True, index=True)
     discord_user_id = db.Column(db.String(40), nullable=True, unique=True, index=True)
@@ -56,6 +70,9 @@ class User(UserMixin, db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     receive_group_test_notifications = db.Column(db.Boolean, default=True, nullable=False)
     notification_channel = db.Column(db.String(20), default='email', nullable=False)
+    pending_notification_channel = db.Column(db.String(20), nullable=True)
+    notification_setup_expires_at = db.Column(db.DateTime, nullable=True)
+    theme_preference = db.Column(db.String(10), nullable=False, default='site', server_default='site')
     digest_frequency = db.Column(db.String(20), default='off', nullable=False)
     digest_hourly_minute_utc = db.Column(db.Integer, default=0, nullable=False)
     digest_daily_hour_utc = db.Column(db.Integer, default=9, nullable=False)
@@ -569,6 +586,9 @@ class PaymentOption(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     label = db.Column(db.String(120), nullable=False)
     method_type = db.Column(db.String(40), nullable=False, index=True)
+    proof_image_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    proof_transaction_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    proof_requirement = db.Column(db.String(12), default='optional', nullable=False)
     recipient_name = db.Column(db.String(120), nullable=True)
     account_handle = db.Column(db.String(200), nullable=True)
     wallet_address = db.Column(db.String(255), nullable=True)
@@ -756,6 +776,13 @@ class GroupTest(db.Model):
     
     status = db.Column(db.String(20), default='recruiting', nullable=False, index=True)
     # Allowed: recruiting, testing, ready_for_payment, closed
+    costs_frozen = db.Column(db.Boolean, default=False, nullable=False)
+    costs_frozen_at = db.Column(db.DateTime, nullable=True)
+    costs_frozen_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    cost_snapshot = db.Column(db.JSON, nullable=True)
+    late_buy_in_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    cost_revision = db.Column(db.Integer, default=1, nullable=False)
+    __mapper_args__ = {'version_id_col': cost_revision}
     
     # Lab testing costs and provider details
     lab_name = db.Column(db.String(200), nullable=True)
@@ -830,7 +857,32 @@ class GroupTest(db.Model):
     def num_non_donors(self) -> int:
         return self.num_approved - self.num_donors
     
+    @property
+    def costs_locked(self):
+        return bool(self.costs_frozen or self.status != 'recruiting')
+
+    @property
+    def late_buy_in_price(self):
+        from .costs import legacy_snapshot
+        if self.late_buy_in_amount is not None:
+            return self.late_buy_in_amount
+        if self.costs_locked:
+            snapshot = self.cost_snapshot or legacy_snapshot(self)
+            if snapshot.get('total_non_donors', 0):
+                price = snapshot.get('non_donor_pays')
+                return price if price is not None and price >= 0 else None
+        return None
+
     def calculate_costs(self):
+        from .costs import legacy_snapshot
+        snapshot = (self.cost_snapshot or legacy_snapshot(self)) if self.costs_locked else self.calculate_live_costs()
+        result = {key: value for key, value in snapshot.items() if key != 'participant_ids'}
+        result.update(costs_frozen=self.costs_locked,
+                      late_buy_in_count=self.participations.filter_by(approved=True, is_late_buy_in=True).count(),
+                      late_buy_in_amount=float(self.late_buy_in_price) if self.late_buy_in_price is not None else None)
+        return result
+
+    def calculate_live_costs(self):
         """
         Rigorous cost calculation logic matching & improving on original spreadsheet.
         
@@ -842,9 +894,10 @@ class GroupTest(db.Model):
         
         Returns dict with all values for templates + admin views.
         """
-        n_part = self.num_approved
-        n_donors = self.num_donors
-        n_non = self.num_non_donors
+        funding = self.participations.filter_by(approved=True, is_late_buy_in=False)
+        n_part = funding.count()
+        n_donors = funding.filter_by(vial_donor=True).count()
+        n_non = n_part - n_donors
         
         total_fixed = (self.total_lab_cost or 0.0) + (self.shipping_cost or 0.0) + (self.donor_shipping_cost or 0.0)
         refund_per = self.refund_per_donor or 0.0
@@ -953,6 +1006,9 @@ class Participation(db.Model):
     payment_verified_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     preferred_payment_option_id = db.Column(db.Integer, db.ForeignKey('payment_options.id'), nullable=True)
     preferred_payment_snapshot = db.Column(db.Text, nullable=True)
+    payment_revision = db.Column(db.Integer, default=0, nullable=False)
+    is_late_buy_in = db.Column(db.Boolean, default=False, nullable=False)
+    __mapper_args__ = {'version_id_col': payment_revision}
     notes = db.Column(db.Text, nullable=True)
     
     requested_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -963,6 +1019,10 @@ class Participation(db.Model):
     denied_reason = db.Column(db.Text, nullable=True)
 
     preferred_payment_option = db.relationship('PaymentOption', lazy='joined')
+    payment_submissions = db.relationship(
+        'PaymentSubmission', backref='participation', cascade='all, delete-orphan',
+        order_by='PaymentSubmission.id.desc()', lazy='selectin',
+    )
     
     def update_amount_owed(self, costs_dict):
         """Helper to sync individual owed based on role (donor vs non). Call after approve or recalc."""
@@ -972,8 +1032,77 @@ class Participation(db.Model):
             self.amount_owed = costs_dict.get('non_donor_pays', 0.0)
 
     @property
+    def current_payment_submission(self):
+        return next((report for report in self.payment_submissions if not report.archived_by_merge), None)
+
+    @property
+    def balance_due(self):
+        return round(max((self.amount_owed or 0) - (self.amount_paid or 0), 0), 2)
+
+    @property
     def payment_claim_pending(self):
         return bool(self.approved and not self.paid_lab and self.payment_claimed_at)
 
     def __repr__(self):
         return f'<Participation user={self.user_id} test={self.group_test_id} approved={self.approved}>'
+
+
+class PaymentSubmission(db.Model):
+    """An immutable report payload; decisions retain the evidence reviewed."""
+    __tablename__ = 'payment_submissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    participation_id = db.Column(db.Integer, db.ForeignKey('participations.id'), nullable=False, index=True)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    method_snapshot = db.Column(db.JSON, nullable=False)
+    transaction_id = db.Column(db.String(255), nullable=True)
+    image_key = db.Column(db.String(500), nullable=True)
+    status = db.Column(db.String(16), default='pending', nullable=False)
+    submitted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    denial_reason = db.Column(db.String(1000), nullable=True)
+    archived_by_merge = db.Column(db.Boolean, default=False, nullable=False)
+
+
+class BrandingState(db.Model):
+    __tablename__ = 'branding_state'
+    id = db.Column(db.Integer, primary_key=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    draft = db.Column(db.JSON, nullable=False, default=dict)
+    published = db.Column(db.JSON, nullable=False, default=dict)
+    __mapper_args__ = {'version_id_col': version}
+
+
+class BrandingRevision(db.Model):
+    __tablename__ = 'branding_revisions'
+    id = db.Column(db.Integer, primary_key=True)
+    actor_id = db.Column(db.Integer, nullable=False)
+    action = db.Column(db.String(20), nullable=False)
+    settings = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class BrandingAsset(db.Model):
+    __tablename__ = 'branding_assets'
+    id = db.Column(db.String(32), primary_key=True)
+    data = deferred(db.Column(db.LargeBinary(length=4194304), nullable=False))
+    icon_data = deferred(db.Column(db.LargeBinary(length=4194304), nullable=False))
+    width = db.Column(db.Integer, nullable=False)
+    height = db.Column(db.Integer, nullable=False)
+    published = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AccountMergeAudit(db.Model):
+    __tablename__ = 'account_merge_audits'
+    id = db.Column(db.Integer, primary_key=True)
+    performed_by_id = db.Column(db.Integer, nullable=False)
+    primary_user_id = db.Column(db.Integer, nullable=False)
+    duplicate_user_id = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    details = db.Column(db.JSON, nullable=False)
+
+
+from .usernames import install_username_policy
+install_username_policy(User)

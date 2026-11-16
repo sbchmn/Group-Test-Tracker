@@ -526,10 +526,12 @@ class BuiltinCommandConfigForm(FlaskForm):
     publicresults_allowed_chat_ids = StringField('Allowed Chat/Guild IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     publicresults_allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     submitcoa_enabled = BooleanField('Enable /submitcoa', default=False)
-    submitcoa_watch_enabled = BooleanField('Automatically submit attachments and links in allowed Telegram chats/topics', default=False)
+    submitcoa_watch_enabled = BooleanField('Automatically submit attachments and links in selected Telegram chats/topics', default=False)
+    submitcoa_watch_chat_ids = StringField('Automatic submission Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submitcoa_watch_thread_ids = StringField('Automatic submission Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     submitcoa_allow_non_private = BooleanField('Allow /submitcoa in groups', default=False)
-    submitcoa_allowed_chat_ids = StringField('Allowed submission Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
-    submitcoa_allowed_thread_ids = StringField('Allowed submission Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submitcoa_allowed_chat_ids = StringField('Allowed /submitcoa Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
+    submitcoa_allowed_thread_ids = StringField('Allowed /submitcoa Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     submitcoa_review_chat_id = StringField('Review Chat ID (blank uses submission chat)', validators=[Optional(), Length(max=120)])
     submitcoa_review_thread_id = StringField('Review Thread ID (optional)', validators=[Optional(), Length(max=80)])
     submit = SubmitField('Save Built-in Command Settings')
@@ -822,15 +824,19 @@ def _telegram_coa_source(message):
 
 def _telegram_coa_watch_allowed(chat_id, chat_type, thread_id):
     # Never turn an empty allowlist into a global passive collector.
-    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_submitcoa_allowed_chat_ids', ''))
-    return (str(_builtin_config_value('builtin_submitcoa_watch_enabled', 'false')).lower() == 'true'
+    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_submitcoa_watch_chat_ids', ''))
+    allowed_threads = _normalize_allowed_thread_ids(_builtin_config_value('builtin_submitcoa_watch_thread_ids', ''))
+    return (_builtin_enabled('submitcoa')
+            and str(_builtin_config_value('builtin_submitcoa_watch_enabled', 'false')).lower() == 'true'
             and chat_type in {'group', 'supergroup', 'channel'}
             and str(chat_id) in allowed_chats
-            and _builtin_submitcoa_scope_allowed(chat_id, chat_type, thread_id))
+            and allowed_threads is not None
+            and (not allowed_threads or str(thread_id or '') in allowed_threads))
 
 
-def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id, assumed=False, prompt=None):
-    if user is None or not user.is_active or not _builtin_submitcoa_scope_allowed(chat_id, chat_type, thread_id):
+def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id, assumed=False, prompt=None, watch=False):
+    scope_allowed = _telegram_coa_watch_allowed if watch else _builtin_submitcoa_scope_allowed
+    if user is None or not user.is_active or not scope_allowed(chat_id, chat_type, thread_id):
         return False
     text = str(message.get('text') or message.get('caption') or '').strip()
     if not assumed and not text.lower().startswith('/submitcoa'):
@@ -3103,7 +3109,7 @@ def telegram_webhook():
                 source_message = dict(message)
                 if not supported_document:
                     source_message.pop('document', None)
-                _submit_telegram_coa(source_message, potential_user, chat_id, chat_type, message_thread_id, assumed=True)
+                _submit_telegram_coa(source_message, potential_user, chat_id, chat_type, message_thread_id, assumed=True, watch=True)
             elif telegram_user_id:
                 send_telegram_chat_message(chat_id, 'Link an active Telegram account to Group Test Manager before submitting a COA.', message_thread_id=message_thread_id)
             else:
@@ -5094,13 +5100,13 @@ def builtin_command_settings():
         testing_threads = _normalize_allowed_thread_ids(form.testing_allowed_thread_ids.data)
         allowed_threads = _normalize_allowed_thread_ids(form.publicresults_allowed_thread_ids.data)
         submit_threads = _normalize_allowed_thread_ids(form.submitcoa_allowed_thread_ids.data)
+        watch_threads = _normalize_allowed_thread_ids(form.submitcoa_watch_thread_ids.data)
         review_thread = str(form.submitcoa_review_thread_id.data or '').strip()
         if form.submitcoa_watch_enabled.data and (
-                not form.submitcoa_enabled.data or not form.submitcoa_allow_non_private.data
-                or not _normalize_allowed_chat_ids(form.submitcoa_allowed_chat_ids.data)):
-            flash('COA watching requires /submitcoa, non-private use, and explicit allowed submission Chat IDs.', 'danger')
+                not form.submitcoa_enabled.data or not _normalize_allowed_chat_ids(form.submitcoa_watch_chat_ids.data)):
+            flash('COA watching requires /submitcoa enabled and explicit automatic submission Chat IDs.', 'danger')
             return render_template('admin/builtin_command_settings.html', form=form)
-        if testing_threads is None or allowed_threads is None or submit_threads is None or (review_thread and not review_thread.lstrip('-').isdigit()):
+        if testing_threads is None or allowed_threads is None or submit_threads is None or watch_threads is None or (review_thread and not review_thread.lstrip('-').isdigit()):
             flash('Allowed thread IDs must be integers separated by commas.', 'danger')
             return render_template('admin/builtin_command_settings.html', form=form)
         _save_notification_config_values({
@@ -5120,6 +5126,8 @@ def builtin_command_settings():
             'builtin_publicresults_allowed_thread_ids': ','.join(allowed_threads or []),
             'builtin_submitcoa_enabled': 'true' if form.submitcoa_enabled.data else 'false',
             'builtin_submitcoa_watch_enabled': 'true' if form.submitcoa_watch_enabled.data else 'false',
+            'builtin_submitcoa_watch_chat_ids': ','.join(_normalize_allowed_chat_ids(form.submitcoa_watch_chat_ids.data)),
+            'builtin_submitcoa_watch_thread_ids': ','.join(watch_threads or []),
             'builtin_submitcoa_allow_non_private': 'true' if form.submitcoa_allow_non_private.data else 'false',
             'builtin_submitcoa_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.submitcoa_allowed_chat_ids.data)),
             'builtin_submitcoa_allowed_thread_ids': ','.join(submit_threads or []),
@@ -5148,6 +5156,8 @@ def builtin_command_settings():
         form.publicresults_allowed_thread_ids.data = _builtin_config_value('builtin_publicresults_allowed_thread_ids', '')
         form.submitcoa_enabled.data = _builtin_enabled('submitcoa')
         form.submitcoa_watch_enabled.data = str(_builtin_config_value('builtin_submitcoa_watch_enabled', 'false')).lower() == 'true'
+        form.submitcoa_watch_chat_ids.data = _builtin_config_value('builtin_submitcoa_watch_chat_ids', '')
+        form.submitcoa_watch_thread_ids.data = _builtin_config_value('builtin_submitcoa_watch_thread_ids', '')
         form.submitcoa_allow_non_private.data = str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() == 'true'
         form.submitcoa_allowed_chat_ids.data = _builtin_config_value('builtin_submitcoa_allowed_chat_ids', '')
         form.submitcoa_allowed_thread_ids.data = _builtin_config_value('builtin_submitcoa_allowed_thread_ids', '')

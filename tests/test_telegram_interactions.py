@@ -21,6 +21,7 @@ class TelegramInteractionTests(unittest.TestCase):
         self.config(telegram_webhook_secret='secret', telegram_bot_username='OurBot',
                     builtin_submitcoa_enabled='true', builtin_submitcoa_allow_non_private='true',
                     builtin_submitcoa_allowed_chat_ids='-1001', builtin_submitcoa_allowed_thread_ids='7',
+                    builtin_submitcoa_watch_chat_ids='-1001', builtin_submitcoa_watch_thread_ids='7',
                     builtin_publicresults_allow_non_private='true')
         self.client = self.app.test_client()
         self.api_calls = []
@@ -131,9 +132,59 @@ class TelegramInteractionTests(unittest.TestCase):
         self.assertEqual(PublicResult.query.count(), 1)
 
     def test_watch_empty_allowlist_never_collects_everywhere(self):
-        self.config(builtin_submitcoa_watch_enabled='true', builtin_submitcoa_allowed_chat_ids='')
+        self.config(builtin_submitcoa_watch_enabled='true', builtin_submitcoa_watch_chat_ids='')
         self.message('https://example.test/coa.pdf')
         self.assertEqual(PublicResult.query.count(), 0)
+
+    def test_commands_and_prompt_replies_can_use_more_topics_than_watching(self):
+        self.config(builtin_submitcoa_watch_enabled='true', builtin_submitcoa_allowed_thread_ids='7,8')
+        self.message('https://example.test/unwatched.pdf', message_thread_id=8)
+        self.assertEqual(PublicResult.query.count(), 0)
+        self.message('/submitcoa', message_thread_id=8)
+        prompt = TelegramInteraction.query.filter_by(kind='coa_prompt').one()
+        self.message('https://example.test/reply.pdf', message_thread_id=8,
+                     reply_to_message={'message_id': int(prompt.bot_message_id)})
+        self.message('/submitcoa https://example.test/command.pdf', message_thread_id=8)
+        self.message('https://example.test/watched.pdf', message_thread_id=7)
+        self.assertEqual(PublicResult.query.count(), 3)
+        self.assertEqual({result.results_link for result in PublicResult.query.all()},
+                         {'https://example.test/reply.pdf', 'https://example.test/command.pdf', 'https://example.test/watched.pdf'})
+
+    def test_automatic_chat_permissions_are_independent_of_command_chat_permissions(self):
+        self.config(builtin_submitcoa_watch_enabled='true', builtin_submitcoa_watch_chat_ids='-1002')
+        self.message('https://example.test/manual-only.pdf')
+        self.message('https://example.test/watched.pdf', chat={'id': -1002, 'type': 'supergroup'})
+        self.message('/submitcoa https://example.test/disallowed-command.pdf', chat={'id': -1002, 'type': 'supergroup'})
+        self.message('/submitcoa https://example.test/allowed-command.pdf')
+        self.assertEqual({result.results_link for result in PublicResult.query.all()},
+                         {'https://example.test/watched.pdf', 'https://example.test/allowed-command.pdf'})
+
+    def test_watching_does_not_require_group_commands_but_respects_master_switch(self):
+        self.config(builtin_submitcoa_watch_enabled='true', builtin_submitcoa_allow_non_private='false')
+        self.message('/submitcoa https://example.test/command.pdf')
+        self.assertEqual(PublicResult.query.count(), 0)
+        self.message('https://example.test/watched.pdf')
+        self.assertEqual(PublicResult.query.count(), 1)
+        self.config(builtin_submitcoa_enabled='false')
+        self.message('https://example.test/disabled.pdf')
+        self.assertEqual(PublicResult.query.count(), 1)
+
+    def test_old_watch_configuration_never_inherits_the_manual_allowlist(self):
+        self.config(builtin_submitcoa_watch_enabled='true')
+        NotificationConfig.query.filter(NotificationConfig.key.in_(
+            ['builtin_submitcoa_watch_chat_ids', 'builtin_submitcoa_watch_thread_ids'])).delete(synchronize_session=False)
+        db.session.commit()
+        self.message('https://example.test/not-automatically-allowed.pdf')
+        self.assertEqual(PublicResult.query.count(), 0)
+        self.message('/submitcoa https://example.test/still-allowed.pdf')
+        self.assertEqual(PublicResult.query.count(), 1)
+
+    def test_invalid_automatic_topic_list_does_not_disable_or_broaden_manual_scope(self):
+        self.config(builtin_submitcoa_watch_enabled='true', builtin_submitcoa_watch_thread_ids='invalid')
+        self.message('https://example.test/ignored.pdf')
+        self.assertEqual(PublicResult.query.count(), 0)
+        self.message('/submitcoa https://example.test/command.pdf')
+        self.assertEqual(PublicResult.query.count(), 1)
 
     def test_watch_requires_active_linked_user_and_ignores_other_commands(self):
         self.config(builtin_submitcoa_watch_enabled='true')
@@ -334,21 +385,35 @@ class TelegramInteractionTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'Telegram privacy and cleanup', page.data)
         values = {'submitcoa_enabled': 'y', 'submitcoa_allow_non_private': 'y',
-                  'submitcoa_watch_enabled': 'y', 'submitcoa_allowed_chat_ids': '',
+                  'submitcoa_watch_enabled': 'y', 'submitcoa_allowed_chat_ids': '-1001,-1002',
+                  'submitcoa_allowed_thread_ids': '7,8', 'submitcoa_watch_chat_ids': '',
+                  'submitcoa_watch_thread_ids': '7',
                   'publicresults_timeout_seconds': '60', 'publicresults_ephemeral': 'y'}
         response = self.client.post(path, data=values)
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'explicit allowed submission Chat IDs', response.data)
-        values['submitcoa_allowed_chat_ids'] = '-1001'
+        self.assertIn(b'explicit automatic submission Chat IDs', response.data)
+        values['submitcoa_watch_chat_ids'] = '-1001'
         values['publicresults_timeout_seconds'] = '1'
         response = self.client.post(path, data=values)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Number must be between', response.data)
         values['publicresults_timeout_seconds'] = '60'
+        values['submitcoa_watch_thread_ids'] = 'invalid'
+        response = self.client.post(path, data=values)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Allowed thread IDs must be integers', response.data)
+        values['submitcoa_watch_thread_ids'] = '7'
         response = self.client.post(path, data=values)
         self.assertEqual(response.status_code, 302)
         db.session.expire_all()
         self.assertEqual(NotificationConfig.query.filter_by(key='builtin_submitcoa_watch_enabled').one().value, 'true')
+        self.assertEqual(NotificationConfig.query.filter_by(key='builtin_submitcoa_watch_chat_ids').one().value, '-1001')
+        self.assertEqual(NotificationConfig.query.filter_by(key='builtin_submitcoa_watch_thread_ids').one().value, '7')
+        self.assertEqual(NotificationConfig.query.filter_by(key='builtin_submitcoa_allowed_chat_ids').one().value, '-1001,-1002')
+        self.assertEqual(NotificationConfig.query.filter_by(key='builtin_submitcoa_allowed_thread_ids').one().value, '7,8')
+        page = self.client.get(path)
+        self.assertIn(b'name="submitcoa_watch_chat_ids"', page.data)
+        self.assertIn(b'value="-1001,-1002"', page.data)
         self.assertEqual(NotificationConfig.query.filter_by(key='builtin_publicresults_timeout_seconds').one().value, '60')
 
 

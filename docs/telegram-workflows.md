@@ -11,12 +11,22 @@ analysis queue and administrator review. It does not publish submissions directl
   requesting user can reply in the same chat/topic with a PDF, image, HTTP/HTTPS
   link, or both a file and a link. Prompts expire in 24 hours and are consumed
   after a successful submission. A caption or Telegram hidden link is supported.
-- Enable **Automatically submit attachments and links** to watch the allowed
-  submission chats. `/submitcoa` and non-private use must also be enabled, and
-  explicit Chat IDs must be configured. An empty chat allowlist never enables
-  watching everywhere. Optional Thread IDs narrow collection to those topics;
-  thread IDs are interpreted within each allowed chat. For different topic
-  policies per group, configure one group at a time until per-chat rules exist.
+- Command submissions and automatic submissions have separate chat/topic
+  settings. **Allowed /submitcoa Chat IDs / Thread IDs** govern explicit commands
+  and replies to their prompts. Group commands also need **Allow /submitcoa in
+  groups** enabled; blank command lists allow any group/topic when enabled.
+- Enable **Automatically submit attachments and links** and set **Automatic
+  submission Chat IDs** to watch selected locations without a command. Optional
+  **Automatic submission Thread IDs** narrow collection to those topics; blank
+  watches all topics in the automatic chat list. Both lists are independent of
+  command permissions, so commands can be allowed broadly while automatic intake
+  watches just one topic. The main **Enable /submitcoa** switch governs both.
+  An empty automatic chat list watches nothing and never inherits command scope.
+  Existing installations must configure the new automatic Chat IDs to resume
+  watching; the old command allowlists are not copied. No database migration is
+  needed for these new settings. Thread IDs apply within each automatic chat;
+  for different topic policies per group, configure one group at a time until
+  per-chat rules exist.
 - Bot accounts, commands addressed to other bots, other slash commands, edited
   messages, and administrator review replies are excluded from passive intake.
   Photos/PDFs/images and HTTP/HTTPS links qualify. One message creates one COA;

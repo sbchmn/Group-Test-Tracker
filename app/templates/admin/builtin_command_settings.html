@@ -40,6 +40,15 @@
                 {{ form.publicresults_enabled.label(class="form-check-label") }}
             </div>
             <p class="small text-muted">/publicresults lists Public Result tags and COA links. It never exposes Group Test results.</p>
+            <div class="rounded border p-3 mb-3">
+                <div class="fw-semibold mb-2">Telegram privacy and cleanup</div>
+                <div class="form-check mb-2">{{ form.publicresults_ephemeral(class="form-check-input") }} {{ form.publicresults_ephemeral.label(class="form-check-label") }}</div>
+                <div class="form-text mb-3">Ephemeral group replies are visible only to the requester and require bot administrator access and a current Telegram Bot API. If unavailable, the bot posts a public menu in the same group/topic with the same timeout and cleanup.</div>
+                {{ form.publicresults_timeout_seconds.label(class="form-label") }}
+                {{ form.publicresults_timeout_seconds(class="form-control", min="10", max="86400") }}
+                {% for error in form.publicresults_timeout_seconds.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                <div class="form-text">10–86,400 seconds; default 300 (5 minutes). Close and timeout remove the menu and the command that opened it. Automatic cleanup shares the existing result-analysis process and runs between jobs; a running analysis can delay deletion. Deleting group commands requires delete-message permission. Discord behavior is unchanged.</div>
+            </div>
             <div class="form-check mb-3">
                 {{ form.publicresults_allow_non_private(class="form-check-input") }}
                 {{ form.publicresults_allow_non_private.label(class="form-check-label") }}
@@ -57,6 +66,10 @@
             <div class="fw-semibold mb-2">COA submission and review</div>
             <div class="form-check mb-2">{{ form.submitcoa_enabled(class="form-check-input") }} {{ form.submitcoa_enabled.label(class="form-check-label") }}</div>
             <div class="form-check mb-3">{{ form.submitcoa_allow_non_private(class="form-check-input") }} {{ form.submitcoa_allow_non_private.label(class="form-check-label") }}</div>
+            <div class="rounded border p-3 mb-3">
+                <div class="form-check mb-2">{{ form.submitcoa_watch_enabled(class="form-check-input") }} {{ form.submitcoa_watch_enabled.label(class="form-check-label") }}</div>
+                <div class="form-text">Opt in to collect PDFs, images, and HTTP/HTTPS links without a command. Requires explicit allowed Chat IDs below; allowed Thread IDs limit collection to those topics. The bot needs access to all messages (administrator access or disabled privacy mode). Submitters must have linked, active accounts; anonymous channel posts cannot be attributed and are skipped. Replies to COA prompts work without watching enabled.</div>
+            </div>
             <div class="mb-3">{{ form.submitcoa_allowed_chat_ids.label(class="form-label") }}{{ form.submitcoa_allowed_chat_ids(class="form-control") }}</div>
             <div class="mb-3">{{ form.submitcoa_allowed_thread_ids.label(class="form-label") }}{{ form.submitcoa_allowed_thread_ids(class="form-control") }}</div>
             <div class="mb-3">{{ form.submitcoa_review_chat_id.label(class="form-label") }}{{ form.submitcoa_review_chat_id(class="form-control") }}<div class="form-text">Leave blank to keep review in the invoking DM, group, or thread.</div></div>

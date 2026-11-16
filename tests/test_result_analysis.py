@@ -624,7 +624,7 @@ class ResultAnalysisTests(unittest.TestCase):
 
         client = self.app.test_client()
         client.post('/login', data={'username': self.user.username, 'password': 'secret-pass'})
-        response = client.get('/admin/action-queue?status=recruiting&q=no-participant-match')
+        response = client.get('/admin/action-queue?status=recruiting')
         page = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)

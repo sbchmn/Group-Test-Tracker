@@ -14,7 +14,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
 from wtforms import (
     StringField, PasswordField, BooleanField, TextAreaField, 
-    FloatField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField, FileField
+    FloatField, IntegerField, DateField, SelectField, SelectMultipleField, SubmitField, FieldList, FormField, FileField
 )
 from wtforms.validators import DataRequired, Email, Length, Optional, NumberRange, EqualTo, URL, Regexp, ValidationError
 from datetime import datetime, date
@@ -48,6 +48,9 @@ from .models import (
     PublicResult,
     DashboardHiddenGroupTest,
     TelegramWebhookUpdate,
+    TelegramInteraction,
+    BSTVendor,
+    BSTTopic,
     TelegramStatusDigestEvent,
     UserDigestEvent,
     PaymentOption,
@@ -93,6 +96,7 @@ from .notifications import (
     answer_telegram_callback_query,
     delete_telegram_message,
     edit_telegram_message,
+    edit_telegram_ephemeral_message,
     register_telegram_webhook,
     unregister_telegram_webhook,
     set_telegram_commands,
@@ -516,10 +520,13 @@ class BuiltinCommandConfigForm(FlaskForm):
     testing_allowed_chat_ids = StringField('Allowed /testing Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     testing_allowed_thread_ids = StringField('Allowed /testing Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     publicresults_enabled = BooleanField('Enable /publicresults', default=True)
+    publicresults_timeout_seconds = IntegerField('Telegram menu timeout (seconds)', default=300, validators=[Optional(), NumberRange(min=10, max=86400)])
+    publicresults_ephemeral = BooleanField('Use private ephemeral replies in Telegram groups', default=True)
     publicresults_allow_non_private = BooleanField('Allow /publicresults in groups/channels', default=False)
     publicresults_allowed_chat_ids = StringField('Allowed Chat/Guild IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     publicresults_allowed_thread_ids = StringField('Allowed Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     submitcoa_enabled = BooleanField('Enable /submitcoa', default=False)
+    submitcoa_watch_enabled = BooleanField('Automatically submit attachments and links in allowed Telegram chats/topics', default=False)
     submitcoa_allow_non_private = BooleanField('Allow /submitcoa in groups', default=False)
     submitcoa_allowed_chat_ids = StringField('Allowed submission Chat IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
     submitcoa_allowed_thread_ids = StringField('Allowed submission Thread IDs (comma-separated)', validators=[Optional(), Length(max=1000)])
@@ -799,22 +806,50 @@ def _telegram_linked_user(telegram_user_id, chat_id=None):
     return user
 
 
-def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
-    if user is None or not user.is_active or not _builtin_submitcoa_scope_allowed(chat_id, chat_type, thread_id):
-        return False
-    text = str(message.get('text') or message.get('caption') or '').strip()
-    if not text.lower().startswith('/submitcoa'):
-        return False
-    argument = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ''
+def _telegram_coa_source(message):
+    """Extract one source, including caption links and Telegram hidden links."""
     document = message.get('document') or {}
     photos = message.get('photo') or []
     attachment = document or (photos[-1] if photos else {})
-    link = safe_http_url(argument)
+    candidates = [entity.get('url') for entity in
+                  (message.get('entities') or []) + (message.get('caption_entities') or [])
+                  if entity.get('type') == 'text_link']
+    text = str(message.get('text') or message.get('caption') or '')
+    candidates.extend(re.findall(r'https?://[^\s<>]+', text, flags=re.IGNORECASE))
+    link = next((safe_http_url(value) for value in candidates if safe_http_url(value)), None)
+    return document, attachment, link
+
+
+def _telegram_coa_watch_allowed(chat_id, chat_type, thread_id):
+    # Never turn an empty allowlist into a global passive collector.
+    allowed_chats = _normalize_allowed_chat_ids(_builtin_config_value('builtin_submitcoa_allowed_chat_ids', ''))
+    return (str(_builtin_config_value('builtin_submitcoa_watch_enabled', 'false')).lower() == 'true'
+            and chat_type in {'group', 'supergroup', 'channel'}
+            and str(chat_id) in allowed_chats
+            and _builtin_submitcoa_scope_allowed(chat_id, chat_type, thread_id))
+
+
+def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id, assumed=False, prompt=None):
+    if user is None or not user.is_active or not _builtin_submitcoa_scope_allowed(chat_id, chat_type, thread_id):
+        return False
+    text = str(message.get('text') or message.get('caption') or '').strip()
+    if not assumed and not text.lower().startswith('/submitcoa'):
+        return False
+    document, attachment, link = _telegram_coa_source(message)
     if not attachment and not link:
-        send_telegram_chat_message(
-            chat_id, 'Attach a PDF/image or provide a public HTTP/HTTPS COA link after /submitcoa.',
-            message_thread_id=thread_id,
+        prompt_id = send_telegram_interactive_message(
+            chat_id, 'Reply to this message with a PDF/image or a public HTTP/HTTPS COA link. '
+            'You can also attach it to /submitcoa. This prompt expires in 24 hours.',
+            message_thread_id=thread_id, reply_to_message_id=message.get('message_id'),
+            reply_markup={'force_reply': True, 'selective': True},
         )
+        if prompt_id and message.get('from', {}).get('id'):
+            db.session.add(TelegramInteraction(
+                kind='coa_prompt', chat_id=str(chat_id), thread_id=str(thread_id) if thread_id is not None else None,
+                telegram_user_id=str(message['from']['id']), bot_message_id=str(prompt_id),
+                expires_at=datetime.utcnow() + timedelta(days=1),
+            ))
+            db.session.commit()
         return True
     result = PublicResult(
         title='Pending COA review',
@@ -845,6 +880,9 @@ def _submit_telegram_coa(message, user, chat_id, chat_type, thread_id):
             send_telegram_chat_message(chat_id, str(exc), message_thread_id=thread_id)
             return True
     db.session.commit()
+    if prompt is not None:
+        prompt.closed_at = datetime.utcnow()
+        db.session.commit()
     run = enqueue_analysis(result, 'upload' if attachment else 'link', requested_by_id=user.id)
     confirmation_id = send_telegram_interactive_message(
         chat_id, f'COA submission #{result.id} queued as analysis run #{run.id}.', message_thread_id=thread_id,
@@ -2113,6 +2151,8 @@ TELEGRAM_RESERVED_COMMANDS = {
     '/join',
     '/publicresults',
     '/submitcoa',
+    '/bst',
+    '/bstadmin',
 }
 
 TELEGRAM_RESERVED_PREFIXES = (
@@ -2486,23 +2526,25 @@ def _public_results_telegram_result_keyboard(results, tag_id, page, total_pages)
 
 
 def _public_results_telegram_view(tag_id=None, page=1):
+    close_row = [{'text': 'Close', 'callback_data': 'pr:close'}]
     if tag_id is None:
         tags, page, total_pages = public_result_tag_page(page)
         if not tags:
-            return 'No Public Results Available.', None
+            return 'No Public Results Available.', {'inline_keyboard': [close_row]}
         body = f'Public Result Tags (page {page}/{total_pages}):'
         return body, _public_results_telegram_tag_keyboard(tags, page, total_pages)
 
     tag, results, page, total_pages = public_results_for_tag_page(tag_id, page)
     if tag is None or not results:
-        return 'No Public Results Available.', {'inline_keyboard': [[{'text': 'Back to Tags', 'callback_data': 'pr:tags:1'}]]}
+        return 'No Public Results Available.', {'inline_keyboard': [[{'text': 'Back to Tags', 'callback_data': 'pr:tags:1'}], close_row]}
     body = f'Public Results for {tag.name} (page {page}/{total_pages}):\n' + '\n'.join(
         f'- {result.title} ({result.created_at.strftime("%Y-%m-%d")})' for result in results
     )
     return body, _public_results_telegram_result_keyboard(results, tag.id, page, total_pages)
 
 
-def _process_public_results_telegram(linked_user, chat_id, chat_type, message_thread_id=None, tag_id=None, page=1, message_id=None):
+def _process_public_results_telegram(linked_user, chat_id, chat_type, message_thread_id=None, tag_id=None, page=1, message_id=None,
+                                     source_message=None, interaction=None):
     if not _builtin_publicresults_enabled():
         return False
     if not _builtin_publicresults_scope_allowed(chat_id, chat_type, message_thread_id):
@@ -2510,6 +2552,49 @@ def _process_public_results_telegram(linked_user, chat_id, chat_type, message_th
     if chat_type == 'private' and linked_user is None:
         return False
     body, keyboard = _public_results_telegram_view(tag_id=tag_id, page=page)
+    if interaction is not None:
+        if interaction.is_ephemeral:
+            return edit_telegram_ephemeral_message(chat_id, interaction.telegram_user_id, message_id, body, reply_markup=keyboard)
+        return edit_telegram_message(chat_id, message_id, body, reply_markup=keyboard)
+    if message_id is None and source_message and (source_message.get('message_id') or source_message.get('ephemeral_message_id')):
+        telegram_id = str((source_message.get('from') or {}).get('id') or '')
+        ephemeral = (chat_type in {'group', 'supergroup'} and bool(telegram_id)
+                     and str(_builtin_config_value('builtin_publicresults_ephemeral', 'true')).lower() == 'true')
+        kwargs = {'message_thread_id': message_thread_id, 'reply_markup': keyboard}
+        if ephemeral:
+            kwargs['receiver_user_id'] = telegram_id
+            if source_message.get('ephemeral_message_id'):
+                kwargs['reply_to_ephemeral_message_id'] = source_message['ephemeral_message_id']
+        sent_id = send_telegram_interactive_message(chat_id, body, **kwargs)
+        if sent_id is None and ephemeral:
+            # Fall back to the shared browser in the invoking group/topic.
+            # Its record must use ordinary edit/delete methods afterwards.
+            ephemeral = False
+            sent_id = send_telegram_interactive_message(
+                chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard,
+            )
+        if sent_id is not None:
+            if ephemeral:
+                # Telegram may reuse an expired ephemeral ID. Retire any older
+                # record before it can delete this newly delivered menu.
+                TelegramInteraction.query.filter_by(
+                    kind='publicresults', chat_id=str(chat_id), telegram_user_id=telegram_id,
+                    bot_message_id=str(sent_id), is_ephemeral=True,
+                ).update({'menu_deleted': True, 'closed_at': datetime.utcnow()}, synchronize_session=False)
+            try:
+                timeout = max(10, min(86400, int(_builtin_config_value('builtin_publicresults_timeout_seconds', '300'))))
+            except (ValueError, TypeError):
+                timeout = 300
+            db.session.add(TelegramInteraction(
+                kind='publicresults', chat_id=str(chat_id),
+                thread_id=str(message_thread_id) if message_thread_id is not None else None,
+                telegram_user_id=telegram_id, bot_message_id=str(sent_id),
+                command_message_id=str(source_message.get('ephemeral_message_id') or source_message.get('message_id')),
+                is_ephemeral=ephemeral, command_is_ephemeral=bool(source_message.get('ephemeral_message_id')),
+                expires_at=datetime.utcnow() + timedelta(seconds=timeout),
+            ))
+            db.session.commit()
+        return sent_id is not None
     if message_id is None:
         delivered = send_telegram_chat_message(chat_id, body, message_thread_id=message_thread_id, reply_markup=keyboard)
     else:
@@ -2822,6 +2907,13 @@ def telegram_webhook():
             db.session.rollback()
             return jsonify({'ok': True})
 
+    edited = payload.get('edited_message') or payload.get('edited_channel_post')
+    if isinstance(edited, dict):
+        from .bst_moderation import moderate
+        moderate(edited)
+        db.session.commit()
+        return jsonify({'ok': True})
+
     # Commands are intentionally not replayed from edited_message or
     # edited_channel_post updates because edits receive a new update_id and may
     # otherwise repeat state-changing actions such as COA submissions.
@@ -2834,7 +2926,7 @@ def telegram_webhook():
         callback_chat_id = str(callback_chat.get('id') or '').strip()
         callback_chat_type = str(callback_chat.get('type') or '').strip().lower()
         callback_data = str(callback_query.get('data') or '').strip()
-        callback_message_id = callback_message.get('message_id')
+        callback_message_id = callback_message.get('ephemeral_message_id') or callback_message.get('message_id')
         callback_user = None
         callback_telegram_user_id = str(callback_from.get('id') or '').strip()
         if callback_telegram_user_id:
@@ -2850,7 +2942,11 @@ def telegram_webhook():
             callback_data[:120], callback_telegram_user_id or 'unknown',
         )
         try:
-            if callback_data.startswith('ra:') and callback_message_id and callback_chat_id:
+            if callback_data.startswith('bs:'):
+                from .bst_bot import handle_callback
+                callback_notice = handle_callback(callback_query)
+                handled = True
+            elif callback_data.startswith('ra:') and callback_message_id and callback_chat_id:
                 from .telegram_result_review import handle_review_callback
                 handled, callback_notice = handle_review_callback(
                     callback_user,
@@ -2859,20 +2955,41 @@ def telegram_webhook():
                     callback_data,
                 )
             elif callback_data.startswith('pr:') and callback_message_id and callback_chat_id:
+                from .telegram_interactions import find_interaction, close_public_results
+                interaction = find_interaction(
+                    'publicresults', callback_chat_id, callback_message_id,
+                    ephemeral=bool(callback_message.get('ephemeral_message_id')),
+                    telegram_user_id=callback_telegram_user_id if callback_message.get('ephemeral_message_id') else None,
+                )
+                if interaction is None and callback_message.get('ephemeral_message_id'):
+                    answer_telegram_callback_query(callback_query.get('id'), 'This menu is no longer available. Send /publicresults again.')
+                    db.session.commit()
+                    return jsonify({'ok': True})
+                if interaction is not None:
+                    if interaction.telegram_user_id and interaction.telegram_user_id != callback_telegram_user_id:
+                        answer_telegram_callback_query(callback_query.get('id'), 'Only the user who opened this menu can use it.')
+                        db.session.commit()
+                        return jsonify({'ok': True})
+                    if interaction.closed_at or interaction.expires_at <= datetime.utcnow():
+                        close_public_results(interaction)
+                        answer_telegram_callback_query(callback_query.get('id'), 'This menu has expired. Send /publicresults again.')
+                        return jsonify({'ok': True})
                 parts = callback_data.split(':')
                 if parts[1] == 'close' and len(parts) == 2:
-                    handled = delete_telegram_message(callback_chat_id, callback_message_id)
+                    handled = close_public_results(interaction) if interaction else delete_telegram_message(callback_chat_id, callback_message_id)
                 elif parts[1] == 'tags' and len(parts) == 3:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
                         message_thread_id=callback_message.get('message_thread_id'),
                         tag_id=None, page=int(parts[2]), message_id=callback_message_id,
+                        interaction=interaction,
                     )
                 elif parts[1] == 'results' and len(parts) == 4:
                     handled = _process_public_results_telegram(
                         callback_user, callback_chat_id, callback_chat_type,
                         message_thread_id=callback_message.get('message_thread_id'),
                         tag_id=int(parts[2]), page=int(parts[3]), message_id=callback_message_id,
+                        interaction=interaction,
                     )
                 elif parts[1] == 'view' and len(parts) == 3:
                     result = PublicResult.query.get(int(parts[2]))
@@ -2917,6 +3034,15 @@ def telegram_webhook():
     telegram_user_id = str(telegram_user_id_raw).strip() if telegram_user_id_raw is not None else ''
     text = (message.get('text') or '').strip()
     caption = (message.get('caption') or '').strip()
+    bst_command, bst_args, bst_elsewhere = _parse_telegram_command(text or caption, config_map.get('telegram_bot_username'))
+    from .bst_bot import handle_message as handle_bst_message
+    from .bst_moderation import moderate
+    if not bst_elsewhere and handle_bst_message(message, bst_command, bst_args):
+        db.session.commit()
+        return jsonify({'ok': True})
+    if moderate(message):
+        db.session.commit()
+        return jsonify({'ok': True})
     if from_user.get('is_bot') is True:
         from .telegram_bot_retorts import handle_bot_reply
         handle_bot_reply(message, config_map)
@@ -2944,6 +3070,44 @@ def telegram_webhook():
     if text or message.get('document') or message.get('photo'):
         from .telegram_result_review import handle_review_reply
         if handle_review_reply(potential_user, chat_id, message_thread_id, message):
+            db.session.commit()
+            return jsonify({'ok': True})
+
+    # Review replies take precedence over passive collection, so administrator
+    # corrections never become a second COA submission.
+    from .telegram_interactions import find_interaction
+    replied_id = (message.get('reply_to_message') or {}).get('message_id')
+    prompt = find_interaction('coa_prompt', chat_id, replied_id) if replied_id else None
+    if prompt is not None:
+        if (prompt.telegram_user_id == telegram_user_id and prompt.closed_at is None
+                and prompt.expires_at > datetime.utcnow()
+                and prompt.thread_id == (str(message_thread_id) if message_thread_id is not None else None)):
+            now = datetime.utcnow()
+            claimed = db.session.execute(update(TelegramInteraction).where(
+                TelegramInteraction.id == prompt.id, TelegramInteraction.closed_at.is_(None),
+                or_(TelegramInteraction.next_attempt_at.is_(None), TelegramInteraction.next_attempt_at <= now),
+            ).values(next_attempt_at=now + timedelta(minutes=2)))
+            db.session.commit()
+            if claimed.rowcount:
+                _submit_telegram_coa(message, potential_user, chat_id, chat_type, message_thread_id, assumed=True, prompt=prompt)
+                prompt.next_attempt_at = None
+        db.session.commit()
+        return jsonify({'ok': True})
+    if not command and _telegram_coa_watch_allowed(chat_id, chat_type, message_thread_id):
+        document, attachment, link = _telegram_coa_source(message)
+        supported_document = (not document or str(document.get('mime_type') or '').startswith('image/')
+                              or document.get('mime_type') == 'application/pdf'
+                              or str(document.get('file_name') or '').lower().endswith(('.pdf', '.png', '.jpg', '.jpeg', '.webp')))
+        if (attachment and supported_document) or link:
+            if potential_user is not None and potential_user.is_active:
+                source_message = dict(message)
+                if not supported_document:
+                    source_message.pop('document', None)
+                _submit_telegram_coa(source_message, potential_user, chat_id, chat_type, message_thread_id, assumed=True)
+            elif telegram_user_id:
+                send_telegram_chat_message(chat_id, 'Link an active Telegram account to Group Test Manager before submitting a COA.', message_thread_id=message_thread_id)
+            else:
+                append_notification_log(f'telegram: COA watch skipped anonymous channel post chat={chat_id}; linked author required')
             db.session.commit()
             return jsonify({'ok': True})
 
@@ -2979,6 +3143,7 @@ def telegram_webhook():
             chat_id,
             chat_type,
             message_thread_id=message_thread_id,
+            source_message=message,
         ):
             db.session.commit()
             return jsonify({'ok': True})
@@ -3109,6 +3274,7 @@ def telegram_webhook():
             chat_id,
             chat_type,
             message_thread_id=message_thread_id,
+            source_message=message,
         ):
             db.session.commit()
             return jsonify({'ok': True})
@@ -4020,6 +4186,7 @@ def _build_pending_queue_query(status_filter, search):
 
 def _queue_redirect_params():
     return {
+        'type': (request.form.get('type') or request.args.get('type') or 'all').strip(),
         'status': (request.form.get('status') or request.args.get('status') or 'all').strip().lower(),
         'q': (request.form.get('q') or request.args.get('q') or '').strip(),
         'page': request.form.get('page') or request.args.get('page') or 1,
@@ -4043,36 +4210,16 @@ def action_queue():
     if analysis_page < 1:
         analysis_page = 1
 
-    pending_query = _build_pending_queue_query(status_filter, search)
-    pending_parts_pagination = pending_query.order_by(Participation.requested_at.asc(), GroupTest.start_date.asc()).paginate(
-        page=page,
-        per_page=per_page,
-        error_out=False,
-    )
-    analysis_runs_pagination = (
-        ResultAnalysisRun.query
-        .options(
-            joinedload(ResultAnalysisRun.group_test),
-            joinedload(ResultAnalysisRun.public_result),
-            selectinload(ResultAnalysisRun.findings),
-        )
-        .filter(or_(
-            ResultAnalysisRun.status == 'needs_review',
-            and_(ResultAnalysisRun.status == 'failed', ResultAnalysisRun.reviewed_at.is_(None)),
-        ))
-        .order_by(ResultAnalysisRun.completed_at.asc(), ResultAnalysisRun.id.asc())
-        .paginate(page=analysis_page, per_page=per_page, error_out=False)
-    )
+    from .admin_queue import build_queue
+    item_type = request.args.get('type', 'all')
+    if item_type not in {'all', 'join', 'payment', 'analysis', 'bst'}:
+        item_type = 'all'
+    pagination, queue_items = build_queue(status_filter, search, page, item_type)
     return render_template(
-        'admin/action_queue.html',
-        pending_parts=pending_parts_pagination.items,
-        pending_parts_pagination=pending_parts_pagination,
-        analysis_runs=analysis_runs_pagination.items,
-        analysis_runs_pagination=analysis_runs_pagination,
-        status_filter=status_filter,
-        search=search,
-        page=page,
-        analysis_page=analysis_page,
+        'admin/action_queue.html', queue_items=queue_items,
+        pending_parts=[item.target for item in queue_items if item.kind in {'join', 'payment'}],
+        pending_parts_pagination=pagination, pagination=pagination,
+        status_filter=status_filter, search=search, page=page, analysis_page=1, item_type=item_type,
     )
 
 
@@ -4709,9 +4856,11 @@ def _telegram_command_menu_entries(include_groups=False):
         'join': 'Request to join a recruiting test',
         'publicresults': 'Browse published public results',
         'submitcoa': 'Submit a COA for administrator review',
+        'bst': 'Apply to sell or view your BST applications',
+        'bstadmin': 'Manage BST topics and vendors (admins)',
     }
     if include_groups:
-        names = []
+        names = ['bst', 'bstadmin']
         if str(_builtin_config_value('builtin_testing_allow_non_private', 'false')).lower() == 'true' and _builtin_enabled('testing'):
             names.append('testing')
         if str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true' and _builtin_enabled('publicresults'):
@@ -4719,7 +4868,7 @@ def _telegram_command_menu_entries(include_groups=False):
         if str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() == 'true' and _builtin_enabled('submitcoa'):
             names.append('submitcoa')
     else:
-        names = ['start', 'help'] + [
+        names = ['start', 'help', 'bst', 'bstadmin'] + [
             name for name in ('tests', 'mytests', 'testing', 'status', 'join', 'publicresults', 'submitcoa')
             if _builtin_enabled(name)
         ]
@@ -4749,7 +4898,7 @@ def _builtin_submitcoa_scope_allowed(chat_id, chat_type, message_thread_id=None)
     chat_type = str(chat_type or '').strip().lower()
     if chat_type == 'private':
         return True
-    if chat_type not in {'group', 'supergroup'}:
+    if chat_type not in {'group', 'supergroup', 'channel'}:
         return False
     if str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() != 'true':
         return False
@@ -4946,6 +5095,11 @@ def builtin_command_settings():
         allowed_threads = _normalize_allowed_thread_ids(form.publicresults_allowed_thread_ids.data)
         submit_threads = _normalize_allowed_thread_ids(form.submitcoa_allowed_thread_ids.data)
         review_thread = str(form.submitcoa_review_thread_id.data or '').strip()
+        if form.submitcoa_watch_enabled.data and (
+                not form.submitcoa_enabled.data or not form.submitcoa_allow_non_private.data
+                or not _normalize_allowed_chat_ids(form.submitcoa_allowed_chat_ids.data)):
+            flash('COA watching requires /submitcoa, non-private use, and explicit allowed submission Chat IDs.', 'danger')
+            return render_template('admin/builtin_command_settings.html', form=form)
         if testing_threads is None or allowed_threads is None or submit_threads is None or (review_thread and not review_thread.lstrip('-').isdigit()):
             flash('Allowed thread IDs must be integers separated by commas.', 'danger')
             return render_template('admin/builtin_command_settings.html', form=form)
@@ -4959,10 +5113,13 @@ def builtin_command_settings():
             'builtin_testing_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.testing_allowed_chat_ids.data)),
             'builtin_testing_allowed_thread_ids': ','.join(testing_threads or []),
             'builtin_publicresults_enabled': 'true' if form.publicresults_enabled.data else 'false',
+            'builtin_publicresults_timeout_seconds': str(form.publicresults_timeout_seconds.data or 300),
+            'builtin_publicresults_ephemeral': 'true' if form.publicresults_ephemeral.data else 'false',
             'builtin_publicresults_allow_non_private': 'true' if form.publicresults_allow_non_private.data else 'false',
             'builtin_publicresults_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.publicresults_allowed_chat_ids.data)),
             'builtin_publicresults_allowed_thread_ids': ','.join(allowed_threads or []),
             'builtin_submitcoa_enabled': 'true' if form.submitcoa_enabled.data else 'false',
+            'builtin_submitcoa_watch_enabled': 'true' if form.submitcoa_watch_enabled.data else 'false',
             'builtin_submitcoa_allow_non_private': 'true' if form.submitcoa_allow_non_private.data else 'false',
             'builtin_submitcoa_allowed_chat_ids': ','.join(_normalize_allowed_chat_ids(form.submitcoa_allowed_chat_ids.data)),
             'builtin_submitcoa_allowed_thread_ids': ','.join(submit_threads or []),
@@ -4984,10 +5141,13 @@ def builtin_command_settings():
         form.testing_allowed_chat_ids.data = _builtin_config_value('builtin_testing_allowed_chat_ids', '')
         form.testing_allowed_thread_ids.data = _builtin_config_value('builtin_testing_allowed_thread_ids', '')
         form.publicresults_enabled.data = _builtin_publicresults_enabled()
+        form.publicresults_timeout_seconds.data = _clamp_int(_builtin_config_value('builtin_publicresults_timeout_seconds', '300'), 300, 10, 86400)
+        form.publicresults_ephemeral.data = str(_builtin_config_value('builtin_publicresults_ephemeral', 'true')).lower() == 'true'
         form.publicresults_allow_non_private.data = str(_builtin_config_value('builtin_publicresults_allow_non_private', 'false')).lower() == 'true'
         form.publicresults_allowed_chat_ids.data = _builtin_config_value('builtin_publicresults_allowed_chat_ids', '')
         form.publicresults_allowed_thread_ids.data = _builtin_config_value('builtin_publicresults_allowed_thread_ids', '')
         form.submitcoa_enabled.data = _builtin_enabled('submitcoa')
+        form.submitcoa_watch_enabled.data = str(_builtin_config_value('builtin_submitcoa_watch_enabled', 'false')).lower() == 'true'
         form.submitcoa_allow_non_private.data = str(_builtin_config_value('builtin_submitcoa_allow_non_private', 'false')).lower() == 'true'
         form.submitcoa_allowed_chat_ids.data = _builtin_config_value('builtin_submitcoa_allowed_chat_ids', '')
         form.submitcoa_allowed_thread_ids.data = _builtin_config_value('builtin_submitcoa_allowed_thread_ids', '')

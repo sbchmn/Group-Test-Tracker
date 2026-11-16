@@ -1811,7 +1811,7 @@ class SecurityTests(unittest.TestCase):
             body, keyboard = _public_results_telegram_view()
 
         self.assertEqual(body, "No Public Results Available.")
-        self.assertIsNone(keyboard)
+        self.assertEqual(keyboard['inline_keyboard'][-1][0]['callback_data'], 'pr:close')
 
     def test_telegram_webhook_custom_command_regex_arguments(self):
         with self.app.app_context():

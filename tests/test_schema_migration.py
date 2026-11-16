@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from sqlalchemy import inspect, text
-from flask_migrate import upgrade
+from flask_migrate import upgrade, downgrade
 
 from app import create_app, db
 from app.models import User
@@ -65,6 +65,7 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertIn("bot_link_tokens", table_names)
             self.assertIn("telegram_webhook_updates", table_names)
             self.assertIn("telegram_status_digest_events", table_names)
+            self.assertIn("telegram_interactions", table_names)
             self.assertIn("user_digest_events", table_names)
             self.assertIn("telegram_command_templates", table_names)
             self.assertIn("telegram_command_invocations", table_names)
@@ -145,6 +146,8 @@ class SchemaMigrationTests(unittest.TestCase):
             tables = set(inspector.get_table_names())
             self.assertIn('result_analysis_runs', tables)
             self.assertIn('result_analysis_findings', tables)
+            self.assertIn('telegram_interactions', tables)
+            self.assertTrue({'bst_topics', 'bst_vendors', 'bst_events', 'bst_notices', 'bst_conversations', 'bst_messages'}.issubset(tables))
             run_indexes = {item['name'] for item in inspector.get_indexes('result_analysis_runs')}
             self.assertIn('ix_result_analysis_status_queue', run_indexes)
             run_columns = {item['name'] for item in inspector.get_columns('result_analysis_runs')}
@@ -152,6 +155,28 @@ class SchemaMigrationTests(unittest.TestCase):
             public_result_columns = {item['name'] for item in inspector.get_columns('public_results')}
             self.assertIn('publication_status', public_result_columns)
             self.assertIn('review_state_json', public_result_columns)
+
+    def test_bst_upgrade_and_downgrade_preserve_existing_accounts(self):
+        migration_dir = str(Path(__file__).resolve().parent.parent / 'migrations')
+        with self.app.app_context():
+            upgrade(directory=migration_dir, revision='f1a3c5e7b9d2')
+            user = User(username='preserved-admin', email='preserved@example.com', password_hash='unused', is_admin=True)
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+            upgrade(directory=migration_dir)
+            from app.models import BSTTopic, BSTVendor
+            topic = BSTTopic(chat_id='-1001', thread_id=7, name='Migration test', code='migration', options={})
+            db.session.add(topic)
+            db.session.flush()
+            db.session.add(BSTVendor(topic_id=topic.id, telegram_user_id='42', draft={}, approved={}, verification={}))
+            db.session.commit()
+            downgrade(directory=migration_dir, revision='f1a3c5e7b9d2')
+            self.assertNotIn('bst_topics', inspect(db.engine).get_table_names())
+            self.assertEqual(db.session.get(User, user_id).username, 'preserved-admin')
+            upgrade(directory=migration_dir)
+            self.assertEqual(db.session.get(User, user_id).username, 'preserved-admin')
+            self.assertIn('bst_topics', inspect(db.engine).get_table_names())
 
     def test_alembic_upgrade_adds_payment_review_fields(self):
         migration_dir = Path(__file__).resolve().parent.parent / 'migrations'

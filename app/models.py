@@ -546,6 +546,108 @@ class ControlPlaneOperationReceipt(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class BSTTopic(db.Model):
+    __tablename__ = 'bst_topics'
+    __table_args__ = (db.UniqueConstraint('chat_id', 'thread_id', name='uq_bst_topic_location'),)
+    id = db.Column(db.Integer, primary_key=True)
+    chat_id = db.Column(db.String(80), nullable=False)
+    thread_id = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String(160), nullable=False)
+    code = db.Column(db.String(40), unique=True, nullable=False)
+    enabled = db.Column(db.Boolean, default=False, nullable=False)
+    options = db.Column(db.JSON, nullable=False, default=dict)
+    version = db.Column(db.Integer, default=1, nullable=False)
+
+
+class BSTVendor(db.Model):
+    __tablename__ = 'bst_vendors'
+    __table_args__ = (db.UniqueConstraint('topic_id', 'telegram_user_id', name='uq_bst_vendor_identity'),)
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey('bst_topics.id'), nullable=False, index=True)
+    topic = db.relationship('BSTTopic')
+    telegram_user_id = db.Column(db.String(40), nullable=False)
+    username = db.Column(db.String(80), nullable=True)
+    status = db.Column(db.String(30), default='draft', nullable=False, index=True)
+    is_approved = db.Column(db.Boolean, default=False, nullable=False)
+    draft = db.Column(db.JSON, default=dict, nullable=False)
+    approved = db.Column(db.JSON, default=dict, nullable=False)
+    verified_email = db.Column(db.String(254), nullable=True)
+    verification = db.Column(db.JSON, default=dict, nullable=False)
+    version = db.Column(db.Integer, default=1, nullable=False)
+    reason = db.Column(db.Text, nullable=True)
+    submitted_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BSTEvent(db.Model):
+    __tablename__ = 'bst_events'
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey('bst_topics.id'), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey('bst_vendors.id'), nullable=True, index=True)
+    action = db.Column(db.String(40), nullable=False)
+    actor_telegram_id = db.Column(db.String(40), nullable=True)
+    actor_gtm_id = db.Column(db.Integer, nullable=True)
+    details = db.Column(db.JSON, default=dict, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BSTNotice(db.Model):
+    __tablename__ = 'bst_notices'
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('bst_events.id'), nullable=False)
+    recipient = db.Column(db.String(80), nullable=False)
+    subject = db.Column(db.String(160), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    attempts = db.Column(db.Integer, default=0, nullable=False)
+    next_attempt_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    complete = db.Column(db.Boolean, default=False, nullable=False)
+    __table_args__ = (db.UniqueConstraint('event_id', 'recipient', name='uq_bst_notice_event_recipient'),)
+
+
+class BSTConversation(db.Model):
+    __tablename__ = 'bst_conversations'
+    telegram_user_id = db.Column(db.String(40), primary_key=True)
+    state = db.Column(db.JSON, default=dict, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+
+
+class BSTMessage(db.Model):
+    """Album buffering, moderation retry, and temporary reminder cleanup."""
+    __tablename__ = 'bst_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey('bst_topics.id'), nullable=False, index=True)
+    message_id = db.Column(db.String(80), nullable=False)
+    telegram_user_id = db.Column(db.String(40), nullable=False)
+    album_id = db.Column(db.String(100), nullable=True, index=True)
+    payload = db.Column(db.JSON, default=dict, nullable=False)
+    action = db.Column(db.String(20), nullable=False)
+    due_at = db.Column(db.DateTime, nullable=False, index=True)
+    attempts = db.Column(db.Integer, default=0, nullable=False)
+    __table_args__ = (db.UniqueConstraint('topic_id', 'message_id', name='uq_bst_message_location'),)
+
+
+class TelegramInteraction(db.Model):
+    """Durable ownership and expiry for COA prompts and public-results menus."""
+    __tablename__ = 'telegram_interactions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), nullable=False)
+    chat_id = db.Column(db.String(120), nullable=False)
+    thread_id = db.Column(db.String(80), nullable=True)
+    telegram_user_id = db.Column(db.String(40), nullable=False)
+    bot_message_id = db.Column(db.String(80), nullable=False)
+    command_message_id = db.Column(db.String(80), nullable=True)
+    is_ephemeral = db.Column(db.Boolean, nullable=False, default=False)
+    command_is_ephemeral = db.Column(db.Boolean, nullable=False, default=False)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    closed_at = db.Column(db.DateTime, nullable=True)
+    menu_deleted = db.Column(db.Boolean, nullable=False, default=False)
+    command_deleted = db.Column(db.Boolean, nullable=False, default=False)
+    cleanup_complete = db.Column(db.Boolean, nullable=False, default=False)
+    cleanup_attempts = db.Column(db.Integer, nullable=False, default=0)
+    next_attempt_at = db.Column(db.DateTime, nullable=True)
+
+
 class TelegramStatusDigestEvent(db.Model):
     __tablename__ = 'telegram_status_digest_events'
 

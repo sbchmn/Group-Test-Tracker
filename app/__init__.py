@@ -184,6 +184,8 @@ def create_app(config_overrides=None):
     # === Register Blueprints ===
     from .routes import main_bp
     app.register_blueprint(main_bp)
+    from .bst_web import bst_bp
+    app.register_blueprint(bst_bp)
     from .payments import payment_bp
     app.register_blueprint(payment_bp)
     from .control_plane_routes import control_plane_bp
@@ -311,6 +313,9 @@ def create_app(config_overrides=None):
         """Process durable laboratory result-analysis jobs."""
         import time
         from .result_analysis.jobs import process_next_run
+        from .telegram_interactions import cleanup_due_interactions
+        from .bst_moderation import maintain_messages
+        from .bst_service import deliver_notices
 
         with app.app_context():
             report_instance_event('status', {
@@ -320,6 +325,19 @@ def create_app(config_overrides=None):
             while True:
                 run = None
                 try:
+                    # Share the existing process: menu expiry does not require
+                    # another hosting component or paid worker.
+                    try:
+                        cleanup_due_interactions()
+                    except Exception:
+                        db.session.rollback()
+                        app.logger.exception('Telegram cleanup failed; retrying on the next analysis poll')
+                    for maintain in (maintain_messages, deliver_notices):
+                        try:
+                            maintain()
+                        except Exception:
+                            db.session.rollback()
+                            app.logger.exception('BST maintenance failed; retrying on the next analysis poll')
                     run = process_next_run()
                     if run:
                         click.echo(f'Result analysis run {run.id}: {run.status}')

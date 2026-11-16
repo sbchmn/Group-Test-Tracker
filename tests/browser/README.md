@@ -1,5 +1,12 @@
 # Payment and responsive browser checks
 
+Run `python tests/browser/bst_workflow.py` to check BST administration and the
+mixed action queue at 320, 390, 820, and 1440 pixels. It verifies that bulk
+selection includes join requests only, applications return to the queue after
+requesting changes, and admins can create approved vendors. It uses an isolated
+local database and mocked Telegram/email delivery. Screenshots are saved to
+`BROWSER_ARTIFACTS_DIR` or a printed temporary artifact directory.
+
 Run `python tests/browser/payment_workflow.py` from the repository root with Chrome,
 the application dependencies, and the optional `websockets` development dependency
 available. This script is separate from pytest discovery because it launches a browser.

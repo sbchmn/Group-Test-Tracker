@@ -358,7 +358,7 @@ class NotificationTests(unittest.TestCase):
 
         self.assertTrue(ok)
         payload = json.loads(mock_urlopen.call_args.args[0].data)
-        self.assertEqual(payload["allowed_updates"], ["message", "channel_post", "callback_query"])
+        self.assertEqual(payload["allowed_updates"], ["message", "channel_post", "callback_query", "edited_message", "edited_channel_post"])
 
     def test_send_telegram_message_treats_failed_bot_api_response_as_failure(self):
         with self.app.app_context():

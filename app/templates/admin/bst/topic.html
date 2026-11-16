@@ -3,7 +3,7 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-3"><h3>{{ 'Configure' if topic else 'Add' }} B/S/T topic</h3><a class="btn btn-outline-secondary" href="{{ url_for('bst.index') }}">B/S/T Vendors</a></div>
 <form method="POST" class="card"><div class="card-body">{{ form.hidden_tag() }}
-{% for field in [form.name, form.chat_id, form.thread_id] %}<div class="mb-3">{{ field.label(class='form-label') }}{{ field(class='form-control', readonly=topic and field.name in ['chat_id','thread_id']) }}{% for error in field.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}</div>{% endfor %}
+{% for field in [form.name, form.chat_id, form.thread_id] %}<div class="mb-3">{{ field.label(class='form-label') }}{{ field(class='form-control', readonly=(topic is not none and field.name in ['chat_id','thread_id'])) }}{% for error in field.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}</div>{% endfor %}
 <div class="alert alert-info">Only approved vendors may post in this topic. This includes human admins posting listings. The bot must be a group admin with Delete Messages permission before enforcement can be enabled.</div>
 <div class="form-check mb-4">{{ form.enabled(class='form-check-input') }}{{ form.enabled.label(class='form-check-label fw-semibold') }}</div>
 <h5>Posting rules</h5><div class="row g-2 mb-4">{% for key in bst.OPTIONS if key != 'verify_email' %}<div class="col-md-6"><div class="form-check">{{ form[key](class='form-check-input') }}{{ form[key].label(class='form-check-label') }}</div></div>{% endfor %}</div>

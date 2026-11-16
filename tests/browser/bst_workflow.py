@@ -118,6 +118,18 @@ try:
     value('[name=password]', 'secret')
     js('document.querySelector("form").submit()')
     wait('location.pathname === "/dashboard" && document.readyState === "complete"')
+    # Browser input must work; assigning .value directly bypasses readonly and
+    # would miss an Add Topic form that real users cannot type into.
+    navigate('/admin/bst/topics/new')
+    for field, content in {'name': 'Keyboard-created topic', 'chat_id': '-1001', 'thread_id': '9'}.items():
+        selector = '[name=' + field + ']'
+        js('document.querySelector(' + json.dumps(selector) + ').focus()')
+        call('Input.insertText', {'text': content})
+        assert js('document.querySelector(' + json.dumps(selector) + ').value') == content, field + ' did not accept typing'
+    js('document.querySelector("button[type=submit], form button").click()')
+    wait('location.pathname.startsWith("/admin/bst/topics/") && !location.pathname.endsWith("new") && document.readyState === "complete"')
+    assert js('document.querySelector("[name=name]").value') == 'Keyboard-created topic'
+    assert js('!document.querySelector("[name=name]").readOnly && document.querySelector("[name=chat_id]").readOnly && document.querySelector("[name=thread_id]").readOnly')
     pages = ['/admin/action-queue', '/admin/bst', f'/admin/bst/topics/{topic_id}', '/admin/bst/vendors/new',
              f'/admin/bst/vendors/{vendor_id}?return_to=queue']
     for width in [320, 390, 820, 1440]:
@@ -149,7 +161,7 @@ try:
     wait('location.pathname.startsWith("/admin/bst/vendors/") && !location.pathname.endsWith("new") && document.readyState === "complete"')
     assert js('document.body.textContent.includes("Posting: Approved")')
     assert not exceptions, exceptions
-    print('BST browser checks passed: 20 responsive views, one mixed queue, change-request return, and admin preapproval.')
+    print('BST browser checks passed: keyboard topic creation, 20 responsive views, one mixed queue, change-request return, and admin preapproval.')
     print('Screenshots: ' + str(artifacts))
 finally:
     if ws:

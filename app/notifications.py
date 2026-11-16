@@ -190,10 +190,10 @@ def template_bodies(template, context=None):
     }
 
 
-def send_notification_message(user, channel, subject, body):
+def send_notification_message(user, channel, subject, body, email_body=None):
     deliver = _CHANNEL_SENDERS.get(channel)
     if deliver is None or deliver is _deliver_email:
-        return _deliver_email(user, subject, body)
+        return _deliver_email(user, subject, email_body if email_body is not None else body)
 
     if deliver(user, subject, body):
         return True
@@ -201,7 +201,7 @@ def send_notification_message(user, channel, subject, body):
     append_notification_log(
         f"{channel}: falling back to email for {getattr(user, 'username', 'unknown')}"
     )
-    return _deliver_email(user, subject, body)
+    return _deliver_email(user, subject, email_body if email_body is not None else body)
 
 
 def send_mailjet_message(user, subject, body):
@@ -664,20 +664,43 @@ def send_telegram_chat_message(chat_id, body, parse_mode=None, message_thread_id
 
 
 def send_telegram_interactive_message(
-        chat_id, body, message_thread_id=None, reply_markup=None, reply_to_message_id=None):
+        chat_id, body, message_thread_id=None, reply_markup=None, reply_to_message_id=None,
+        receiver_user_id=None, reply_to_ephemeral_message_id=None):
     payload = {'chat_id': str(chat_id or ''), 'text': str(body or '')[:4096]}
     thread_id = normalize_telegram_thread_id(message_thread_id)
     if thread_id is not None:
         payload['message_thread_id'] = thread_id
     if reply_markup is not None:
         payload['reply_markup'] = reply_markup
+    if receiver_user_id is not None:
+        payload['ephemeral_message_parameters'] = {'receiver_user_id': int(receiver_user_id)}
+    if reply_to_ephemeral_message_id is not None:
+        payload['reply_parameters'] = {'ephemeral_message_id': int(reply_to_ephemeral_message_id)}
     if reply_to_message_id is not None:
         reply_id = normalize_telegram_thread_id(reply_to_message_id)
         if reply_id is not None:
             payload['reply_parameters'] = {'message_id': reply_id}
     ok, response = _telegram_api_post('sendMessage', payload)
     result = response.get('result') if ok and isinstance(response, dict) else None
-    return str(result.get('message_id')) if isinstance(result, dict) and result.get('message_id') is not None else None
+    id_field = 'ephemeral_message_id' if receiver_user_id is not None else 'message_id'
+    return str(result[id_field]) if isinstance(result, dict) and result.get(id_field) is not None else None
+
+
+def delete_telegram_ephemeral_message(chat_id, receiver_user_id, message_id):
+    ok, _ = _telegram_api_post('deleteEphemeralMessage', {
+        'chat_id': str(chat_id), 'receiver_user_id': int(receiver_user_id),
+        'ephemeral_message_id': int(message_id),
+    })
+    return ok
+
+
+def edit_telegram_ephemeral_message(chat_id, receiver_user_id, message_id, body, reply_markup=None):
+    payload = {'chat_id': str(chat_id), 'receiver_user_id': int(receiver_user_id),
+               'ephemeral_message_id': int(message_id), 'text': body}
+    if reply_markup is not None:
+        payload['reply_markup'] = reply_markup
+    ok, _ = _telegram_api_post('editEphemeralMessageText', payload)
+    return ok
 
 
 def normalize_telegram_thread_id(value):
@@ -922,8 +945,8 @@ def register_telegram_webhook(webhook_url, secret_token=None, drop_pending_updat
         "url": str(webhook_url or "").strip(),
         "drop_pending_updates": bool(drop_pending_updates),
         # Subscribe only to update types handled by the application. In
-        # particular, edited messages must not replay state-changing commands.
-        "allowed_updates": ["message", "channel_post", "callback_query"],
+        # particular, edits are moderated but never replay state-changing commands.
+        "allowed_updates": ["message", "channel_post", "callback_query", "edited_message", "edited_channel_post"],
     }
     secret_value = str(secret_token or "").strip()
     if secret_value:

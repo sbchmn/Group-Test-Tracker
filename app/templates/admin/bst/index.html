@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}B/S/T Vendors{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+  <div><h3>B/S/T Vendors</h3><p class="text-muted mb-0">Manage topic rules, applications, and approvals. Vendors do not need GTM accounts.</p></div>
+  <div class="d-flex flex-wrap gap-2"><a class="btn btn-primary" href="{{ url_for('bst.create_vendor') }}">Create approved vendor</a><a class="btn btn-outline-primary" href="{{ url_for('bst.topic_settings') }}">Add BST topic</a><a class="btn btn-outline-secondary" href="{{ url_for('main.action_queue') }}">Action Queue</a></div>
+</div>
+<div class="card mb-4"><div class="card-body"><h5>Configured topics</h5>
+{% for topic in topics %}<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 border-top py-2"><div><strong>{{ topic.name }}</strong> <span class="badge text-bg-{{ 'success' if topic.enabled else 'secondary' }}">{{ 'Enabled' if topic.enabled else 'Disabled' }}</span><div class="small text-muted">{{ topic.chat_id }} / Topic {{ topic.thread_id }}</div></div><a class="btn btn-sm btn-outline-primary" href="{{ url_for('bst.topic_settings', topic_id=topic.id) }}">Configure</a></div>{% else %}<p class="text-muted">Add a topic here, or run /bstadmin in its Telegram group topic.</p>{% endfor %}
+</div></div>
+<form method="GET" class="row g-2 mb-3">
+<div class="col-md-4"><label for="bst-topic" class="form-label">Topic</label><select id="bst-topic" name="topic" class="form-select"><option value="">All topics</option>{% for topic in topics %}<option value="{{ topic.id }}" {{ 'selected' if topic.id == selected_topic }}>{{ topic.name }}</option>{% endfor %}</select></div>
+<div class="col-md-3"><label for="bst-status" class="form-label">Status</label><select id="bst-status" name="status" class="form-select">{% for value in ['all','pending','approved','changes','denied','revoked','draft'] %}<option {{ 'selected' if status == value }} value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+<div class="col-md-3"><label for="bst-search" class="form-label">Search vendors</label><input id="bst-search" class="form-control" name="q" value="{{ search }}" placeholder="Name, email, Telegram ID"></div><div class="col-md-2 align-self-end"><button class="btn btn-primary">Filter</button></div>
+</form>
+<div class="table-responsive record-container"><table class="table table-hover align-middle record-table"><thead><tr><th>Vendor</th><th>Topic</th><th>Application</th><th>Posting approval</th><th>Action</th></tr></thead><tbody>
+{% for vendor in vendors.items %}<tr><td data-label="Vendor" class="record-title"><strong>{{ vendor.draft.get('vendor_name') or vendor.telegram_user_id }}</strong><div class="text-muted small">{{ vendor.telegram_user_id }}</div></td><td data-label="Topic">{{ vendor.topic.name }}</td><td data-label="Application"><span class="badge text-bg-{{ 'warning' if vendor.status == 'pending' else 'secondary' }}">{{ vendor.status|title }}</span></td><td data-label="Posting approval">{{ 'Active' if bst.eligible(vendor) else 'Email verification required' if vendor.is_approved else 'None' }}</td><td data-label="Action"><a class="btn btn-sm btn-primary" href="{{ url_for('bst.vendor_detail', vendor_id=vendor.id) }}">Manage</a></td></tr>{% else %}<tr><td colspan="5">No vendors match your filters.</td></tr>{% endfor %}
+</tbody></table></div>
+{% if vendors.pages > 1 %}<nav aria-label="BST vendor pages" class="d-flex gap-2">{% if vendors.has_prev %}<a class="btn btn-outline-secondary" href="{{ url_for('bst.index', page=vendors.prev_num, topic=selected_topic, status=status, q=search) }}">Previous</a>{% endif %}<span class="align-self-center">Page {{ vendors.page }} of {{ vendors.pages }}</span>{% if vendors.has_next %}<a class="btn btn-outline-secondary" href="{{ url_for('bst.index', page=vendors.next_num, topic=selected_topic, status=status, q=search) }}">Next</a>{% endif %}</nav>{% endif %}
+{% endblock %}

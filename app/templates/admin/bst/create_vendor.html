@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}Create B/S/T Vendor{% endblock %}
+{% block content %}
+<h3>Create and approve B/S/T vendor</h3><p class="text-muted">Preapprove an existing vendor before they apply. No GTM account or Telegram link is required. Use their numeric Telegram user ID, not their changeable username.</p>
+<form method="POST" class="card"><div class="card-body">{{ form.hidden_tag() }}{% for field in form if field.name != 'csrf_token' %}<div class="mb-3">{{ field.label(class='form-label') }}{{ field(class='form-select' if field.name == 'topic_id' else 'form-control') }}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}
+<p class="small text-muted">If the topic requires verified email, approval is recorded now and posting becomes available after the vendor verifies through /bst.</p><button class="btn btn-primary">Create and approve</button> <a class="btn btn-outline-secondary" href="{{ url_for('bst.index') }}">Cancel</a></div></form>
+{% endblock %}

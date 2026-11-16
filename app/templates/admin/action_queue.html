@@ -12,62 +12,11 @@
     <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
 </div>
 
-<div class="bulk-toolbar mb-2">
-    <h4 class="mb-0">Result Analysis</h4>
-    <span class="badge text-bg-warning">{{ analysis_runs_pagination.total }} requiring attention</span>
-</div>
-{% if analysis_runs %}
-    <div class="card border-warning mb-4">
-        <div class="table-responsive record-container">
-            <table class="table table-sm table-hover align-middle mb-0 record-table ">
-                <thead class="table-light">
-                    <tr><th>Result</th><th>State</th><th>Provider</th><th>Findings</th><th>Ready</th><th class="text-end record-actions-heading">Action</th></tr>
-                </thead>
-                <tbody>
-                    {% for run in analysis_runs %}
-                        <tr>
-                            <td data-label="Result" class="record-title">
-                                <strong>{{ run.target.title }}</strong>
-                                <div class="small text-muted">{{ 'Group Test' if run.group_test_id else 'Public Result' }} · {{ run.source_kind|title }} · Run {{ run.id }}</div>
-                                {% if run.status == 'failed' and run.error_message %}<div class="small text-danger">{{ run.error_message }}</div>{% endif %}
-                            </td>
-                            <td data-label="State"><span class="badge text-bg-{{ 'warning' if run.status == 'needs_review' else 'danger' }}">{{ run.status|replace('_', ' ')|title }}</span></td>
-                            <td data-label="Provider">{{ run.provider|title }}<div class="small text-muted">{{ run.provider_model }}</div></td>
-                            <td data-label="Findings">{{ run.findings|length }}</td>
-                            <td data-label="Ready">{{ (run.completed_at or run.created_at).strftime('%Y-%m-%d %H:%M') if (run.completed_at or run.created_at) else 'n/a' }}</td>
-                            <td class="text-end record-actions" data-label="Actions"><div class="action-stack"><a class="btn btn-sm btn-{{ 'primary' if run.status == 'needs_review' else 'outline-danger' }}" href="{{ url_for('main.review_result_analysis', run_id=run.id) }}">{{ 'Review Findings' if run.status == 'needs_review' else 'Inspect Failure' }}</a>{% if run.status == 'failed' %}{% call more_menu('analysisMore' ~ run.id) %}<li><form method="POST" action="{{ url_for('main.acknowledge_result_analysis_failure', run_id=run.id) }}" class="d-inline" onsubmit="return confirm('Acknowledge this failure and remove it from the Action Queue?')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="status" value="{{ status_filter }}">
-                                        <input type="hidden" name="q" value="{{ search }}">
-                                        <input type="hidden" name="page" value="{{ page }}">
-                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                        <button class="dropdown-item" type="submit">Acknowledge</button>
-                                    </form></li>{% endcall %}{% endif %}</div></td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% if analysis_runs_pagination.pages > 1 %}
-        <nav aria-label="Result analysis queue pagination" class="mb-4">
-            <ul class="pagination pagination-sm">
-                {% for pnum in analysis_runs_pagination.iter_pages(left_edge=1, left_current=1, right_current=2, right_edge=1) %}
-                    {% if pnum %}<li class="page-item {% if pnum == analysis_runs_pagination.page %}active{% endif %}"><a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=page, analysis_page=pnum) }}">{{ pnum }}</a></li>{% else %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}
-                {% endfor %}
-            </ul>
-        </nav>
-    {% endif %}
-{% else %}
-    <div class="alert alert-success">No result analyses currently require administrator attention.</div>
-{% endif %}
-
-<h4 class="mb-2">Participation Requests &amp; Payment Reports</h4>
 <div class="card mb-3">
     <div class="card-body">
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-md-3">
-                <label for="status" class="form-label mb-1">Test Status</label>
+                <label for="status" class="form-label mb-1">Test status (join/payment)</label>
                 <select id="status" name="status" class="form-select form-select-sm">
                     <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
                     <option value="recruiting" {% if status_filter == 'recruiting' %}selected{% endif %}>Recruiting</option>
@@ -77,9 +26,9 @@
             </div>
             <div class="col-md-5">
                 <label for="q" class="form-label mb-1">Search</label>
-                <input id="q" name="q" value="{{ search }}" class="form-control form-control-sm" placeholder="Test title, compound, participant, or email">
+                <input id="q" name="q" value="{{ search }}" class="form-control form-control-sm" placeholder="Test, vendor, topic, participant, or email">
             </div>
-            <div class="col-md-4 text-md-end">
+            <div class="col-md-4"><label class="form-label" for="queue-type">Item type</label><select id="queue-type" name="type" class="form-select form-select-sm">{% for value,label in [('all','All items'),('join','Join requests'),('payment','Payment reports'),('analysis','Result analysis'),('bst','BST applications')] %}<option value="{{ value }}" {{ 'selected' if item_type == value }}>{{ label }}</option>{% endfor %}</select></div><div class="col-12 text-md-end">
                 <button class="btn btn-sm btn-primary" type="submit">Apply Filters</button>
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.action_queue') }}">Reset</a>
             </div>
@@ -87,36 +36,36 @@
     </div>
 </div>
 
-{% if not pending_parts %}
-    <div class="alert alert-success">No pending participation requests or payment reports match your filters.</div>
+{% if not queue_items %}
+    <div class="alert alert-success">No pending participation requests, payment reports, BST applications, or result reviews match your filters.</div>
 {% else %}
-    <div class="card border-warning mb-3">
+    {% if item_type in ['all','join'] %}<div class="card border-warning mb-3">
         <div class="card-body">
             <form method="POST" action="{{ url_for('main.approve_filtered_from_queue') }}" id="approve-filtered-form" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="status" value="{{ status_filter }}">
                 <input type="hidden" name="q" value="{{ search }}">
                 <input type="hidden" name="page" value="{{ page }}">
-                <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+                <input type="hidden" name="analysis_page" value="{{ analysis_page }}"><input type="hidden" name="type" value="{{ item_type }}">
                 <div class="col-md-7">
-                    <label for="confirm_text" class="form-label mb-1">Approve all filtered requests</label>
+                    <label for="confirm_text" class="form-label mb-1">Approve all filtered join requests</label>
                     <input id="confirm_text" name="confirm_text" class="form-control form-control-sm" placeholder="Type APPROVE FILTERED to confirm" required>
                 </div>
                 <div class="col-md-5 text-md-end">
                     <button type="submit" class="btn btn-sm btn-warning">
-                        <i class="bi bi-exclamation-triangle"></i> Approve All Filtered
+                        <i class="bi bi-exclamation-triangle"></i> Approve All Filtered Join Requests
                     </button>
                 </div>
             </form>
         </div>
     </div>
 
-    <form method="POST" action="{{ url_for('main.approve_selected_from_queue') }}" id="approve-selected-form" class="d-inline">
+    {% endif %}<form method="POST" action="{{ url_for('main.approve_selected_from_queue') }}" id="approve-selected-form" class="d-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="status" value="{{ status_filter }}">
         <input type="hidden" name="q" value="{{ search }}">
         <input type="hidden" name="page" value="{{ page }}">
-        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+        <input type="hidden" name="analysis_page" value="{{ analysis_page }}"><input type="hidden" name="type" value="{{ item_type }}">
         <div id="approve-selected-hidden"></div>
     </form>
 
@@ -125,7 +74,7 @@
         <input type="hidden" name="status" value="{{ status_filter }}">
         <input type="hidden" name="q" value="{{ search }}">
         <input type="hidden" name="page" value="{{ page }}">
-        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
+        <input type="hidden" name="analysis_page" value="{{ analysis_page }}"><input type="hidden" name="type" value="{{ item_type }}">
         <input type="hidden" name="deny_reason" id="deny-selected-reason" value="">
         <div id="deny-selected-hidden"></div>
     </form>
@@ -135,7 +84,7 @@
                 <label class="form-check d-flex align-items-center gap-2"><input type="checkbox" id="select-all" class="form-check-input m-0"><span>Select all join requests</span></label>
                 <span id="queue-selection-count" class="selection-count small text-muted" aria-live="polite">0 selected</span>
             </div>
-            <span class="text-muted small">Showing {{ pending_parts|length }} request(s) on this page. Total filtered: {{ pending_parts_pagination.total }}</span>
+            <span class="text-muted small">Showing {{ queue_items|length }} item(s) on this page. Total filtered: {{ pending_parts_pagination.total }}</span>
             <div class="action-row">
                 <button type="submit" class="btn btn-success btn-sm" form="approve-selected-form" onclick="return confirm('Approve selected participants?')">
                     <i class="bi bi-check2-square"></i> Approve Selected
@@ -151,68 +100,21 @@
                 <thead class="table-light">
                     <tr>
                         <th style="width: 40px;"><span class="visually-hidden">Select request</span></th>
-                        <th>Participant</th>
-                        <th>Group Test</th>
+                        <th>Person / Result</th>
+                        <th>Test / Topic</th>
                         <th>Item / Status</th>
                         <th>Requested / Reported</th>
                         <th class="text-end record-actions-heading">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for part in pending_parts %}
-                        {% set is_payment_report = part.approved %}
-                        <tr>
-                            <td data-label="Select" class="record-check {% if is_payment_report %}record-empty{% endif %}">
-                                {% if not is_payment_report %}
-                                    <label class="d-flex align-items-center gap-2"><input type="checkbox" value="{{ part.id }}" class="part-checkbox"><span class="record-card-only">Select request</span></label>
-                                {% else %}
-                                    <span class="text-muted small">—</span>
-                                {% endif %}
-                            </td>
-                            <td data-label="Participant" class="record-title">
-                                <strong>{{ part.name or part.user.username }}</strong>
-                                <div class="small text-muted">{{ part.user.email }}</div>
-                            </td>
-                            <td data-label="Group Test" class="record-wide">
-                                <a href="{{ url_for('main.test_detail', test_id=part.group_test.id) }}">{{ part.group_test.title }}</a>
-                                {% if part.group_test.compound %}
-                                    <div class="small text-muted">{{ part.group_test.compound }}</div>
-                                {% endif %}
-                            </td>
-                            <td data-label="Item / Status">
-                                {% if is_payment_report %}
-                                    <span class="badge text-bg-info">Payment Report</span>
-                                    <div class="small text-muted">Reported ${{ '%.2f'|format(part.amount_paid or 0) }} · owed ${{ '%.2f'|format(part.amount_owed or 0) }}</div>
-                                {% else %}
-                                    <span class="badge text-bg-warning">Join Request</span>
-                                {% endif %}
-                                <span class="badge bg-secondary">{{ part.group_test.status|replace('_', ' ')|title }}</span>
-                            </td>
-                            <td data-label="Requested / Reported">
-                                {% if is_payment_report %}
-                                    {{ part.payment_claimed_at.strftime('%Y-%m-%d %H:%M') if part.payment_claimed_at else 'n/a' }}
-                                {% else %}
-                                    {{ part.requested_at.strftime('%Y-%m-%d %H:%M') if part.requested_at else 'n/a' }}
-                                {% endif %}
-                            </td>
-                            <td class="text-end record-actions" data-label="Actions"><div class="action-stack">{% if is_payment_report %}<button type="button" class="btn btn-outline-primary btn-sm" data-payment-part="{{ part.id }}" data-payment-mode="review"><i class="bi bi-receipt me-1"></i> View Proof</button><a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage Test</a><div class="small text-muted mt-1">{% if part.payment_submissions %}{% set report = part.current_payment_submission %}{{ 'Image' if report.image_key else '' }}{{ ' + ' if report.image_key and report.transaction_id else '' }}{{ 'Transaction ID' if report.transaction_id else '' }}{{ 'No proof provided' if not report.image_key and not report.transaction_id else '' }}{% else %}No proof provided{% endif %}</div>{% else %}<form method="POST" action="{{ url_for('main.approve_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Approve this participant?')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="status" value="{{ status_filter }}">
-                                        <input type="hidden" name="q" value="{{ search }}">
-                                        <input type="hidden" name="page" value="{{ page }}">
-                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                        {% set pricing_test = part.group_test %}{% set pricing_id = part.id %}{% include 'admin/_buy_in_amount.html' %}
-                                        <button type="submit" class="btn btn-success btn-sm">Approve</button>
-                                    </form><div class="action-row"><a href="{{ url_for('main.manage_participants', test_id=part.group_test.id) }}" class="btn btn-outline-primary btn-sm">Manage</a><form method="POST" action="{{ url_for('main.deny_from_queue', part_id=part.id) }}" class="d-inline" onsubmit="return confirm('Deny this request?')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="status" value="{{ status_filter }}">
-                                        <input type="hidden" name="q" value="{{ search }}">
-                                        <input type="hidden" name="page" value="{{ page }}">
-                                        <input type="hidden" name="analysis_page" value="{{ analysis_page }}">
-                                        <input type="hidden" name="deny_reason" class="deny-row-reason" value="">
-                                        <button type="submit" class="btn btn-outline-danger btn-sm">Deny</button>
-                                    </form></div>{% endif %}</div></td>
-                        </tr>
+                    {% for item in queue_items %}
+                        {% if item.kind in ['join','payment'] %}{% set part = item.target %}{% include 'admin/_queue_participation.html' %}
+                        {% elif item.kind == 'bst' %}{% set vendor = item.target %}
+                        <tr><td data-label="Select" class="record-check record-empty"><span class="text-muted small">&mdash;</span></td><td data-label="Vendor" class="record-title"><strong>{{ vendor.draft.get('vendor_name') }}</strong><div class="small text-muted">{{ vendor.draft.get('email') }} &middot; TG {{ vendor.telegram_user_id }}</div></td><td data-label="Topic">{{ vendor.topic.name }}</td><td data-label="Item / Status"><span class="badge text-bg-warning">BST Application</span>{% if vendor.is_approved %}<div class="small text-muted">Profile changes; prior approval remains active</div>{% endif %}</td><td data-label="Submitted">{{ vendor.submitted_at.strftime('%Y-%m-%d %H:%M') if vendor.submitted_at else '' }}</td><td class="record-actions" data-label="Actions"><a class="btn btn-primary btn-sm" href="{{ url_for('bst.vendor_detail', vendor_id=vendor.id, return_to='queue', q=search, status=status_filter, page=page, type=item_type) }}">Review application</a></td></tr>
+                        {% else %}{% set run = item.target %}
+                        <tr><td data-label="Select" class="record-check record-empty"><span class="text-muted small">&mdash;</span></td><td data-label="Result" class="record-title"><strong>{{ run.target.title }}</strong><div class="small text-muted">{{ 'Group Test' if run.group_test_id else 'Public Result' }} &middot; {{ run.source_kind|title }} ? Run {{ run.id }}</div>{% if run.status == 'failed' and run.error_message %}<div class="small text-danger">{{ run.error_message }}</div>{% endif %}</td><td data-label="Provider">{{ run.provider|title }}<div class="small text-muted">{{ run.provider_model }}</div></td><td data-label="Item / Status"><span class="badge text-bg-{{ 'warning' if run.status == 'needs_review' else 'danger' }}">Result Analysis &middot; {{ run.status|replace('_',' ')|title }}</span><div class="small text-muted">{{ run.findings|length }} findings</div></td><td data-label="Ready">{{ item.queued_at.strftime('%Y-%m-%d %H:%M') if item.queued_at else 'n/a' }}</td><td class="record-actions" data-label="Actions"><a class="btn btn-sm btn-{{ 'primary' if run.status == 'needs_review' else 'outline-danger' }}" href="{{ url_for('main.review_result_analysis', run_id=run.id) }}">{{ 'Review Findings' if run.status == 'needs_review' else 'Inspect Failure' }}</a>{% if run.status == 'failed' %}<form method="POST" action="{{ url_for('main.acknowledge_result_analysis_failure', run_id=run.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary mt-2">Acknowledge failure</button></form>{% endif %}</td></tr>
+                        {% endif %}
                     {% endfor %}
                 </tbody>
             </table>
@@ -222,19 +124,19 @@
             <nav aria-label="Queue pagination" class="mt-3">
                 <ul class="pagination pagination-sm">
                     <li class="page-item {% if not pending_parts_pagination.has_prev %}disabled{% endif %}">
-                        <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pending_parts_pagination.prev_num if pending_parts_pagination.has_prev else 1, analysis_page=analysis_page) }}">Previous</a>
+                        <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pending_parts_pagination.prev_num if pending_parts_pagination.has_prev else 1, type=item_type) }}">Previous</a>
                     </li>
                     {% for pnum in pending_parts_pagination.iter_pages(left_edge=1, left_current=1, right_current=2, right_edge=1) %}
                         {% if pnum %}
                             <li class="page-item {% if pnum == pending_parts_pagination.page %}active{% endif %}">
-                                <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pnum, analysis_page=analysis_page) }}">{{ pnum }}</a>
+                                <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pnum, type=item_type) }}">{{ pnum }}</a>
                             </li>
                         {% else %}
                             <li class="page-item disabled"><span class="page-link">...</span></li>
                         {% endif %}
                     {% endfor %}
                     <li class="page-item {% if not pending_parts_pagination.has_next %}disabled{% endif %}">
-                        <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pending_parts_pagination.next_num if pending_parts_pagination.has_next else pending_parts_pagination.pages, analysis_page=analysis_page) }}">Next</a>
+                        <a class="page-link" href="{{ url_for('main.action_queue', status=status_filter, q=search, page=pending_parts_pagination.next_num if pending_parts_pagination.has_next else pending_parts_pagination.pages, type=item_type) }}">Next</a>
                     </li>
                 </ul>
             </nav>
